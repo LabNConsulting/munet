@@ -1,0 +1,42 @@
+version: 1
+topology:
+  switches:
+    net0:
+      type: bridge
+    net1:
+      type: bridge
+      ip: "192.168.10.0/24"
+  nodes:
+    r1:
+      # Simple config
+      connections: ["net0", "net1", "r2"]
+      cmd: |
+        ip addr show
+        tail -f /dev/null
+    r2:
+      # More detailed connection config
+      connections:
+        - to: "net0"
+        - to: "r1"
+          name: "p2p0"
+        - to: "r3"
+          name: "p2p1"
+          match: 1
+        - to: "r3"
+          ip: "192.168.202.0/31"
+          name: "p2p2"
+          match: 2
+      cmd: |
+        ip addr show
+        tail -f /dev/null
+    r3:
+      connections:
+        - to: "net1"
+        - to: "r2"
+          match: 1
+        - to: "r2"
+          ip: "192.168.202.1/31"
+          match: 2
+      cmd: |
+        ip addr show
+        tail -f /dev/null

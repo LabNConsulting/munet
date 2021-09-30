@@ -1,0 +1,11 @@
+version = 1
+
+[topology.nodes.r1]
+cmd = '''
+tail -f /dev/null
+'''
+
+[topology.nodes.r2]
+cmd = '''
+tail -f /dev/null
+'''
