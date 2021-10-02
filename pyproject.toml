@@ -72,7 +72,7 @@ log_date_format = "%Y-%m-%d %H:%M:%S"
 # If verbose is specifyied log_cli will be set to 1, it can also be specified
 # here or on the CLI.
 # log_cli = 1
-log_cli_level = "INFO"
+log_cli_level = "DEBUG"
 log_cli_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 

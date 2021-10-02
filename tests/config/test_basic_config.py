@@ -41,20 +41,26 @@ def check(p):
 
 
 def test_load_default():
-    p = commander.popen(["micronet"], stdin=DEVNULL)
+    p = commander.popen(["micronet", "--no-cleanup", "--no-wait"], stdin=DEVNULL)
     check(p)
 
 
 def test_load_yaml_config():
-    p = commander.popen(["micronet", "-c", "topology.yaml"], stdin=DEVNULL)
+    p = commander.popen(
+        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.yaml"], stdin=DEVNULL
+    )
     check(p)
 
 
 def test_load_toml_config():
-    p = commander.popen(["micronet", "-c", "topology.toml"], stdin=DEVNULL)
+    p = commander.popen(
+        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.toml"], stdin=DEVNULL
+    )
     check(p)
 
 
 def test_load_json_config():
-    p = commander.popen(["micronet", "-c", "topology.json"], stdin=DEVNULL)
+    p = commander.popen(
+        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.json"], stdin=DEVNULL
+    )
     check(p)
