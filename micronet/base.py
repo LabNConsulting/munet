@@ -18,26 +18,24 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import datetime
 import logging
 import os
 import re
+import readline
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import time as time_mod
 
+
 root_hostname = subprocess.check_output("hostname")
 
 # This allows us to cleanup any leftovers later on
 os.environ["MICRONET_PID"] = str(os.getpid())
-
-
-def make_list(o):
-    if isinstance(o, (tuple, list)):
-        return o
-    return [o]
 
 
 class Timeout:
@@ -68,7 +66,10 @@ def cmd_error(rc, o, e):
 
 
 def proc_error(p, o, e):
-    args = p.args if isinstance(p.args, str) else " ".join(p.args)
+    if hasattr(p, "args"):
+        args = p.args if isinstance(p.args, str) else " ".join(p.args)
+    else:
+        args = ""
     s = f"rc {p.returncode} pid {p.pid}\n\targs: {args}"
     o = "\n\tstdout: " + o.strip() if o and o.strip() else ""
     e = "\n\tstderr: " + e.strip() if e and e.strip() else ""
@@ -83,11 +84,19 @@ def comm_error(p):
     return proc_error(p, *p.saved_output)
 
 
+async def acomm_error(p):
+    rc = p.returncode
+    assert rc is not None
+    if not hasattr(p, "saved_output"):
+        p.saved_output = await p.communicate()
+    return proc_error(p, *p.saved_output)
+
+
 def get_tmp_dir(uniq):
     return os.path.join(tempfile.mkdtemp(), uniq)
 
 
-class Commander:
+class Commander:  # pylint: disable=R0904
     """
     Commander.
 
@@ -96,8 +105,9 @@ class Commander:
 
     tmux_wait_gen = 0
 
-    def __init__(self, name, logger=None):
+    def __init__(self, name, logger=None, **kwargs):
         """Create a Commander."""
+        del kwargs  # deal with lint warning
         self.name = name
         self.last = None
         self.exec_paths = {}
@@ -109,7 +119,11 @@ class Commander:
         else:
             self.logger = logger
 
-        self.cwd = self.cmd_raises("pwd").strip()
+        super().__init__()
+
+    @property
+    def is_container(self):
+        return False
 
     def set_logger(self, logfile):
         self.logger = logging.getLogger(__name__ + ".commander." + self.name)
@@ -135,23 +149,62 @@ class Commander:
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
-    def get_exec_path(self, binary):
-        """Return the full path to the binary executable.
-
-        `binary` :: binary name or list of binary names
-        """
+    def _get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
         if isinstance(binary, str):
             bins = [binary]
         else:
             bins = binary
         for b in bins:
-            if b in self.exec_paths:
-                return self.exec_paths[b]
+            if b in cache:
+                return cache[b]
 
-            rc, output, _ = self.cmd_status("which " + b, warn=False)
+            rc, output, _ = cmdf("which " + b, warn=False)
             if not rc:
-                return os.path.abspath(output.strip())
-            return None
+                cache[b] = os.path.abspath(output.strip())
+                return cache[b]
+        return None
+
+    async def _async_get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
+        if isinstance(binary, str):
+            bins = [binary]
+        else:
+            bins = binary
+        for b in bins:
+            if b in cache:
+                return cache[b]
+
+            rc, output, _ = await cmdf("which " + b, warn=False)
+            if not rc:
+                cache[b] = os.path.abspath(output.strip())
+                return cache[b]
+        return None
+
+    async def async_get_exec_path(self, binary):
+        """Return the full path to the binary executable.
+
+        `binary` :: binary name or list of binary names
+        """
+        return await self._async_get_exec_path(
+            binary, self.async_cmd_status_host, self.exec_paths
+        )
+
+    def get_exec_path(self, binary):
+        """Return the full path to the binary executable.
+
+        `binary` :: binary name or list of binary names
+        """
+        return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
+
+    def get_exec_path_host(self, binary):  # pylint: disable=R0201
+        """Return the full path to the binary executable.
+
+        If the object is actually a derived class (e.g., a container) this method will
+        return the exec path for the native namespace rather than the container. The
+        path is the one which the other xxx_host methods will use.
+
+        `binary` :: binary name or list of binary names
+        """
+        return get_exec_path_host(binary)
 
     def test(self, flags, arg):
         """Run test binary, with flags and arg"""
@@ -162,6 +215,11 @@ class Commander:
     def path_exists(self, path):
         """Check if path exists."""
         return self.test("-e", path)
+
+    def get_cmd_container(self, cmd, sudo=False, tty=False):
+        if sudo:
+            return "sudo " + cmd
+        return cmd
 
     def _get_cmd_str(self, cmd):
         if isinstance(cmd, str):
@@ -180,8 +238,8 @@ class Commander:
         defaults.update(kwargs)
         return pre_cmd, cmd, defaults
 
-    def _popen(self, method, cmd, skip_pre_cmd=False, **kwargs):
-        if sys.version_info[0] >= 3:
+    def _popen(self, method, cmd, skip_pre_cmd=False, async_exec=False, **kwargs):
+        if not async_exec:
             defaults = {
                 "encoding": "utf-8",
                 "stdout": subprocess.PIPE,
@@ -197,21 +255,18 @@ class Commander:
         self.logger.debug('%s: %s("%s", kwargs: %s)', self, method, cmd, defaults)
 
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
-        p = subprocess.Popen(actual_cmd, **defaults)
-        if not hasattr(p, "args"):
-            p.args = actual_cmd
+        if async_exec:
+            p = asyncio.create_subprocess_exec(*actual_cmd, **defaults)
+        else:
+            p = subprocess.Popen(actual_cmd, **defaults)
         return p, actual_cmd
-
-    def set_cwd(self, cwd):
-        self.logger.warning("%s: 'cd' (%s) does not work outside namespaces", self, cwd)
-        self.cwd = cwd
 
     def popen(self, cmd, **kwargs):
         """
         Creates a pipe with the given `command`.
 
         Args:
-            command: `str` or `list` of command to open a pipe with.
+            cmd: `str` or `list` of command to open a pipe with.
             **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
                 then will be invoked with `bash -c`, otherwise `command` is a list and
                 will be invoked without a shell.
@@ -219,51 +274,167 @@ class Commander:
         Returns:
             a subprocess.Popen object.
         """
-        p, _ = self._popen("popen", cmd, **kwargs)
-        return p
+        return self._popen("popen", cmd, async_exec=False, **kwargs)[0]
 
-    def cmd_status(self, cmd, raises=False, warn=True, stdin=None, **kwargs):
-        """Execute a command."""
+    def popen_host(self, cmd, **kwargs):
+        """
+        Creates a pipe with the given `command`.
 
-        # We are not a shell like mininet, so we need to intercept this
-        chdir = False
-        if not isinstance(cmd, str):
-            cmds = cmd
-        else:
-            # Make sure the code doesn't think this will work.
-            m = re.match(r"cd(\s*|\s+(\S+))$", cmd)
-            assert not m
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
 
-            cmds = ["/bin/bash", "-c", cmd]
+        Returns:
+            a subprocess.Popen object.
+        """
+        return Commander._popen(self, "popen_host", cmd, async_exec=False, **kwargs)[0]
 
+    async def async_popen(self, cmd, **kwargs):
+        """Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `command` is a string then will be invoked with `bash -c`, otherwise
+                `command` is a list and will be invoked without a shell.
+
+        Returns:
+            a asyncio.subprocess.Process object.
+        """
+        return await self._popen("async_popen", cmd, async_exec=True, **kwargs)[0]
+
+    async def async_popen_host(self, cmd, **kwargs):
+        """Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `command` is a string then will be invoked with `bash -c`, otherwise
+                `command` is a list and will be invoked without a shell.
+
+        Returns:
+            a asyncio.subprocess.Process object.
+        """
+        return await Commander._popen(
+            self, "async_popen_host", cmd, async_exec=True, **kwargs
+        )[0]
+
+    @staticmethod
+    def _cmd_status_input(stdin):
         pinput = None
-
         if isinstance(stdin, (bytes, str)):
             pinput = stdin
             stdin = subprocess.PIPE
+        return pinput, stdin
 
-        p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
-        stdout, stderr = p.communicate(input=pinput)
-        rc = p.wait()
-
-        # For debugging purposes.
-        self.last = (rc, actual_cmd, cmd, stdout, stderr)
-
+    def _cmd_status_finish(self, p, c, ac, o, e, raises, warn):
+        rc = p.returncode
+        self.last = (rc, ac, c, o, e)
         if rc:
             if warn:
-                self.logger.warning(
-                    "%s: proc failed: %s:", self, proc_error(p, stdout, stderr)
-                )
+                self.logger.warning("%s: proc failed: %s:", self, proc_error(p, o, e))
             if raises:
                 # error = Exception("stderr: {}".format(stderr))
                 # This annoyingly doesnt' show stderr when printed normally
-                error = subprocess.CalledProcessError(rc, actual_cmd)
-                error.stdout, error.stderr = stdout, stderr
+                error = subprocess.CalledProcessError(rc, ac)
+                error.stdout, error.stderr = o, e
                 raise error
-        elif chdir:
-            self.set_cwd(stdout.strip())
+        return rc, o, e
 
-        return rc, stdout, stderr
+    def _cmd_status(self, cmds, raises=False, warn=True, stdin=None, **kwargs):
+        """Execute a command."""
+        pinput, stdin = self._cmd_status_input(stdin)
+        p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
+        o, e = p.communicate(pinput)
+        return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
+
+    async def _async_cmd_status(
+        self, cmds, raises=False, warn=True, stdin=None, text=None, **kwargs
+    ):
+        """Execute a command."""
+        pinput, stdin = Commander._cmd_status_input(stdin)
+        p, actual_cmd = self._popen(
+            "async_cmd_status", cmds, async_exec=True, stdin=stdin, **kwargs
+        )
+        p = await p
+
+        if text is False:
+            encoding = None
+        else:
+            encoding = kwargs.get("encoding", "utf-8")
+
+        if encoding is not None and isinstance(pinput, str):
+            pinput = pinput.encode(encoding)
+        o, e = await p.communicate(pinput)
+        if encoding is not None:
+            o = o.decode(encoding) if o is not None else o
+            e = e.decode(encoding) if e is not None else e
+        return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
+
+    def cmd_get_cmd_list(self, cmd):
+        if not isinstance(cmd, str):
+            cmds = cmd
+        else:
+            # Make sure the code doesn't think `cd` will work.
+            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
+            cmds = ["/bin/bash", "-c", cmd]
+        return cmds
+
+    def cmd_status(self, cmd, **kwargs):
+        "Run given command returning status and outputs"
+        #
+        # This method serves as the basis for all derived sync cmd variations, so to
+        # override sync cmd behavior simply override this function and *not* the other
+        # variations, unless you are changing only that variation's behavior
+        #
+        cmds = self.cmd_get_cmd_list(cmd)
+        return self._cmd_status(cmds, **kwargs)
+
+    def cmd_raises(self, cmd, **kwargs):
+        """Execute a command. Raise an exception on errors"""
+
+        _, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
+        return stdout
+
+    def cmd_status_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return Commander.cmd_status(self, cmd, **kwargs)
+
+    def cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return Commander.cmd_status(self, cmd, raises=True, **kwargs)
+
+    async def async_cmd_status(self, cmd, **kwargs):
+        #
+        # This method serves as the basis for all derived async cmd variations, so to
+        # override async cmd behavior simply override this function and *not* the other
+        # variations, unless you are changing only that variation's behavior
+        #
+        cmds = self.cmd_get_cmd_list(cmd)
+        return await self._async_cmd_status(cmds, **kwargs)
+
+    async def async_cmd_raises(self, cmd, **kwargs):
+        """Execute a command. Raise an exception on errors"""
+        if cmd == "echo foobar":
+            pdb.set_trace()
+
+        _, stdout, _ = await self.async_cmd_status(cmd, raises=True, **kwargs)
+        return stdout
+
+    async def async_cmd_status_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return await Commander.async_cmd_status(self, cmd, **kwargs)
+
+    async def async_cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        _, stdout, _ = await Commander.async_cmd_status(
+            self, cmd, raises=True, **kwargs
+        )
+        return stdout
 
     def cmd_legacy(self, cmd, **kwargs):
         """Execute a command with stdout and stderr joined, *IGNORES ERROR*."""
@@ -271,13 +442,6 @@ class Commander:
         defaults = {"stderr": subprocess.STDOUT}
         defaults.update(kwargs)
         _, stdout, _ = self.cmd_status(cmd, raises=False, **defaults)
-        return stdout
-
-    def cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors"""
-
-        rc, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
-        assert rc == 0
         return stdout
 
     # Run a command in a new window (gnome-terminal, screen, tmux, xterm)
@@ -291,6 +455,7 @@ class Commander:
         forcex=False,
         new_window=False,
         tmux_target=None,
+        on_host=False,
     ):
         """
         Run a command in a new window (TMUX, Screen or XTerm).
@@ -316,10 +481,16 @@ class Commander:
             channel = "{}-wait-{}".format(os.getpid(), Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
 
-        sudo_path = self.get_exec_path(["sudo"])
-        nscmd = sudo_path + " " + self.pre_cmd_str + cmd
+        sudo_path = get_exec_path_host(["sudo"])
+
+        if not self.is_container or on_host:
+            # This is the command to execute to be inside the namespace.
+            nscmd = sudo_path + " " + self.pre_cmd_str + cmd
+        else:
+            nscmd = self.get_cmd_container(cmd, sudo=True, tty=True)
+
         if "TMUX" in os.environ and not forcex:
-            cmd = [self.get_exec_path("tmux")]
+            cmd = [get_exec_path_host("tmux")]
             if new_window:
                 cmd.append("new-window")
                 cmd.append("-P")
@@ -348,7 +519,7 @@ class Commander:
         elif "STY" in os.environ and not forcex:
             # wait for not supported in screen for now
             channel = None
-            cmd = [self.get_exec_path("screen")]
+            cmd = [get_exec_path_host("screen")]
             if not os.path.exists(
                 "/run/screen/S-{}/{}".format(os.environ["USER"], os.environ["STY"])
             ):
@@ -357,9 +528,13 @@ class Commander:
         elif "DISPLAY" in os.environ:
             # We need it broken up for xterm
             user_cmd = cmd
-            cmd = [self.get_exec_path("xterm")]
+            cmd = [get_exec_path_host("xterm")]
             if "SUDO_USER" in os.environ:
-                cmd = [self.get_exec_path("sudo"), "-u", os.environ["SUDO_USER"]] + cmd
+                cmd = [
+                    get_exec_path_host("sudo"),
+                    "-u",
+                    os.environ["SUDO_USER"],
+                ] + cmd
             if title:
                 cmd.append("-T")
                 cmd.append(title)
@@ -399,16 +574,42 @@ class Commander:
 
         # Wait here if we weren't handed the channel to wait for
         if channel and wait_for is True:
-            cmd = [self.get_exec_path("tmux"), "wait", channel]
+            cmd = [get_exec_path_host("tmux"), "wait", channel]
             self.cmd_status(cmd, skip_pre_cmd=True)
 
         return pane_info
 
-    def delete(self):
-        pass
+
+class InterfaceMixin:
+    def __init__(self, **kwargs):
+        del kwargs  # get rid of lint
+        self.intf_addrs = {}
+        self.next_intf_index = 0
+        self.basename = "eth"
+        # self.basename = name + "-eth"
+        super().__init__()
+
+    @property
+    def intfs(self):
+        return self.intf_addrs.keys()
+
+    def set_intf_basename(self, basename):
+        self.basename = basename
+
+    def get_next_intf_name(self):
+        while True:
+            ifname = self.basename + str(self.next_intf_index)
+            self.next_intf_index += 1
+            if ifname not in self.intf_addrs:
+                break
+        return ifname
+
+    def register_interface(self, ifname):
+        if ifname not in self.intf_addrs:
+            self.intf_addrs[ifname] = None
 
 
-class LinuxNamespace(Commander):
+class LinuxNamespace(Commander, InterfaceMixin):
     """
     A linux Namespace.
 
@@ -450,12 +651,11 @@ class LinuxNamespace(Commander):
                 passed to `mkdir -p`.
             logger: Passed to superclass.
         """
-        super(LinuxNamespace, self).__init__(name, logger)
+        super().__init__(name=name, logger=logger)
 
-        self.logger.debug("%s: Creating", self)
+        self.logger.debug("%s: creating", self)
 
-        self.intf_addrs = {}
-        self.next_intf_index = 0
+        self.cwd = os.path.abspath(os.getcwd())
 
         nslist = []
         # cmd = [] if os.geteuid() == 0 else ["/usr/bin/sudo"]
@@ -475,9 +675,14 @@ class LinuxNamespace(Commander):
             flags += "m"
         if net:
             nslist.append("net")
+            # if pid:
+            #     os.system(f"touch /tmp/netns-{name}")
+            #     cmd.append(f"--net=/tmp/netns-{name}")
+            # else:
             flags += "n"
         if pid:
             nslist.append("pid")
+            flags += "f"
             flags += "p"
             cmd.append("--mount-proc")
         if time:
@@ -492,6 +697,9 @@ class LinuxNamespace(Commander):
             cmd.append("--uts")
 
         cmd.append(flags)
+        if pid:
+            cmd.append(get_exec_path_host("tini"))
+            cmd.append("-vvv")
         cmd.append("/bin/cat")
 
         # Using cat and a stdin PIPE is nice as it will exit when we do. However, we
@@ -504,8 +712,9 @@ class LinuxNamespace(Commander):
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             start_new_session=True,  # detach from pgid so signals don't propogate
             shell=False,
         )
@@ -525,33 +734,54 @@ class LinuxNamespace(Commander):
                 # See if their namespace is different
                 if ours != theirs:
                     nslist.remove(fname)
-            if not nslist:
+            if not nslist or (pid and nslist == ["pid"]):
                 break
             elapsed = int(timeout.elapsed())
             if elapsed <= 3:
                 time_mod.sleep(0.1)
             elif elapsed > 10:
-                self.logger.warning("%s: unshare taking more than %ss", self, elapsed)
+                self.logger.warning(
+                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
+                )
                 time_mod.sleep(3)
             else:
-                self.logger.info("%s: unshare taking more than %ss", self, elapsed)
+                self.logger.info(
+                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
+                )
                 time_mod.sleep(1)
+        if p.poll():
+            logger.error("%s: namespace process failed: %s", self, comm_error(p))
         assert p.poll() is None, "unshare unexpectedly exited!"
-        assert not nslist, "unshare never unshared!"
+        # assert not nslist, "unshare never unshared!"
 
         # Set pre-command based on our namespace proc
         self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
         if not pid:
             self.base_pre_cmd.append("-F")
-        self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + self.cwd])
+        self.set_pre_cmd(self.base_pre_cmd)
 
-        # Remount /sys to pickup any changes
-        self.cmd_raises("mount -t sysfs sysfs /sys")
+        # Remount /sys to pickup any changes, but keep root /sys/fs/cgroup
+        # This pattern could be made generic and supported for any overlapping mounts
+        tmpmnt = f"/tmp/cgm-{self.pid}"
+
+        #
+        # We do not want cmd_status in child classes (e.g., container) for the remaining
+        # setup calls in this __init__ function.
+        #
+        self.cmd_status_host(f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
+        self.cmd_status_host("mount -t sysfs sysfs /sys")
+        self.cmd_status_host(f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
+        # self.cmd_raises(
+        #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
+        #     skip_pre_cmd=True,
+        # )
+        # o = self.cmd_raises("ls -l /sys/fs/cgroup")
+        # self.logger.warning("XXX %s", o)
 
         # Set the hostname to the namespace name
         if uts and set_hostname:
             # Debugging get the root hostname
-            self.cmd_raises("hostname " + self.name)
+            self.cmd_status_host("hostname " + self.name)
             nroot = subprocess.check_output("hostname")
             if root_hostname != nroot:
                 result = self.p.poll()
@@ -569,29 +799,29 @@ class LinuxNamespace(Commander):
                 else:
                     self.bind_mount(s[0], s[1])
 
-        o = self.cmd_legacy("ls -l /proc/{}/ns".format(self.pid))
+        o = self.cmd_status_host("ls -l /proc/{}/ns".format(self.pid))
         self.logger.debug("namespaces:\n %s", o)
 
-        # Doing this here messes up all_protocols ipv6 check
-        self.cmd_raises("ip link set lo up")
+        # will cache the path, which is important in delete to avoid running a shell
+        # which can hang during cleanup
+        self.ip_path = get_exec_path_host("ip")
+        self.cmd_status_host([self.ip_path, "link", "set", "lo", "up"])
 
-    @property
-    def intfs(self):
-        return self.intf_addrs.keys()
+        self.logger.info("%s: created", self)
 
     def tmpfs_mount(self, inner):
+        self.logger.debug("Mounting tmpfs on %s", inner)
         self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount -n -t tmpfs tmpfs " + inner)
 
     def bind_mount(self, outer, inner):
-        self.cmd_raises("mkdir -p " + inner)
+        self.logger.debug("Bind mounting %s on %s", outer, inner)
+        # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
 
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)
 
-        ip_path = self.get_exec_path("ip")
-        assert ip_path, "XXX missing ip command!"
         if os.path.exists("/run/netns/{}".format(ns)):
             self.logger.warning("%s: Removing existing nsspace %s", self, ns)
             try:
@@ -604,14 +834,11 @@ class LinuxNamespace(Commander):
                     str(ex),
                     exc_info=True,
                 )
-        self.cmd_raises([ip_path, "netns", "add", ns])
+        self.cmd_raises_host([self.ip_path, "netns", "add", ns])
 
     def delete_netns(self, ns):
         self.logger.debug("Deleting network namespace %s", ns)
-
-        ip_path = self.get_exec_path("ip")
-        assert ip_path, "XXX missing ip command!"
-        self.cmd_raises([ip_path, "netns", "delete", ns])
+        self.cmd_raises_host([self.ip_path, "netns", "delete", ns])
 
     def set_intf_netns(self, intf, ns, up=False):
         # In case a user hard-codes 1 thinking it "resets"
@@ -621,9 +848,9 @@ class LinuxNamespace(Commander):
 
         self.logger.debug("Moving interface %s to namespace %s", intf, ns)
 
-        cmd = "ip link set {} netns " + ns
+        cmd = [self.ip_path, "link", "set", intf, "netns", ns]
         if up:
-            cmd += " up"
+            cmd.append("up")
         self.intf_ip_cmd(intf, cmd)
         if ns == str(self.pid):
             # If we are returning then remove from dict
@@ -637,42 +864,85 @@ class LinuxNamespace(Commander):
         self.set_intf_netns(intf, str(self.pid))
 
     def intf_ip_cmd(self, intf, cmd):
-        """Run an ip command for considering an interfaces possible namespace.
-
-        `cmd` - format is run using the interface name on the command
-        """
+        """Run an ip command, considering an interface's possible namespace."""
         if intf in self.ifnetns:
-            assert cmd.startswith("ip ")
-            cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
-        self.cmd_raises(cmd.format(intf))
+            if isinstance(cmd, list):
+                assert cmd[0].endswith("ip")
+                cmd[1:1] = ["-n", self.ifnetns[intf]]
+            else:
+                assert cmd.startswith("ip ")
+                cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
+        self.cmd_raises_host(cmd)
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
+        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
+            self.set_pre_cmd(self.base_pre_cmd)
+            return
         self.logger.debug("%s: new CWD %s", self, cwd)
         self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
-    def get_next_intf_name(self):
-        ifname = self.name + "-eth" + str(self.next_intf_index)
-        self.next_intf_index += 1
-        return ifname
+    def cleanup_proc(self, p):
+        if not p or p.returncode is not None:
+            return None
 
-    def register_interface(self, ifname):
-        if ifname not in self.intf_addrs:
-            self.intf_addrs[ifname] = None
+        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+        os.kill(-p.pid, signal.SIGTERM)
+        try:
+            assert isinstance(p, subprocess.Popen)
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.logger.warning(
+                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
+            )
+            os.kill(-p.pid, signal.SIGKILL)
+            try:
+                assert isinstance(p, subprocess.Popen)
+                p.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.logger.warning("%s: kill timeout", self)
+                return p
+            except Exception as error:
+                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+        except Exception as error:
+            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
+        return None
+
+    async def async_cleanup_proc(self, p):
+        if not p or p.returncode is not None:
+            return None
+
+        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+        os.kill(-p.pid, signal.SIGTERM)
+        try:
+            assert not isinstance(p, subprocess.Popen)
+            await asyncio.wait_for(p.communicate(), timeout=10)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
+            )
+            os.kill(-p.pid, signal.SIGKILL)
+            try:
+                assert not isinstance(p, subprocess.Popen)
+                await asyncio.wait_for(p.communicate(), timeout=2)
+            except asyncio.TimeoutError:
+                self.logger.warning("%s: kill timeout", self)
+                return p
+            except Exception as error:
+                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+        except Exception as error:
+            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
+        return None
 
     def delete(self):
-        if self.p and self.p.poll() is None:
-            if sys.version_info[0] >= 3:
-                try:
-                    self.p.terminate()
-                    self.p.communicate(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.p.kill()
-                    self.p.communicate(timeout=2)
-            else:
-                self.p.kill()
-                self.p.communicate()
+        asyncio.run(LinuxNamespace.async_delete(self))
+
+    async def async_delete(self):
+        if type(self) == LinuxNamespace:  # pylint: disable=C0123
+            self.logger.info("%s: async linuxnamespace deleting", self.name)
+        self.cleanup_proc(self.p)
         self.set_pre_cmd(["/bin/false"])
+        self.logger.info("%s: deleted", self.name)
 
 
 class SharedNamespace(Commander):
@@ -690,35 +960,28 @@ class SharedNamespace(Commander):
             name: Internal name for the namespace.
             pid: PID of the process to share with.
         """
-        super(SharedNamespace, self).__init__(name, logger)
+        super().__init__(name=name, logger=logger)
 
         self.logger.debug("%s: Creating", self)
 
+        self.cwd = os.path.abspath(os.getcwd())
         self.pid = pid
-        self.intfs = []
-        self.next_intf_index = 0
 
-        # Set pre-command based on our namespace proc
-        self.set_pre_cmd(
-            ["/usr/bin/nsenter", "-a", "-t", str(self.pid), "--wd=" + self.cwd]
-        )
+        self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
+        self.set_pre_cmd(self.base_pre_cmd)
+
+        self.ip_path = self.get_exec_path("ip")
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
+        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
+            self.set_pre_cmd(self.base_pre_cmd)
+            return
         self.logger.debug("%s: new CWD %s", self, cwd)
-        self.set_pre_cmd(["/usr/bin/nsenter", "-a", "-t", str(self.pid), "--wd=" + cwd])
-
-    def get_next_intf_name(self):
-        ifname = self.name + "-eth" + str(self.next_intf_index)
-        self.next_intf_index += 1
-        return ifname
-
-    def register_interface(self, ifname):
-        if ifname not in self.intfs:
-            self.intfs.append(ifname)
+        self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
 
-class Bridge(SharedNamespace):
+class Bridge(SharedNamespace, InterfaceMixin):
     """
     A linux bridge.
     """
@@ -731,13 +994,15 @@ class Bridge(SharedNamespace):
         cls.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, unet=None, logger=None):
+    def __init__(self, name=None, unet=None, logger=None, **kwargs):
         """Create a linux Bridge."""
 
         self.id = self._get_next_id()
         if not name:
             name = "br{}".format(self.id)
-        super(Bridge, self).__init__(name, unet.pid, logger)
+        super().__init__(name=name, pid=unet.pid, logger=logger, **kwargs)
+
+        self.set_intf_basename(self.name + "-eth")
 
         self.unet = unet
 
@@ -752,11 +1017,23 @@ class Bridge(SharedNamespace):
 
     def delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
+        asyncio.run(Bridge.async_delete(self))
 
-        rc, o, e = self.cmd_status("ip link show {}".format(self.name), warn=False)
+    async def async_delete(self):
+        """Stop the bridge (i.e., delete the linux resources)."""
+
+        rc, o, e = await self.async_cmd_status(
+            [self.ip_path, "link", "show", self.name],
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            warn=False,
+        )
         if not rc:
-            rc, o, e = self.cmd_status(
-                "ip link delete {}".format(self.name), warn=False
+            rc, o, e = await self.async_cmd_status(
+                [self.ip_path, "link", "delete", self.name],
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                warn=False,
             )
         if rc:
             self.logger.error(
@@ -766,7 +1043,7 @@ class Bridge(SharedNamespace):
                 cmd_error(rc, o, e),
             )
         else:
-            self.logger.debug("%s: Deleted.", self)
+            self.logger.info("%s: deleted", self.name)
 
 
 class BaseMicronet(LinuxNamespace):
@@ -783,7 +1060,11 @@ class BaseMicronet(LinuxNamespace):
         self.macs = {}
         self.rmacs = {}
 
-        super().__init__("micronet", mount=True, net=True, uts=True, **kwargs)
+        self.cli_server = None
+        self.cli_sockpath = None
+        self.cli_histfile = None
+
+        super().__init__(name="micronet", mount=True, net=True, uts=True, **kwargs)
 
         # this is for testing purposes do not use
         if not BaseMicronet.g_unet:
@@ -802,9 +1083,12 @@ class BaseMicronet(LinuxNamespace):
         self.logger.debug("%s: add_host %s(%s)", self, cls.__name__, name)
 
         self.hosts[name] = cls(name, **kwargs)
+
         # Create a new mounted FS for tracking nested network namespaces creatd by the
         # user with `ip netns add`
-        self.hosts[name].tmpfs_mount("/run/netns")
+
+        # XXX why is this failing with podman???
+        # self.hosts[name].tmpfs_mount("/run/netns")
 
         return self.hosts[name]
 
@@ -851,35 +1135,41 @@ class BaseMicronet(LinuxNamespace):
             lhost, rhost = self.hosts[name1], self.hosts[name2]
             lifname = "i1{:x}".format(lhost.pid)
             rifname = "i2{:x}".format(rhost.pid)
-            self.cmd_raises(
+            self.cmd_raises_host(
                 "ip link add {} type veth peer name {}".format(lifname, rifname)
             )
 
-            self.cmd_raises("ip link set {} netns {}".format(lifname, lhost.pid))
-            lhost.cmd_raises("ip link set {} name {}".format(lifname, if1))
-            lhost.cmd_raises("ip link set {} up".format(if1))
+            self.cmd_raises_host("ip link set {} netns {}".format(lifname, lhost.pid))
+            lhost.cmd_raises_host("ip link set {} name {}".format(lifname, if1))
+            lhost.cmd_raises_host("ip link set {} up".format(if1))
             lhost.register_interface(if1)
 
-            self.cmd_raises("ip link set {} netns {}".format(rifname, rhost.pid))
-            rhost.cmd_raises("ip link set {} name {}".format(rifname, if2))
-            rhost.cmd_raises("ip link set {} up".format(if2))
+            self.cmd_raises_host("ip link set {} netns {}".format(rifname, rhost.pid))
+            rhost.cmd_raises_host("ip link set {} name {}".format(rifname, if2))
+            rhost.cmd_raises_host("ip link set {} up".format(if2))
             rhost.register_interface(if2)
         else:
             switch = self.switches[name1]
             host = self.hosts[name2]
+            lifname = "i1{:x}".format(switch.pid)
+            rifname = "i1{:x}".format(host.pid)
 
             assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
-            self.cmd_raises(
-                f"ip link add {if1} type veth peer name {if2} netns {host.pid}"
+            self.cmd_raises_host(
+                f"ip link add {lifname} type veth peer name {rifname} netns {host.pid}"
             )
-            self.cmd_raises(f"ip link set {if1} netns {switch.pid}")
+            self.cmd_raises_host(f"ip link set {lifname} netns {switch.pid}")
+            switch.cmd_raises_host(f"ip link set {lifname} name {if1}")
+            host.cmd_raises_host(f"ip link set {rifname} name {if2}")
+
             switch.register_interface(if1)
             host.register_interface(if2)
-            self.cmd_raises(f"ip link set {if1} master {switch.name}")
-            self.cmd_raises(f"ip link set {if1} up")
-            host.cmd_raises(f"ip link set {if2} up")
+
+            switch.cmd_raises_host(f"ip link set {if1} master {switch.name}")
+            switch.cmd_raises_host(f"ip link set {if1} up")
+            host.cmd_raises_host(f"ip link set {if2} up")
 
         # Cache the MAC values, and reverse mapping
         self.get_mac(name1, if1)
@@ -889,7 +1179,7 @@ class BaseMicronet(LinuxNamespace):
         """Add a switch to micronet."""
 
         self.logger.debug("%s: add_switch %s(%s)", self, cls.__name__, name)
-        self.switches[name] = cls(name, self, **kwargs)
+        self.switches[name] = cls(name, unet=self, **kwargs)
         return self.switches[name]
 
     def get_mac(self, name, ifname):
@@ -899,7 +1189,7 @@ class BaseMicronet(LinuxNamespace):
             dev = self.switches[name]
 
         if (name, ifname) not in self.macs:
-            _, output, _ = dev.cmd_status("ip -o link show " + ifname)
+            _, output, _ = dev.cmd_status_host("ip -o link show " + ifname)
             m = re.match(".*link/(loopback|ether) ([0-9a-fA-F:]+) .*", output)
             mac = m.group(2)
             self.macs[(name, ifname)] = mac
@@ -907,46 +1197,61 @@ class BaseMicronet(LinuxNamespace):
 
         return self.macs[(name, ifname)]
 
+    async def _delete_link(self, lname):
+        rname, rif = self.links[lname][2:4]
+        host = self.hosts[rname]
+
+        self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
+        rc, o, e = await host.async_cmd_status_host(
+            [self.ip_path, "link", "delete", rif],
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            warn=False,
+        )
+        if rc:
+            self.logger.error(
+                "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)
+            )
+
+    def _delete_links(self):
+        return asyncio.gather(*[self._delete_link(x) for x in self.links])
+
     def delete(self):
         """Delete the micronet topology."""
+        asyncio.run(BaseMicronet.async_delete(self))
 
-        self.logger.debug("%s: Deleting.", self)
+    async def async_delete(self):
+        """Delete the micronet topology."""
+        self.logger.debug("%s: ASYNC Deleting.", self)
 
-        for lname, (_, _, rname, rif) in self.links.items():
-            host = self.hosts[rname]
-
-            self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
-
-            rc, o, e = host.cmd_status("ip link delete {}".format(rif), warn=False)
-            if rc:
-                self.logger.error(
-                    "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)
-                )
+        ltask = self._delete_links()
+        htask = asyncio.gather(*[x.async_delete() for x in self.hosts.values()])
+        stask = asyncio.gather(*[x.async_delete() for x in self.switches.values()])
+        try:
+            # First delete links, then hosts and switches
+            await ltask
+            await asyncio.gather(htask, stask)
+        except Exception as error:
+            self.logger.error(
+                "%s: error deleting hosts and switches: %s", self, error, exc_info=True
+            )
 
         self.links = {}
-
-        for host in self.hosts.values():
-            try:
-                host.delete()
-            except Exception as error:
-                self.logger.error(
-                    "%s: error while deleting host %s: %s", self, host, error
-                )
-
         self.hosts = {}
-
-        for switch in self.switches.values():
-            try:
-                switch.delete()
-            except Exception as error:
-                self.logger.error(
-                    "%s: error while deleting switch %s: %s", self, switch, error
-                )
         self.switches = {}
 
-        self.logger.debug("%s: Deleted.", self)
+        if self.cli_server:
+            self.cli_server.cancel()
+            self.cli_server = None
+        if self.cli_sockpath:
+            await self.async_cmd_status("rm -rf " + os.path.dirname(self.cli_sockpath))
+            self.cli_sockpath = None
+        if self.cli_histfile:
+            readline.write_history_file(histfile)
+            self.cli_histfile = None
 
-        super().delete()
+        self.logger.debug("%s: ASYNC Deleted.", self)
+        await super().async_delete()
 
 
 BaseMicronet.g_unet = None
@@ -958,8 +1263,11 @@ BaseMicronet.g_unet = None
 
 
 def get_exec_path(binary):
-    base = Commander("base")
-    return base.get_exec_path(binary)
+    return commander.get_exec_path(binary)
+
+
+def get_exec_path_host(binary):
+    return commander.get_exec_path(binary)
 
 
 commander = Commander("micronet")

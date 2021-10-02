@@ -57,6 +57,11 @@ def _kill_piddict(pids_by_upid, sig):
         for pid in pids:
             try:
                 if pid != ourpid:
+                    logging.info(
+                        "killing proc %s (%s)",
+                        pid,
+                        open(f"/proc/{pid}/cmdline", "r").read().replace("\x00", " "),
+                    )
                     os.kill(int(pid), sig)
             except Exception:
                 pass
@@ -93,6 +98,9 @@ def _cleanup_pids(ours):
     if not pids_by_upid:
         return
 
+    t = "current" if ours else "previous"
+    logging.info("Reaping %s  micronet processes", t)
+
     _kill_piddict(pids_by_upid, signal.SIGTERM)
 
     # Give them 5 second to exit cleanly
@@ -112,7 +120,6 @@ def cleanup_current():
 
     Currently this only scans for old processes.
     """
-    logging.info("reaping current micronet processes")
     _cleanup_pids(True)
 
 
@@ -121,5 +128,4 @@ def cleanup_previous():
 
     Currently this only scans for old processes.
     """
-    logging.info("reaping past micronet processes")
     _cleanup_pids(False)

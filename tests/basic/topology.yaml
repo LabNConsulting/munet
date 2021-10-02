@@ -9,9 +9,10 @@ topology:
   nodes:
     r1:
       # Simple config
-      connections: ["net0", "net1", "r2"]
+      connections: ["net0:xyz0", "net1", "r2"]
       cmd: |
         ip addr show
+        which ping
         tail -f /dev/null
     r2:
       # More detailed connection config
@@ -21,22 +22,27 @@ topology:
           name: "p2p0"
         - to: "r3"
           name: "p2p1"
-          match: 1
+          remote-name: "eth1"
         - to: "r3"
           ip: "192.168.202.0/31"
           name: "p2p2"
-          match: 2
+          remote-name: "eth2"
+      image: docker.io/labn/docker-ci-test:20.04
+      podman:
+        extra_args: []
       cmd: |
         ip addr show
+        which ping
         tail -f /dev/null
     r3:
       connections:
         - to: "net1"
         - to: "r2"
-          match: 1
+          remote-name: "p2p1"
         - to: "r2"
           ip: "192.168.202.1/31"
-          match: 2
+          remote-name: "p2p2"
       cmd: |
+        stat -f -c %T /sys/fs/cgroup
         ip addr show
         tail -f /dev/null

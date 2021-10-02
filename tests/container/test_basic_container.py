@@ -23,22 +23,44 @@ import logging
 
 import pytest
 
-from micronet.parser import build_topology
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
 
 
-async def test_basic_ping(unet):
+async def test_containers_up(unet):
+    output = unet.cmd_raises("podman ps")
+    logging.info("Containers:\n%s\n\n", output)
+
+
+async def test_ping_the_container(unet):
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
-    logging.info("ping r2 output: %s", o)
+    logging.info("ping output: %s", o)
 
+    other_ip = unet.hosts["r2"].intf_addrs["eth1"].ip
+    o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
+    logging.info("ping output: %s", o)
+
+
+async def test_ping_from_container(unet):
     other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
     o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
-    logging.info("ping r1 output: %s", o)
+    logging.info("ping output: %s", o)
 
-    # useful for manually testing the CLI
-    # from micronet.cli import async_cli
-    # await async_cli(unet, title="First", prompt="primary> ")
+    other_ip = unet.hosts["r1"].intf_addrs["eth1"].ip
+    o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
+    logging.info("ping output: %s", o)
+
+
+async def test_container_mounts(unet):
+    await unet.hosts["r2"].async_cmd_raises("echo foobar > /mytmp/foobar.txt")
+    o = await unet.hosts["r2"].async_cmd_raises("cat /mytmp/foobar.txt")
+    assert o == "foobar\n"
+
+    o = await unet.hosts["r2"].async_cmd_raises("df -T ")
+    logging.info("DF:\n%s\n", o)
+
+    await unet.hosts["r2"].async_cmd_raises("echo foobaz > /mybind/foobar.txt")
+    o = await unet.hosts["r2"].async_cmd_raises("cat /mybind/foobar.txt")
+    assert o == "foobaz\n"
