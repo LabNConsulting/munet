@@ -34,6 +34,7 @@ from .native import (
     L3Bridge,
     L3Node,
     Micronet,
+    to_thread,
 )
 
 __all__ = [
@@ -49,4 +50,5 @@ __all__ = [
     "comm_error",
     "get_exec_path",
     "proc_error",
+    "to_thread",
 ]

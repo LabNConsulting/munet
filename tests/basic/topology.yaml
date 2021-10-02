@@ -12,7 +12,7 @@ topology:
       connections: ["net0", "net1", "r2"]
       cmd: |
         ip addr show
-        tail -f /dev/null
+        # tail -f /dev/null
     r2:
       # More detailed connection config
       connections:
@@ -28,7 +28,9 @@ topology:
           match: 2
       cmd: |
         ip addr show
-        tail -f /dev/null
+        sleep 4
+        echo foo
+        # tail -f /dev/null
     r3:
       connections:
         - to: "net1"
@@ -39,4 +41,6 @@ topology:
           match: 2
       cmd: |
         ip addr show
-        tail -f /dev/null
+        sleep 2
+        exit 1
+        # tail -f /dev/null

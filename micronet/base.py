@@ -18,11 +18,13 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import datetime
 import logging
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -32,12 +34,6 @@ root_hostname = subprocess.check_output("hostname")
 
 # This allows us to cleanup any leftovers later on
 os.environ["MICRONET_PID"] = str(os.getpid())
-
-
-def make_list(o):
-    if isinstance(o, (tuple, list)):
-        return o
-    return [o]
 
 
 class Timeout:
@@ -180,8 +176,8 @@ class Commander:
         defaults.update(kwargs)
         return pre_cmd, cmd, defaults
 
-    def _popen(self, method, cmd, skip_pre_cmd=False, **kwargs):
-        if sys.version_info[0] >= 3:
+    def _popen(self, method, cmd, skip_pre_cmd=False, async_exec=False, **kwargs):
+        if sys.version_info[0] >= 3 and not async_exec:
             defaults = {
                 "encoding": "utf-8",
                 "stdout": subprocess.PIPE,
@@ -197,9 +193,10 @@ class Commander:
         self.logger.debug('%s: %s("%s", kwargs: %s)', self, method, cmd, defaults)
 
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
-        p = subprocess.Popen(actual_cmd, **defaults)
-        if not hasattr(p, "args"):
-            p.args = actual_cmd
+        if async_exec:
+            p = asyncio.create_subprocess_exec(*actual_cmd, **defaults)
+        else:
+            p = subprocess.Popen(actual_cmd, **defaults)
         return p, actual_cmd
 
     def set_cwd(self, cwd):
@@ -211,7 +208,7 @@ class Commander:
         Creates a pipe with the given `command`.
 
         Args:
-            command: `str` or `list` of command to open a pipe with.
+            cmd: `str` or `list` of command to open a pipe with.
             **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
                 then will be invoked with `bash -c`, otherwise `command` is a list and
                 will be invoked without a shell.
@@ -219,21 +216,31 @@ class Commander:
         Returns:
             a subprocess.Popen object.
         """
-        p, _ = self._popen("popen", cmd, **kwargs)
-        return p
+        return self._popen("popen", cmd, async_exec=False, **kwargs)[0]
+
+    async def async_popen(self, cmd, **kwargs):
+        """Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `command` is a string then will be invoked with `bash -c`, otherwise
+                `command` is a list and will be invoked without a shell.
+
+        Returns:
+            a asyncio.subprocess.Process object.
+        """
+        return await self._popen("async_popen", cmd, async_exec=True, **kwargs)[0]
 
     def cmd_status(self, cmd, raises=False, warn=True, stdin=None, **kwargs):
         """Execute a command."""
 
-        # We are not a shell like mininet, so we need to intercept this
-        chdir = False
         if not isinstance(cmd, str):
             cmds = cmd
         else:
-            # Make sure the code doesn't think this will work.
-            m = re.match(r"cd(\s*|\s+(\S+))$", cmd)
-            assert not m
-
+            # Make sure the code doesn't think `cd` will work.
+            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
             cmds = ["/bin/bash", "-c", cmd]
 
         pinput = None
@@ -260,8 +267,6 @@ class Commander:
                 error = subprocess.CalledProcessError(rc, actual_cmd)
                 error.stdout, error.stderr = stdout, stderr
                 raise error
-        elif chdir:
-            self.set_cwd(stdout.strip())
 
         return rc, stdout, stderr
 
@@ -572,8 +577,10 @@ class LinuxNamespace(Commander):
         o = self.cmd_legacy("ls -l /proc/{}/ns".format(self.pid))
         self.logger.debug("namespaces:\n %s", o)
 
-        # Doing this here messes up all_protocols ipv6 check
-        self.cmd_raises("ip link set lo up")
+        # will cache the path, which is important in delete to avoid running a shell
+        # which can hang during cleanup
+        self.ip_path = self.get_exec_path("ip")
+        self.cmd_raises([self.ip_path, "link", "set", "lo", "up"])
 
     @property
     def intfs(self):
@@ -590,8 +597,6 @@ class LinuxNamespace(Commander):
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)
 
-        ip_path = self.get_exec_path("ip")
-        assert ip_path, "XXX missing ip command!"
         if os.path.exists("/run/netns/{}".format(ns)):
             self.logger.warning("%s: Removing existing nsspace %s", self, ns)
             try:
@@ -604,14 +609,11 @@ class LinuxNamespace(Commander):
                     str(ex),
                     exc_info=True,
                 )
-        self.cmd_raises([ip_path, "netns", "add", ns])
+        self.cmd_raises([self.ip_path, "netns", "add", ns])
 
     def delete_netns(self, ns):
         self.logger.debug("Deleting network namespace %s", ns)
-
-        ip_path = self.get_exec_path("ip")
-        assert ip_path, "XXX missing ip command!"
-        self.cmd_raises([ip_path, "netns", "delete", ns])
+        self.cmd_raises([self.ip_path, "netns", "delete", ns])
 
     def set_intf_netns(self, intf, ns, up=False):
         # In case a user hard-codes 1 thinking it "resets"
@@ -621,9 +623,9 @@ class LinuxNamespace(Commander):
 
         self.logger.debug("Moving interface %s to namespace %s", intf, ns)
 
-        cmd = "ip link set {} netns " + ns
+        cmd = [self.ip_path, "link", "set", intf, "netns", ns]
         if up:
-            cmd += " up"
+            cmd.append("up")
         self.intf_ip_cmd(intf, cmd)
         if ns == str(self.pid):
             # If we are returning then remove from dict
@@ -637,14 +639,15 @@ class LinuxNamespace(Commander):
         self.set_intf_netns(intf, str(self.pid))
 
     def intf_ip_cmd(self, intf, cmd):
-        """Run an ip command for considering an interfaces possible namespace.
-
-        `cmd` - format is run using the interface name on the command
-        """
+        """Run an ip command, considering an interface's possible namespace."""
         if intf in self.ifnetns:
-            assert cmd.startswith("ip ")
-            cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
-        self.cmd_raises(cmd.format(intf))
+            if isinstance(cmd, list):
+                assert cmd[0].endswith("ip")
+                cmd[1:1] = ["-n", self.ifnetns[intf]]
+            else:
+                assert cmd.startswith("ip ")
+                cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
+        self.cmd_raises(cmd)
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
@@ -660,18 +663,35 @@ class LinuxNamespace(Commander):
         if ifname not in self.intf_addrs:
             self.intf_addrs[ifname] = None
 
-    def delete(self):
-        if self.p and self.p.poll() is None:
-            if sys.version_info[0] >= 3:
-                try:
-                    self.p.terminate()
-                    self.p.communicate(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.p.kill()
-                    self.p.communicate(timeout=2)
+    def cleanup_proc(self, p):
+        if not p or p.returncode is not None:
+            return None
+
+        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+        os.kill(-p.pid, signal.SIGTERM)
+        try:
+            if isinstance(p, subprocess.Popen):
+                p.communicate(timeout=10)
             else:
-                self.p.kill()
-                self.p.communicate()
+                asyncio.wait_for(p.communicate(), timeout=10)
+        except (subprocess.TimeoutExpired, asyncio.TimeoutError):
+            self.logger.warning(
+                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
+            )
+            os.kill(-p.pid, signal.SIGKILL)
+            try:
+                if isinstance(p, subprocess.Popen):
+                    p.communicate(timeout=2)
+                else:
+                    asyncio.wait_for(p.communicate(), timeout=2)
+            except (subprocess.TimeoutExpired, asyncio.TimeoutError):
+                self.logger.warning("%s: kill timeout", self)
+                return p
+        return None
+
+    def delete(self):
+        self.logger.debug("%s: delete", self)
+        self.cleanup_proc(self.p)
         self.set_pre_cmd(["/bin/false"])
 
 
@@ -702,6 +722,8 @@ class SharedNamespace(Commander):
         self.set_pre_cmd(
             ["/usr/bin/nsenter", "-a", "-t", str(self.pid), "--wd=" + self.cwd]
         )
+
+        self.ip_path = self.get_exec_path("ip")
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
@@ -753,10 +775,18 @@ class Bridge(SharedNamespace):
     def delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
 
-        rc, o, e = self.cmd_status("ip link show {}".format(self.name), warn=False)
+        rc, o, e = self.cmd_status(
+            [self.ip_path, "link", "show", self.name],
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            warn=False,
+        )
         if not rc:
             rc, o, e = self.cmd_status(
-                "ip link delete {}".format(self.name), warn=False
+                [self.ip_path, "link", "delete", self.name],
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                warn=False,
             )
         if rc:
             self.logger.error(
@@ -889,7 +919,7 @@ class BaseMicronet(LinuxNamespace):
         """Add a switch to micronet."""
 
         self.logger.debug("%s: add_switch %s(%s)", self, cls.__name__, name)
-        self.switches[name] = cls(name, self, **kwargs)
+        self.switches[name] = cls(name, unet=self, **kwargs)
         return self.switches[name]
 
     def get_mac(self, name, ifname):
@@ -917,7 +947,12 @@ class BaseMicronet(LinuxNamespace):
 
             self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
 
-            rc, o, e = host.cmd_status("ip link delete {}".format(rif), warn=False)
+            rc, o, e = host.cmd_status(
+                [self.ip_path, "link", "delete", rif],
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                warn=False,
+            )
             if rc:
                 self.logger.error(
                     "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)

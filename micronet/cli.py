@@ -18,6 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import argparse
 import logging
 import os
@@ -86,18 +87,20 @@ def spawn(unet, host, cmd):
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
 
 
+def host_cmd_split(unet, cmd):
+    csplit = cmd.split()
+    i = 0
+    for i, e in enumerate(csplit):
+        if e not in unet.hosts:
+            break
+    hosts = csplit[:i]
+    if not hosts:
+        hosts = sorted(unet.hosts.keys())
+    cmd = " ".join(csplit[i:])
+    return hosts, cmd
+
+
 def doline(unet, line, writef):
-    def host_cmd_split(unet, cmd):
-        csplit = cmd.split()
-        i = 0
-        for i, e in enumerate(csplit):
-            if e not in unet.hosts:
-                break
-        hosts = csplit[:i]
-        if not hosts:
-            hosts = sorted(unet.hosts.keys())
-        cmd = " ".join(csplit[i:])
-        return hosts, cmd
 
     line = line.strip()
     m = re.match(r"^(\S+)(?:\s+(.*))?$", line)
@@ -106,8 +109,10 @@ def doline(unet, line, writef):
 
     cmd = m.group(1)
     oargs = m.group(2) if m.group(2) else ""
+
     if cmd in ("q", "quit"):
         return False
+
     if cmd == "hosts":
         writef("%% hosts: %s\n" % " ".join(sorted(unet.hosts.keys())))
     elif cmd in ["term", "vtysh", "xterm"]:
@@ -239,6 +244,21 @@ def local_cli(unet, outf, prompt="unet> "):
             return
 
 
+def init_history(unet, histfile):
+    try:
+        if histfile is None:
+            histfile = os.path.expanduser("~/.micronet-history.txt")
+            if not os.path.exists(histfile):
+                if unet:
+                    unet.cmd("touch " + histfile)
+                else:
+                    subprocess.run("touch " + histfile, check=True)
+        if histfile:
+            readline.read_history_file(histfile)
+    except Exception:
+        pass
+
+
 def cli(
     unet,
     histfile=None,
@@ -274,24 +294,50 @@ def cli(
     if not unet:
         logger.debug("client-cli using sockpath %s", sockpath)
 
-    try:
-        if histfile is None:
-            histfile = os.path.expanduser("~/.micronet-history.txt")
-            if not os.path.exists(histfile):
-                if unet:
-                    unet.cmd("touch " + histfile)
-                else:
-                    subprocess.run("touch " + histfile, check=True)
-        if histfile:
-            readline.read_history_file(histfile)
-    except Exception:
-        pass
+    init_history(unet, histfile)
 
     try:
         if sockpath:
             cli_client(sockpath, prompt=prompt)
         else:
             local_cli(unet, sys.stdout, prompt=prompt)
+    except EOFError:
+        pass
+    except Exception as ex:
+        logger.critical("cli: got exception: %s", ex, exc_info=True)
+        raise
+    finally:
+        readline.write_history_file(histfile)
+
+
+async def async_cli(
+    unet,
+    histfile=None,
+    sockpath=None,
+    force_window=False,
+    title=None,
+    prompt=None,
+    background=True,
+):
+    init_history(unet, histfile)
+    del background
+    del force_window
+    del sockpath
+    del title
+
+    outf = sys.stdout
+
+    if prompt is None:
+        prompt = "unet> "
+
+    try:
+        print("\n--- Micronet CLI Starting ---\n\n")
+        while True:
+            line = input(prompt)
+            if line is None:
+                return
+            if not doline(unet, line, outf.write):
+                return
     except EOFError:
         pass
     except Exception as ex:

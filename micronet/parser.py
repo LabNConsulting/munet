@@ -69,8 +69,8 @@ def get_config(fname):
     return config
 
 
-def build_topology(config=None, logger=None):
-    unet = Micronet()
+def build_topology(config=None, logger=None, rundir=None):
+    unet = Micronet(logger=logger, rundir=rundir)
 
     if not config:
         config = get_config(None)
