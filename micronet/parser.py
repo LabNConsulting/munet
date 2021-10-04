@@ -40,33 +40,57 @@ def find_matching_net_config(name, cconf, oconf):
     return None
 
 
-def get_config(fname):
+def get_config(fname, basename="topology", search=None):
     if not fname:
-        for ext in ("yaml", "toml", "json"):
-            if os.path.exists("topology." + ext):
-                fname = "topology." + ext
-                break
+        if not search:
+            search = [os.getcwd()]
+        elif isinstance(search, str):
+            search = [search]
+        found = False
+        for d in search:
+            for ext in ("yaml", "toml", "json"):
+                fname = os.path.join(d, basename + "." + ext)
+                if os.path.exists(fname):
+                    break
+            else:
+                continue
+            break
         else:
-            raise FileNotFoundError("topology.{json,toml,yaml}")
+            raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
     _, ext = fname.rsplit(".", 1)
     if ext == "json":
         import json  # pylint: disable=C0415
 
-        logging.info("loading json config from %s/%s", os.getcwd(), fname)
+        logging.info("Loading json config from %s/%s", os.getcwd(), fname)
         config = json.load(open(fname, encoding="utf-8"))
     elif ext == "toml":
         import toml  # pylint: disable=C0415
 
-        logging.info("loading toml config from %s/%s", os.getcwd(), fname)
+        logging.info("Loading toml config from %s/%s", os.getcwd(), fname)
         config = toml.load(fname)
     elif ext == "yaml":
         import yaml  # pylint: disable=C0415
 
-        logging.info("loading yaml config from %s/%s", os.getcwd(), fname)
+        logging.info("Loading yaml config from %s/%s", os.getcwd(), fname)
         config = yaml.safe_load(open(fname, encoding="utf-8"))
     else:
         config = {}
     return config
+
+
+def setup_logging(args):
+    # Create rundir and arrange for future commands to run in it.
+
+    # Change CWD to the rundir prior to parsing config
+    old = os.getcwd()
+    os.chdir(args.rundir)
+    try:
+        # change "data" to whatever resource lookup we need
+        search = [old, os.path.join(old, "data")]
+        config = get_config(args.log_config, "logconf", search)
+        logging.config.dictConfig(config)
+    finally:
+        os.chdir(old)
 
 
 def build_topology(config=None, logger=None, rundir=None):

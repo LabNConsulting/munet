@@ -139,7 +139,7 @@ class L3Node(LinuxNamespace):
             stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
             # start_new_session=True,  # allows us to signal all children to exit
         )
-        self.logger.info(
+        self.logger.debug(
             "%s: popen %s => %s",
             self,
             cmds,

@@ -22,8 +22,11 @@ import argparse
 import asyncio
 import functools
 import logging
+import logging.config
 import signal
+import subprocess
 import sys
+import tempfile
 
 from . import cli
 from . import parser
@@ -102,8 +105,14 @@ def setup_signals(tasklist):
             loop.add_signal_handler(
                 sn, functools.partial(raise_signal, sn, sn in fail_signals)
             )
-        # else:
-        #     logging.warning("doing nothing for signum %s %s", sn, signal.strsignal(sn))
+        elif not (
+            hasattr(signal, "SIGRTMIN")
+            and hasattr(signal, "SIGRTMAX")
+            and signal.SIGRTMIN <= sn <= signal.SIGRTMAX
+        ):
+            logging.debug(
+                "doing nothing for signum %s %s (%s)", sn, signal.strsignal(sn), h
+            )
 
 
 async def async_main(args, unet):
@@ -114,10 +123,10 @@ async def async_main(args, unet):
     try:
         if not args.topology_only:
 
-            def log_cmd_result(future):
+            def log_cmd_result(node, future):
                 try:
                     n = future.result()
-                    logger.info("%s: cmd completed result: %s", future, n)
+                    logger.info("%s: cmd completed result: %s", node.name, n)
                 except asyncio.CancelledError:
                     logger.info("%s: cmd.wait() canceled", future)
 
@@ -126,7 +135,7 @@ async def async_main(args, unet):
                 p = await node.run_cmd()
                 procs.append(p)
                 task = asyncio.create_task(p.wait(), name=f"Node-{node.name}-cmd")
-                task.add_done_callback(log_cmd_result)
+                task.add_done_callback(functools.partial(log_cmd_result, node))
                 tasks.append(task)
 
         # tasks = []
@@ -140,7 +149,7 @@ async def async_main(args, unet):
             tasks.append(coro)
         else:
             # Wait on our tasks
-            logging.info("Waiting for node cmd's to complete")
+            logging.info("Waiting for all node cmd to complete")
             coro = asyncio.gather(*tasks)
         await coro
     except asyncio.CancelledError as ex:
@@ -154,6 +163,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cli", action="store_true", help="Run the CLI")
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
+    ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
         "--no-cleanup", action="store_true", help="Do not cleanup previous runs"
     )
@@ -170,7 +180,11 @@ def main():
     ap.add_argument("-v", "--verbose", action="store_true", help="be verbose")
     args = ap.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    rundir = args.rundir if args.rundir else tempfile.mkdtemp(prefix="unet")
+    subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
+    args.rundir = rundir
+
+    parser.setup_logging(args)
 
     config = parser.get_config(args.config)
     if not config["topology"]["nodes"]:
@@ -183,9 +197,9 @@ def main():
     unet = parser.build_topology(config, logger, args.rundir)
     logging.info("Topology up: rundir: %s", unet.rundir)
 
-    exit_status = 2
+    status = 2
     try:
-        exit_status = asyncio.run(async_main(args, unet))
+        status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
         logging.info("Exiting, received KeyboardInterrupt")
     except ExitSignalError as error:
@@ -195,7 +209,7 @@ def main():
 
     logging.info("Deleting unet")
     unet.delete()
-    return exit_status
+    return status
 
 
 exit_status = main()
