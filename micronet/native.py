@@ -119,19 +119,49 @@ class L3Node(LinuxNamespace):
 
     async def run_cmd(self):
         """Run the configured commands for this node"""
+
+        image = None
+        docker_args = []
+        if "docker" in self.config:
+            image = self.config["docker"].get("image", "").strip()
+            docker_args = self.config["docker"].get("extra_args", "")
+            docker_args = [x.strip() for x in docker_args]
+        if not image:
+            image = self.config.get("image", "").strip()
+
         cmd = self.config.get("cmd", "").strip()
-        if not cmd:
+        if not cmd and not image:
             return None
-        if cmd.find("\n") == -1:
-            cmd += "\n"
 
-        cmdpath = os.path.join(self.rundir, "cmd.txt")
-        with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-            cmdfile.write(cmd)
-            cmdfile.flush()
+        if cmd:
+            if cmd.find("\n") == -1:
+                cmd += "\n"
+            cmdpath = os.path.join(self.rundir, "cmd.txt")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(cmd)
+                cmdfile.flush()
 
-        bash_path = self.get_exec_path("bash")
-        cmds = [bash_path, cmdfile.name]
+        if image:
+            # Need to run docker
+            cmds = [
+                self.get_exec_path("docker"),
+                "run",
+                "--rm",
+                "--net=host",
+                "-t",
+            ] + docker_args
+            if cmd:
+                cmds += [
+                    "--entrypoint=/bin/bash",
+                    f"--volume={cmdpath}:/tmp/cmds.txt",
+                ]
+            cmds.append(image)
+            if cmd:
+                cmds.append("/tmp/cmds.txt")
+        else:
+            bash_path = self.get_exec_path("bash")
+            cmds = [bash_path, cmdpath]
+
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,

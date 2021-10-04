@@ -12,7 +12,6 @@ topology:
       connections: ["net0", "net1", "r2"]
       cmd: |
         ip addr show
-        # tail -f /dev/null
     r2:
       # More detailed connection config
       connections:
@@ -26,11 +25,12 @@ topology:
           ip: "192.168.202.0/31"
           name: "p2p2"
           match: 2
+      docker:
+        image: localhost/morn/ffd:latest-amd64
+        extra_args: []
       cmd: |
         ip addr show
-        sleep 4
-        echo foo
-        # tail -f /dev/null
+        tail -f /dev/null
     r3:
       connections:
         - to: "net1"
@@ -43,4 +43,3 @@ topology:
         ip addr show
         sleep 2
         exit 1
-        # tail -f /dev/null
