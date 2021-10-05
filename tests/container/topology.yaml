@@ -1,0 +1,16 @@
+version: 1
+topology:
+  switches:
+    net0:
+  nodes:
+    r1:
+      connections: ["net0", "r2"]
+      cmd: ip addr show
+    r2:
+      image: ubuntu
+      # image: localhost/morn/ffd:latest-amd64
+      connections: ["net0", "r1"]
+      cmd: |
+        tail -f /dev/null
+
+        # ip addr
