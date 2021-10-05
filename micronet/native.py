@@ -211,7 +211,7 @@ class L3Node(LinuxNamespace):
         self.next_p2p_network = make_ip_network(n, 1)
 
         ipaddr = ipaddress.ip_interface(n)
-        oipaddr = ipaddr + 1
+        oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
 
         self.intf_addrs[ifname] = ipaddr
         other.intf_addrs[oifname] = oipaddr

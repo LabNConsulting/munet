@@ -98,6 +98,8 @@ def setup_logging(args):
                 print("PRELOG: " + msg % p, **k, file=sys.stderr)
 
         config, fname = get_config(args.log_config, "logconf", search, logf=logf)
+        if args.verbose:
+            config["handlers"]["console"]["level"] = "DEBUG"
         logging.config.dictConfig(config)
         logging.info("Loaded logging config %s", fname)
     finally:
