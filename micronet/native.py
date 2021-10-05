@@ -22,13 +22,13 @@ import asyncio
 import ipaddress
 import logging
 import os
-import signal
 import subprocess
 import tempfile
 
 from .base import BaseMicronet
 from .base import Bridge
 from .base import LinuxNamespace
+from .base import cmd_error
 
 
 def get_ip_interface(c):
@@ -93,10 +93,22 @@ class L3Node(LinuxNamespace):
         if not name:
             name = "r{}".format(self.id)
 
-        super().__init__(name, logger=logger, **kwargs)
-
         self.cmd_p = None
+        self.cmd_cont_name = ""
         self.config = config if config else {}
+
+        if "image" in self.config or "podman" in self.config:
+            # super().__init__(name, logger=logger, pid=True, cgroup=True, **kwargs)
+            super().__init__(
+                name,
+                logger=logger,
+                # cgroup=True,
+                # pid=True,
+                # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],
+                **kwargs,
+            )
+        else:
+            super().__init__(name, logger=logger, **kwargs)
 
         # Setup node's networking
         if ip := get_ip_interface(self.config):
@@ -121,11 +133,11 @@ class L3Node(LinuxNamespace):
         """Run the configured commands for this node"""
 
         image = None
-        docker_args = []
-        if "docker" in self.config:
-            image = self.config["docker"].get("image", "").strip()
-            docker_args = self.config["docker"].get("extra_args", "")
-            docker_args = [x.strip() for x in docker_args]
+        podman_extra = []
+        if "podman" in self.config:
+            image = self.config["podman"].get("image", "").strip()
+            podman_extra = self.config["podman"].get("extra_args", "")
+            podman_extra = [x.strip() for x in podman_extra]
         if not image:
             image = self.config.get("image", "").strip()
 
@@ -142,22 +154,27 @@ class L3Node(LinuxNamespace):
                 cmdfile.flush()
 
         if image:
-            # Need to run docker
+            self.cmd_cont_name = f"{self.name}-{os.getpid()}"
             cmds = [
-                self.get_exec_path("docker"),
+                self.get_exec_path("podman"),
                 "run",
+                f"--name={self.cmd_cont_name}",
+                # "--privileged",
                 "--rm",
-                "--net=host",
-                "-t",
-            ] + docker_args
-            if cmd:
+                f"--net=ns:/proc/{self.pid}/ns/net",
+            ] + podman_extra
+
+            if not cmd:
+                cmds.append(image)
+            else:
+                bash_path = self.get_cont_exec_path(image, "bash")
                 cmds += [
-                    "--entrypoint=/bin/bash",
+                    # u'--entrypoint=""',
                     f"--volume={cmdpath}:/tmp/cmds.txt",
+                    image,
+                    bash_path,
+                    "/tmp/cmds.txt",
                 ]
-            cmds.append(image)
-            if cmd:
-                cmds.append("/tmp/cmds.txt")
         else:
             bash_path = self.get_exec_path("bash")
             cmds = [bash_path, cmdpath]
@@ -205,7 +222,16 @@ class L3Node(LinuxNamespace):
         other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     def delete(self):
-        self.cleanup_proc(self.cmd_p)
+        if not self.cmd_cont_name:
+            self.cleanup_proc(self.cmd_p)
+        elif self.cmd_p and self.cmd_p.returncode is None:
+            rc, o, e = self.cmd_status(
+                [self.get_exec_path("podman"), "stop", self.cmd_cont_name]
+            )
+            if rc:
+                self.logger.warning(
+                    "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
+                )
         super().delete()
 
 

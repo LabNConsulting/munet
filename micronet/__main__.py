@@ -23,6 +23,7 @@ import asyncio
 import functools
 import logging
 import logging.config
+import os
 import signal
 import subprocess
 import sys
@@ -34,7 +35,7 @@ from .cleanup import cleanup_previous
 from .native import to_thread
 
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger("main")
 
 ign_signals = {
     signal.SIGCONT,
@@ -93,14 +94,14 @@ def setup_signals(tasklist):
         h = signal.getsignal(sn)
         is_handled = h and h not in {signal.SIG_IGN, signal.SIG_DFL}
         if is_handled and sn != signal.SIGINT:
-            logging.warning(
+            logger.warning(
                 "skipping python handled signum %s %s", sn, signal.strsignal(sn)
             )
         elif sn in ign_signals and is_handled != signal.SIG_IGN:
             try:
                 signal.signal(sn, signal.SIG_IGN)
             except Exception as e:
-                logging.debug("exception trying to ignore signal %s: %s", sn, e)
+                logger.debug("exception trying to ignore signal %s: %s", sn, e)
         elif sn in exit_signals or sn in fail_signals:
             loop.add_signal_handler(
                 sn, functools.partial(raise_signal, sn, sn in fail_signals)
@@ -110,7 +111,7 @@ def setup_signals(tasklist):
             and hasattr(signal, "SIGRTMAX")
             and signal.SIGRTMIN <= sn <= signal.SIGRTMAX
         ):
-            logging.debug(
+            logger.debug(
                 "doing nothing for signum %s %s (%s)", sn, signal.strsignal(sn), h
             )
 
@@ -144,23 +145,23 @@ async def async_main(args, unet):
             coro = asyncio.create_task(to_thread(lambda: cli.cli(unet)))
             tasks.append(coro)
         elif not args.no_wait:
-            logging.info("Waiting on signal to exit")
+            logger.info("Waiting on signal to exit")
             coro = asyncio.create_task(forever())
             tasks.append(coro)
         else:
             # Wait on our tasks
-            logging.info("Waiting for all node cmd to complete")
+            logger.info("Waiting for all node cmd to complete")
             coro = asyncio.gather(*tasks)
         await coro
     except asyncio.CancelledError as ex:
-        logging.info("Exiting, task canceled: %s tasks: %s", ex, tasks)
+        logger.info("Exiting, task canceled: %s tasks: %s", ex, tasks)
         return 1
-    logging.info("Exiting normally")
+    logger.info("Exiting normally")
     return 0
 
 
-def main():
-    ap = argparse.ArgumentParser()
+def main(*args):
+    ap = argparse.ArgumentParser(args)
     ap.add_argument("--cli", action="store_true", help="Run the CLI")
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
@@ -185,32 +186,37 @@ def main():
     args.rundir = rundir
 
     parser.setup_logging(args)
+    global logger
+    logger = logging.getLogger("main")
 
-    config = parser.get_config(args.config)
+    config, fname = parser.get_config(args.config)
+    logger.info("Loaded config from %s/%s", os.getcwd(), fname)
     if not config["topology"]["nodes"]:
-        logging.critical("No nodes defined in config file")
+        logger.critical("No nodes defined in config file")
         return 1
 
     if not args.no_cleanup:
         cleanup_previous()
 
-    unet = parser.build_topology(config, logger, args.rundir)
-    logging.info("Topology up: rundir: %s", unet.rundir)
+    # unet = parser.build_topology(config, logger, args.rundir)
+    unet = parser.build_topology(config, rundir=args.rundir)
+    logger.info("Topology up: rundir: %s", unet.rundir)
 
     status = 2
     try:
         status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
-        logging.info("Exiting, received KeyboardInterrupt")
+        logger.info("Exiting, received KeyboardInterrupt")
     except ExitSignalError as error:
-        logging.info("Exiting, received ExitSignalError: %s", error)
+        logger.info("Exiting, received ExitSignalError: %s", error)
     except Exception as error:
-        logging.info("Exiting, received unexpected exception %s", error, exc_info=True)
+        logger.info("Exiting, received unexpected exception %s", error, exc_info=True)
 
-    logging.info("Deleting unet")
+    logger.info("Deleting unet")
     unet.delete()
     return status
 
 
-exit_status = main()
-sys.exit(exit_status)
+if __name__ == "__main__":
+    exit_status = main()
+    sys.exit(exit_status)

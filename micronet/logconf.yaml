@@ -1,7 +1,7 @@
 version: 1
 formatters:
   brief:
-    format: '%(asctime)s: %(message)s'
+    format: '%(asctime)s: %(levelname)s: %(message)s'
   precise:
     format: '%(asctime)s %(levelname)s: %(name)s: %(message)s'
 
@@ -18,7 +18,12 @@ handlers:
     filename: exec.log
     mode: w
 
+root:
+  level: DEBUG
+  handlers: [ "console", "file" ]
+
 loggers:
-  root:
-    level: NOTSET
-    handlers: [ "console", "file" ]
+  main:
+    level: DEBUG
+    propagate: true
+

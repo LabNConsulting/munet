@@ -3,10 +3,10 @@
   "topology": {
     "nodes": {
       "r1": {
-        "cmd": "tail -f /dev/null"
+        "cmd": "ip link"
       },
       "r2": {
-        "cmd": "tail -f /dev/null"
+        "cmd": "ip addr"
       }
     }
   }

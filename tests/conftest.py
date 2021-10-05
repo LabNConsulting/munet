@@ -123,6 +123,7 @@ def pytest_runtest_makereport(item, call):
             pause = item.config.getoption("--pause-on-error")
 
     if error and isatty and item.config.getoption("--cli-on-error"):
+        print("\nCLI-ON-ERROR: %s" % call.excinfo.typename)
         if BaseMicronet.g_unet:
             cli(BaseMicronet.g_unet)
         else:

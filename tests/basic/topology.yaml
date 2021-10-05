@@ -25,12 +25,12 @@ topology:
           ip: "192.168.202.0/31"
           name: "p2p2"
           match: 2
-      docker:
+      podman:
         image: localhost/morn/ffd:latest-amd64
         extra_args: []
       cmd: |
         ip addr show
-        tail -f /dev/null
+        exit 3
     r3:
       connections:
         - to: "net1"
@@ -40,6 +40,6 @@ topology:
           ip: "192.168.202.1/31"
           match: 2
       cmd: |
+        stat -f -c %T /sys/fs/cgroup
         ip addr show
-        sleep 2
         exit 1

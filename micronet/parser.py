@@ -18,8 +18,11 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import importlib.resources
 import logging
 import os
+import sys
+
 from copy import deepcopy
 
 from .native import Micronet
@@ -40,17 +43,21 @@ def find_matching_net_config(name, cconf, oconf):
     return None
 
 
-def get_config(fname, basename="topology", search=None):
+def get_config(fname, basename="topology", search=None, logf=logging.debug):
     if not fname:
         if not search:
             search = [os.getcwd()]
         elif isinstance(search, str):
             search = [search]
-        found = False
         for d in search:
+            logf(
+                "%s",
+                'searching in "{}" for "{}".{{yaml, toml, json}}'.format(d, basename),
+            )
             for ext in ("yaml", "toml", "json"):
                 fname = os.path.join(d, basename + "." + ext)
                 if os.path.exists(fname):
+                    logf("%s", 'Found "{}"'.format(fname))
                     break
             else:
                 continue
@@ -61,21 +68,18 @@ def get_config(fname, basename="topology", search=None):
     if ext == "json":
         import json  # pylint: disable=C0415
 
-        logging.info("Loading json config from %s/%s", os.getcwd(), fname)
         config = json.load(open(fname, encoding="utf-8"))
     elif ext == "toml":
         import toml  # pylint: disable=C0415
 
-        logging.info("Loading toml config from %s/%s", os.getcwd(), fname)
         config = toml.load(fname)
     elif ext == "yaml":
         import yaml  # pylint: disable=C0415
 
-        logging.info("Loading yaml config from %s/%s", os.getcwd(), fname)
         config = yaml.safe_load(open(fname, encoding="utf-8"))
     else:
         config = {}
-    return config
+    return config, fname
 
 
 def setup_logging(args):
@@ -85,10 +89,17 @@ def setup_logging(args):
     old = os.getcwd()
     os.chdir(args.rundir)
     try:
-        # change "data" to whatever resource lookup we need
-        search = [old, os.path.join(old, "data")]
-        config = get_config(args.log_config, "logconf", search)
+        search = [old]
+        with importlib.resources.path("micronet", "logconf.yaml") as datapath:
+            search.append(datapath.parent)
+
+        def logf(msg, *p, **k):
+            if args.verbose:
+                print("PRELOG: " + msg % p, **k, file=sys.stderr)
+
+        config, fname = get_config(args.log_config, "logconf", search, logf=logf)
         logging.config.dictConfig(config)
+        logging.info("Loaded logging config %s", fname)
     finally:
         os.chdir(old)
 
@@ -97,9 +108,10 @@ def build_topology(config=None, logger=None, rundir=None):
     unet = Micronet(logger=logger, rundir=rundir)
 
     if not config:
-        config = get_config(None)
+        config, fname = get_config(None)
     if "topology" not in config:
         return unet
+
     config = config["topology"]
 
     if "switches" in config:

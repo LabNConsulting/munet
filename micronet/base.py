@@ -96,6 +96,7 @@ class Commander:
         """Create a Commander."""
         self.name = name
         self.last = None
+        self.cont_exec_paths = {}
         self.exec_paths = {}
         self.pre_cmd = []
         self.pre_cmd_str = ""
@@ -131,6 +132,38 @@ class Commander:
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
+    def get_cont_exec_path(self, image, binary):
+        """Return path to the binary inside the given container image.
+
+        Args:
+            image: `str` image name to check inside
+            binary `str` or `list` binary name or list of binary names
+        Returns:
+            the full path to the binary or None.
+        """
+        if isinstance(binary, str):
+            bins = [binary]
+        else:
+            bins = binary
+        if image not in self.cont_exec_paths:
+            self.cont_exec_paths[image] = {}
+        for b in bins:
+            if b in self.cont_exec_paths[image]:
+                return self.cont_exec_paths[image][b]
+
+            # rc, o, e = self.podman_cmd_status(image, "which " + b, warn=False)
+            rc, o, e = self.podman_cmd_status(image, "which " + b)
+            if not rc:
+                self.cont_exec_paths[image][b] = o.strip()
+                return self.cont_exec_paths[image][b]
+            else:
+                self.logger.warning(
+                    "Couldn't get path inside container for %s: %s",
+                    b,
+                    cmd_error(rc, o, e),
+                )
+        return None
+
     def get_exec_path(self, binary):
         """Return the full path to the binary executable.
 
@@ -146,7 +179,8 @@ class Commander:
 
             rc, output, _ = self.cmd_status("which " + b, warn=False)
             if not rc:
-                return os.path.abspath(output.strip())
+                self.exec_paths[b] = os.path.abspath(output.strip())
+                return self.exec_paths[b]
             return None
 
     def test(self, flags, arg):
@@ -282,6 +316,47 @@ class Commander:
         """Execute a command. Raise an exception on errors"""
 
         rc, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
+        assert rc == 0
+        return stdout
+
+    def podman_cmd_status(
+        self, image, cmd, raises=False, warn=True, stdin=None, **kwargs
+    ):
+        """Execute a command inside a container image."""
+
+        cmds = [
+            self.get_exec_path("podman"),
+            "run",
+            "--rm",
+            f"--net=ns:/proc/{self.pid}/ns/net",
+            # '--entrypoint=""',
+            image,
+        ]
+
+        if not isinstance(cmd, str):
+            cmds += cmd
+        else:
+            # Make sure the code doesn't think `cd` will work.
+            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
+            cmds += ["/bin/bash", "-c", cmd]
+
+        return self.cmd_status(cmds, raises, warn, stdin, **kwargs)
+
+    def podman_cmd_raises(self, image, cmd, **kwargs):
+        """Execute a command inside a container image.
+
+        Args:
+            image: `str` name of image to execute command within.
+            cmd: `str` or `list` if `str` then execute with `bash -c`.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+
+        Returns
+            stdout of the command
+        """
+
+        rc, stdout, _ = self.podman_cmd_status(image, cmd, raises=True, **kwargs)
         assert rc == 0
         return stdout
 
@@ -480,9 +555,14 @@ class LinuxNamespace(Commander):
             flags += "m"
         if net:
             nslist.append("net")
+            # if pid:
+            #     os.system(f"touch /tmp/netns-{name}")
+            #     cmd.append(f"--net=/tmp/netns-{name}")
+            # else:
             flags += "n"
         if pid:
             nslist.append("pid")
+            flags += "f"
             flags += "p"
             cmd.append("--mount-proc")
         if time:
@@ -497,6 +577,9 @@ class LinuxNamespace(Commander):
             cmd.append("--uts")
 
         cmd.append(flags)
+        if pid:
+            cmd.append(self.get_exec_path("tini"))
+            cmd.append("-vvv")
         cmd.append("/bin/cat")
 
         # Using cat and a stdin PIPE is nice as it will exit when we do. However, we
@@ -509,8 +592,9 @@ class LinuxNamespace(Commander):
         p = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
             start_new_session=True,  # detach from pgid so signals don't propogate
             shell=False,
         )
@@ -530,19 +614,25 @@ class LinuxNamespace(Commander):
                 # See if their namespace is different
                 if ours != theirs:
                     nslist.remove(fname)
-            if not nslist:
+            if not nslist or (pid and nslist == ["pid"]):
                 break
             elapsed = int(timeout.elapsed())
             if elapsed <= 3:
                 time_mod.sleep(0.1)
             elif elapsed > 10:
-                self.logger.warning("%s: unshare taking more than %ss", self, elapsed)
+                self.logger.warning(
+                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
+                )
                 time_mod.sleep(3)
             else:
-                self.logger.info("%s: unshare taking more than %ss", self, elapsed)
+                self.logger.info(
+                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
+                )
                 time_mod.sleep(1)
+        if p.poll():
+            logger.error("%s: namespace process failed: %s", self, comm_error(p))
         assert p.poll() is None, "unshare unexpectedly exited!"
-        assert not nslist, "unshare never unshared!"
+        # assert not nslist, "unshare never unshared!"
 
         # Set pre-command based on our namespace proc
         self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
@@ -550,8 +640,17 @@ class LinuxNamespace(Commander):
             self.base_pre_cmd.append("-F")
         self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + self.cwd])
 
-        # Remount /sys to pickup any changes
+        # Remount /sys to pickup any changes, but keep root /sys/fs/cgroup
+        tmpmnt = f"/tmp/cgm-{self.pid}"
+        self.cmd_raises(f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
         self.cmd_raises("mount -t sysfs sysfs /sys")
+        self.cmd_raises(f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
+        # self.cmd_raises(
+        #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
+        #     skip_pre_cmd=True,
+        # )
+        # o = self.cmd_raises("ls -l /sys/fs/cgroup")
+        # self.logger.warning("XXX %s", o)
 
         # Set the hostname to the namespace name
         if uts and set_hostname:
@@ -587,11 +686,13 @@ class LinuxNamespace(Commander):
         return self.intf_addrs.keys()
 
     def tmpfs_mount(self, inner):
+        self.logger.debug("Mounting tmpfs on %s", inner)
         self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount -n -t tmpfs tmpfs " + inner)
 
     def bind_mount(self, outer, inner):
-        self.cmd_raises("mkdir -p " + inner)
+        self.logger.debug("Bind mounting %s on %s", outer, inner)
+        # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
 
     def add_netns(self, ns):

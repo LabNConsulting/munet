@@ -20,10 +20,13 @@
 #
 import logging
 import subprocess
+import sys
+
 from subprocess import DEVNULL
 
 from micronet import Commander
 from micronet import cmd_error
+from micronet.__main__ import main
 
 
 commander = Commander("base")
@@ -40,27 +43,31 @@ def check(p):
     logging.info("Success: %s", s)
 
 
+stdargs = [
+    "poetry",
+    "run",
+    "micronet",
+    "--no-cleanup",
+    "--no-cli",
+    "--no-wait",
+]
+
+
 def test_load_default():
-    p = commander.popen(["micronet", "--no-cleanup", "--no-wait"], stdin=DEVNULL)
+    p = commander.popen(stdargs)
     check(p)
 
 
 def test_load_yaml_config():
-    p = commander.popen(
-        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.yaml"], stdin=DEVNULL
-    )
+    p = commander.popen(stdargs + ["-c", "topology.yaml"])
     check(p)
 
 
 def test_load_toml_config():
-    p = commander.popen(
-        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.toml"], stdin=DEVNULL
-    )
+    p = commander.popen(stdargs + ["-c", "topology.toml"])
     check(p)
 
 
 def test_load_json_config():
-    p = commander.popen(
-        ["micronet", "--no-cleanup", "--no-wait", "-c", "topology.json"], stdin=DEVNULL
-    )
+    p = commander.popen(stdargs + ["-c", "topology.json"])
     check(p)
