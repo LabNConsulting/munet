@@ -140,6 +140,47 @@ class L3Node(LinuxNamespace):
                 continue
             raise NotImplementedError("complex mounts for non-containers")
 
+    async def run_cmd(self):
+        """Run the configured commands for this node"""
+
+        cmd = self.config.get("cmd", "").strip()
+        if not cmd and not image:
+            return None
+
+        if cmd:
+            if cmd.find("\n") == -1:
+                cmd += "\n"
+            cmdpath = os.path.join(self.rundir, "cmd.txt")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(cmd)
+                cmdfile.flush()
+
+        bash_path = self.get_exec_path("bash")
+        cmds = [bash_path, cmdpath]
+
+        self.cmd_p = await self.async_popen(
+            cmds,
+            stdin=subprocess.DEVNULL,
+            stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
+            stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
+            # start_new_session=True,  # allows us to signal all children to exit
+        )
+        self.logger.debug(
+            "%s: popen %s => %s",
+            self,
+            cmds,
+            self.cmd_p.pid,
+        )
+        return self.cmd_p
+
+    def cmd_completed(self, future):
+        try:
+            n = future.result()
+            self.logger.info("%s: cmd completed result: %s", self, n)
+        except asyncio.CancelledError:
+            # Should we stop the container if we have one?
+            self.logger.info("%s: cmd.wait() canceled", future)
+
     # def child_exit(self, pid):
     #     """Called back when cmd finishes executing."""
     #     if self.cmd_p && self.cmd_p.pid == pid:
@@ -217,14 +258,7 @@ class L3ContainerNode(L3Node):
         """
         return self._get_exec_path(binary, super().cmd_status, self.exec_paths)
 
-    def cmd_status_host(self, cmd, **kwargs):
-        return super().cmd_status(cmd, **kwargs)
-
-    def cmd_raises_host(self, cmd, **kwargs):
-        _, stdout, _ = super().cmd_status(cmd, raises=True, **kwargs)
-        return stdout
-
-    def cmd_status(self, cmd, **kwargs):
+    def _get_podman_precmd(self, cmd):
         podman_path = self.get_exec_path_host("podman")
         if self.container_id:
             cmds = [podman_path, "exec", self.container_id]
@@ -242,7 +276,26 @@ class L3ContainerNode(L3Node):
             # Make sure the code doesn't think `cd` will work.
             assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
             cmds += ["/bin/bash", "-c", cmd]
+        return cmds
 
+    def popen(self, cmd, **kwargs):
+        """
+        Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+
+        Returns:
+            a subprocess.Popen object.
+        """
+        cmds = self._get_podman_precmd(cmd)
+        return self._popen("popen", cmds, async_exec=False, **kwargs)[0]
+
+    def cmd_status(self, cmd, **kwargs):
+        cmds = self._get_podman_precmd(cmd)
         return self._cmd_status(cmds, **kwargs)
 
     def tmpfs_mount(self, inner):
@@ -301,6 +354,8 @@ class L3ContainerNode(L3Node):
                 cmdfile.write(cmd)
                 cmdfile.flush()
 
+        bash_path = self.get_exec_path("bash")
+
         self.container_id = f"{self.name}-{os.getpid()}"
         cmds = [
             self.get_exec_path_host("podman"),
@@ -318,7 +373,6 @@ class L3ContainerNode(L3Node):
         if not cmd:
             cmds.append(image)
         else:
-            bash_path = self.get_exec_path("bash")
             cmds += [
                 # u'--entrypoint=""',
                 f"--volume={cmdpath}:/tmp/cmds.txt",

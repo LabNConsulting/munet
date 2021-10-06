@@ -146,14 +146,14 @@ class Commander:
             if not rc:
                 cache[b] = os.path.abspath(output.strip())
                 return cache[b]
-            return None
+        return None
 
     def get_exec_path(self, binary):
         """Return the full path to the binary executable.
 
         `binary` :: binary name or list of binary names
         """
-        return self._get_exec_path(binary, self.cmd_status, self.exec_paths)
+        return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
 
     def test(self, flags, arg):
         """Run test binary, with flags and arg"""
@@ -220,6 +220,21 @@ class Commander:
         """
         return self._popen("popen", cmd, async_exec=False, **kwargs)[0]
 
+    def popen_host(self, cmd, **kwargs):
+        """
+        Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+
+        Returns:
+            a subprocess.Popen object.
+        """
+        return Commander._popen(self, "popen_host", cmd, async_exec=False, **kwargs)[0]
+
     async def async_popen(self, cmd, **kwargs):
         """Creates a pipe with the given `command`.
 
@@ -234,6 +249,23 @@ class Commander:
             a asyncio.subprocess.Process object.
         """
         return await self._popen("async_popen", cmd, async_exec=True, **kwargs)[0]
+
+    async def async_popen_host(self, cmd, **kwargs):
+        """Creates a pipe with the given `command`.
+
+        Args:
+            cmd: `str` or `list` of command to open a pipe with.
+
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `command` is a string then will be invoked with `bash -c`, otherwise
+                `command` is a list and will be invoked without a shell.
+
+        Returns:
+            a asyncio.subprocess.Process object.
+        """
+        return await Commander._popen(
+            self, "async_popen_host", cmd, async_exec=True, **kwargs
+        )[0]
 
     def _cmd_status(
         self, cmds, raises=False, warn=True, stdin=None, no_container=False, **kwargs
@@ -275,6 +307,10 @@ class Commander:
             cmds = ["/bin/bash", "-c", cmd]
         return self._cmd_status(cmds, **kwargs)
 
+    def cmd_status_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return Commander.cmd_status(self, cmd, **kwargs)
+
     def cmd_legacy(self, cmd, **kwargs):
         """Execute a command with stdout and stderr joined, *IGNORES ERROR*."""
 
@@ -289,6 +325,10 @@ class Commander:
         rc, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
         assert rc == 0
         return stdout
+
+    def cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return Commander.cmd_status(self, cmd, raises=True, **kwargs)
 
     # Run a command in a new window (gnome-terminal, screen, tmux, xterm)
     def run_in_window(
@@ -326,10 +366,10 @@ class Commander:
             channel = "{}-wait-{}".format(os.getpid(), Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
 
-        sudo_path = self.get_exec_path(["sudo"])
+        sudo_path = self.get_exec_path_host(["sudo"])
         nscmd = sudo_path + " " + self.pre_cmd_str + cmd
         if "TMUX" in os.environ and not forcex:
-            cmd = [self.get_exec_path("tmux")]
+            cmd = [self.get_exec_path_host("tmux")]
             if new_window:
                 cmd.append("new-window")
                 cmd.append("-P")
@@ -358,7 +398,7 @@ class Commander:
         elif "STY" in os.environ and not forcex:
             # wait for not supported in screen for now
             channel = None
-            cmd = [self.get_exec_path("screen")]
+            cmd = [self.get_exec_path_host("screen")]
             if not os.path.exists(
                 "/run/screen/S-{}/{}".format(os.environ["USER"], os.environ["STY"])
             ):
@@ -367,9 +407,13 @@ class Commander:
         elif "DISPLAY" in os.environ:
             # We need it broken up for xterm
             user_cmd = cmd
-            cmd = [self.get_exec_path("xterm")]
+            cmd = [self.get_exec_path_host("xterm")]
             if "SUDO_USER" in os.environ:
-                cmd = [self.get_exec_path("sudo"), "-u", os.environ["SUDO_USER"]] + cmd
+                cmd = [
+                    self.get_exec_path_host("sudo"),
+                    "-u",
+                    os.environ["SUDO_USER"],
+                ] + cmd
             if title:
                 cmd.append("-T")
                 cmd.append(title)
@@ -409,7 +453,7 @@ class Commander:
 
         # Wait here if we weren't handed the channel to wait for
         if channel and wait_for is True:
-            cmd = [self.get_exec_path("tmux"), "wait", channel]
+            cmd = [self.get_exec_path_host("tmux"), "wait", channel]
             self.cmd_status(cmd, skip_pre_cmd=True)
 
         return pane_info
@@ -510,7 +554,7 @@ class LinuxNamespace(Commander):
 
         cmd.append(flags)
         if pid:
-            cmd.append(self.get_exec_path("tini"))
+            cmd.append(self.get_exec_path_host("tini"))
             cmd.append("-vvv")
         cmd.append("/bin/cat")
 
@@ -633,14 +677,6 @@ class LinuxNamespace(Commander):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
         # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
-
-    def cmd_status_host(self, cmd, **kwargs):
-        # Make sure the command runs on the host and not in any container.
-        return LinuxNamespace.cmd_status(self, cmd, **kwargs)
-
-    def cmd_raises_host(self, cmd, **kwargs):
-        # Make sure the command runs on the host and not in any container.
-        return LinuxNamespace.cmd_raises(self, cmd, **kwargs)
 
     def get_exec_path_host(self, binary):
         return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
@@ -777,9 +813,6 @@ class SharedNamespace(Commander):
         self.set_pre_cmd(self.base_pre_cmd)
 
         self.ip_path = self.get_exec_path("ip")
-
-    cmd_status_host = Commander.cmd_status
-    cmd_raises_host = Commander.cmd_raises
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc

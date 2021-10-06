@@ -131,12 +131,17 @@ def doline(unet, line, writef):
         hosts, cmd = host_cmd_split(unet, oargs)
         for host in hosts:
             if len(hosts) > 1:
-                writef("------ Host: %s ------\n" % host)
+                writef(
+                    "------ Host: %s type(%s) ------\n"
+                    % (host, str(type(unet.hosts[host])))
+                )
             if sys.stdin.isatty():
                 spawn(unet, host, cmd)
             else:
-                output = unet.hosts[host].cmd_legacy(cmd)
-                writef(output)
+                rc, o, _ = unet.hosts[host].cmd_status(cmd, stderr=subprocess.STDOUT)
+                if rc:
+                    writef("*** non-zero exit status: %d\n" % rc)
+                writef(o)
             if len(hosts) > 1:
                 writef("------- End: %s ------\n" % host)
         writef("\n")

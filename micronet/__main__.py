@@ -136,7 +136,7 @@ async def async_main(args, unet):
                 p = await node.run_cmd()
                 procs.append(p)
                 task = asyncio.create_task(p.wait(), name=f"Node-{node.name}-cmd")
-                task.add_done_callback(functools.partial(L3Node.cmd_complete, node))
+                task.add_done_callback(functools.partial(L3Node.cmd_completed, node))
                 tasks.append(task)
 
         # tasks = []
