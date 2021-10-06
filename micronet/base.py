@@ -96,7 +96,6 @@ class Commander:
         """Create a Commander."""
         self.name = name
         self.last = None
-        self.cont_exec_paths = {}
         self.exec_paths = {}
         self.pre_cmd = []
         self.pre_cmd_str = ""
@@ -106,7 +105,9 @@ class Commander:
         else:
             self.logger = logger
 
-        self.cwd = self.cmd_raises("pwd").strip()
+    @property
+    def is_container(self):
+        return False
 
     def set_logger(self, logfile):
         self.logger = logging.getLogger(__name__ + ".commander." + self.name)
@@ -132,56 +133,27 @@ class Commander:
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
-    def get_cont_exec_path(self, image, binary):
-        """Return path to the binary inside the given container image.
-
-        Args:
-            image: `str` image name to check inside
-            binary `str` or `list` binary name or list of binary names
-        Returns:
-            the full path to the binary or None.
-        """
+    def _get_exec_path(self, binary, cmdf, cache):
         if isinstance(binary, str):
             bins = [binary]
         else:
             bins = binary
-        if image not in self.cont_exec_paths:
-            self.cont_exec_paths[image] = {}
         for b in bins:
-            if b in self.cont_exec_paths[image]:
-                return self.cont_exec_paths[image][b]
+            if b in cache:
+                return cache[b]
 
-            # rc, o, e = self.podman_cmd_status(image, "which " + b, warn=False)
-            rc, o, e = self.podman_cmd_status(image, "which " + b)
+            rc, output, _ = cmdf("which " + b, warn=False)
             if not rc:
-                self.cont_exec_paths[image][b] = o.strip()
-                return self.cont_exec_paths[image][b]
-            else:
-                self.logger.warning(
-                    "Couldn't get path inside container for %s: %s",
-                    b,
-                    cmd_error(rc, o, e),
-                )
-        return None
+                cache[b] = os.path.abspath(output.strip())
+                return cache[b]
+            return None
 
     def get_exec_path(self, binary):
         """Return the full path to the binary executable.
 
         `binary` :: binary name or list of binary names
         """
-        if isinstance(binary, str):
-            bins = [binary]
-        else:
-            bins = binary
-        for b in bins:
-            if b in self.exec_paths:
-                return self.exec_paths[b]
-
-            rc, output, _ = self.cmd_status("which " + b, warn=False)
-            if not rc:
-                self.exec_paths[b] = os.path.abspath(output.strip())
-                return self.exec_paths[b]
-            return None
+        return self._get_exec_path(binary, self.cmd_status, self.exec_paths)
 
     def test(self, flags, arg):
         """Run test binary, with flags and arg"""
@@ -233,10 +205,6 @@ class Commander:
             p = subprocess.Popen(actual_cmd, **defaults)
         return p, actual_cmd
 
-    def set_cwd(self, cwd):
-        self.logger.warning("%s: 'cd' (%s) does not work outside namespaces", self, cwd)
-        self.cwd = cwd
-
     def popen(self, cmd, **kwargs):
         """
         Creates a pipe with the given `command`.
@@ -267,18 +235,12 @@ class Commander:
         """
         return await self._popen("async_popen", cmd, async_exec=True, **kwargs)[0]
 
-    def cmd_status(self, cmd, raises=False, warn=True, stdin=None, **kwargs):
+    def _cmd_status(
+        self, cmds, raises=False, warn=True, stdin=None, no_container=False, **kwargs
+    ):
         """Execute a command."""
 
-        if not isinstance(cmd, str):
-            cmds = cmd
-        else:
-            # Make sure the code doesn't think `cd` will work.
-            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
-            cmds = ["/bin/bash", "-c", cmd]
-
         pinput = None
-
         if isinstance(stdin, (bytes, str)):
             pinput = stdin
             stdin = subprocess.PIPE
@@ -288,7 +250,7 @@ class Commander:
         rc = p.wait()
 
         # For debugging purposes.
-        self.last = (rc, actual_cmd, cmd, stdout, stderr)
+        self.last = (rc, actual_cmd, cmds, stdout, stderr)
 
         if rc:
             if warn:
@@ -304,6 +266,15 @@ class Commander:
 
         return rc, stdout, stderr
 
+    def cmd_status(self, cmd, **kwargs):
+        if not isinstance(cmd, str):
+            cmds = cmd
+        else:
+            # Make sure the code doesn't think `cd` will work.
+            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
+            cmds = ["/bin/bash", "-c", cmd]
+        return self._cmd_status(cmds, **kwargs)
+
     def cmd_legacy(self, cmd, **kwargs):
         """Execute a command with stdout and stderr joined, *IGNORES ERROR*."""
 
@@ -316,47 +287,6 @@ class Commander:
         """Execute a command. Raise an exception on errors"""
 
         rc, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
-        assert rc == 0
-        return stdout
-
-    def podman_cmd_status(
-        self, image, cmd, raises=False, warn=True, stdin=None, **kwargs
-    ):
-        """Execute a command inside a container image."""
-
-        cmds = [
-            self.get_exec_path("podman"),
-            "run",
-            "--rm",
-            f"--net=ns:/proc/{self.pid}/ns/net",
-            # '--entrypoint=""',
-            image,
-        ]
-
-        if not isinstance(cmd, str):
-            cmds += cmd
-        else:
-            # Make sure the code doesn't think `cd` will work.
-            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
-            cmds += ["/bin/bash", "-c", cmd]
-
-        return self.cmd_status(cmds, raises, warn, stdin, **kwargs)
-
-    def podman_cmd_raises(self, image, cmd, **kwargs):
-        """Execute a command inside a container image.
-
-        Args:
-            image: `str` name of image to execute command within.
-            cmd: `str` or `list` if `str` then execute with `bash -c`.
-            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
-                then will be invoked with `bash -c`, otherwise `command` is a list and
-                will be invoked without a shell.
-
-        Returns
-            stdout of the command
-        """
-
-        rc, stdout, _ = self.podman_cmd_status(image, cmd, raises=True, **kwargs)
         assert rc == 0
         return stdout
 
@@ -534,6 +464,8 @@ class LinuxNamespace(Commander):
 
         self.logger.debug("%s: Creating", self)
 
+        self.cwd = os.path.abspath(os.getcwd())
+
         self.intf_addrs = {}
         self.next_intf_index = 0
 
@@ -638,13 +570,20 @@ class LinuxNamespace(Commander):
         self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
         if not pid:
             self.base_pre_cmd.append("-F")
-        self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + self.cwd])
+        self.set_pre_cmd(self.base_pre_cmd)
 
         # Remount /sys to pickup any changes, but keep root /sys/fs/cgroup
+        # This pattern could be made generic and supported for any overlapping mounts
         tmpmnt = f"/tmp/cgm-{self.pid}"
-        self.cmd_raises(f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
-        self.cmd_raises("mount -t sysfs sysfs /sys")
-        self.cmd_raises(f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
+
+        #
+        # We do not want cmd_status in child classes (e.g., container) for the remaining
+        # setup calls in this __init__ function.
+        #
+        cmdf = LinuxNamespace.cmd_status
+        cmdf(self, f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
+        cmdf(self, "mount -t sysfs sysfs /sys")
+        cmdf(self, f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
         # self.cmd_raises(
         #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
         #     skip_pre_cmd=True,
@@ -655,7 +594,7 @@ class LinuxNamespace(Commander):
         # Set the hostname to the namespace name
         if uts and set_hostname:
             # Debugging get the root hostname
-            self.cmd_raises("hostname " + self.name)
+            cmdf(self, "hostname " + self.name)
             nroot = subprocess.check_output("hostname")
             if root_hostname != nroot:
                 result = self.p.poll()
@@ -673,13 +612,13 @@ class LinuxNamespace(Commander):
                 else:
                     self.bind_mount(s[0], s[1])
 
-        o = self.cmd_legacy("ls -l /proc/{}/ns".format(self.pid))
+        o = cmdf(self, "ls -l /proc/{}/ns".format(self.pid))
         self.logger.debug("namespaces:\n %s", o)
 
         # will cache the path, which is important in delete to avoid running a shell
         # which can hang during cleanup
-        self.ip_path = self.get_exec_path("ip")
-        self.cmd_raises([self.ip_path, "link", "set", "lo", "up"])
+        self.ip_path = self.get_exec_path_host("ip")
+        cmdf(self, [self.ip_path, "link", "set", "lo", "up"])
 
     @property
     def intfs(self):
@@ -694,6 +633,17 @@ class LinuxNamespace(Commander):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
         # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
+
+    def cmd_status_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return LinuxNamespace.cmd_status(self, cmd, **kwargs)
+
+    def cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return LinuxNamespace.cmd_raises(self, cmd, **kwargs)
+
+    def get_exec_path_host(self, binary):
+        return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
 
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)
@@ -710,11 +660,11 @@ class LinuxNamespace(Commander):
                     str(ex),
                     exc_info=True,
                 )
-        self.cmd_raises([self.ip_path, "netns", "add", ns])
+        self.cmd_raises_host([self.ip_path, "netns", "add", ns])
 
     def delete_netns(self, ns):
         self.logger.debug("Deleting network namespace %s", ns)
-        self.cmd_raises([self.ip_path, "netns", "delete", ns])
+        self.cmd_raises_host([self.ip_path, "netns", "delete", ns])
 
     def set_intf_netns(self, intf, ns, up=False):
         # In case a user hard-codes 1 thinking it "resets"
@@ -748,10 +698,13 @@ class LinuxNamespace(Commander):
             else:
                 assert cmd.startswith("ip ")
                 cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
-        self.cmd_raises(cmd)
+        self.cmd_raises_host(cmd)
 
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
+        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
+            self.set_pre_cmd(self.base_pre_cmd)
+            return
         self.logger.debug("%s: new CWD %s", self, cwd)
         self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
@@ -815,21 +768,26 @@ class SharedNamespace(Commander):
 
         self.logger.debug("%s: Creating", self)
 
+        self.cwd = os.path.abspath(os.getcwd())
         self.pid = pid
         self.intfs = []
         self.next_intf_index = 0
 
-        # Set pre-command based on our namespace proc
-        self.set_pre_cmd(
-            ["/usr/bin/nsenter", "-a", "-t", str(self.pid), "--wd=" + self.cwd]
-        )
+        self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
+        self.set_pre_cmd(self.base_pre_cmd)
 
         self.ip_path = self.get_exec_path("ip")
 
+    cmd_status_host = Commander.cmd_status
+    cmd_raises_host = Commander.cmd_raises
+
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
+        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
+            self.set_pre_cmd(self.base_pre_cmd)
+            return
         self.logger.debug("%s: new CWD %s", self, cwd)
-        self.set_pre_cmd(["/usr/bin/nsenter", "-a", "-t", str(self.pid), "--wd=" + cwd])
+        self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
     def get_next_intf_name(self):
         ifname = self.name + "-eth" + str(self.next_intf_index)
@@ -935,7 +893,9 @@ class BaseMicronet(LinuxNamespace):
         self.hosts[name] = cls(name, **kwargs)
         # Create a new mounted FS for tracking nested network namespaces creatd by the
         # user with `ip netns add`
-        self.hosts[name].tmpfs_mount("/run/netns")
+
+        # XXX add me back smarter to handle containers
+        # self.hosts[name].tmpfs_mount("/run/netns")
 
         return self.hosts[name]
 
@@ -982,18 +942,18 @@ class BaseMicronet(LinuxNamespace):
             lhost, rhost = self.hosts[name1], self.hosts[name2]
             lifname = "i1{:x}".format(lhost.pid)
             rifname = "i2{:x}".format(rhost.pid)
-            self.cmd_raises(
+            self.cmd_raises_host(
                 "ip link add {} type veth peer name {}".format(lifname, rifname)
             )
 
-            self.cmd_raises("ip link set {} netns {}".format(lifname, lhost.pid))
-            lhost.cmd_raises("ip link set {} name {}".format(lifname, if1))
-            lhost.cmd_raises("ip link set {} up".format(if1))
+            self.cmd_raises_host("ip link set {} netns {}".format(lifname, lhost.pid))
+            lhost.cmd_raises_host("ip link set {} name {}".format(lifname, if1))
+            lhost.cmd_raises_host("ip link set {} up".format(if1))
             lhost.register_interface(if1)
 
-            self.cmd_raises("ip link set {} netns {}".format(rifname, rhost.pid))
-            rhost.cmd_raises("ip link set {} name {}".format(rifname, if2))
-            rhost.cmd_raises("ip link set {} up".format(if2))
+            self.cmd_raises_host("ip link set {} netns {}".format(rifname, rhost.pid))
+            rhost.cmd_raises_host("ip link set {} name {}".format(rifname, if2))
+            rhost.cmd_raises_host("ip link set {} up".format(if2))
             rhost.register_interface(if2)
         else:
             switch = self.switches[name1]
@@ -1002,15 +962,15 @@ class BaseMicronet(LinuxNamespace):
             assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
-            self.cmd_raises(
+            self.cmd_raises_host(
                 f"ip link add {if1} type veth peer name {if2} netns {host.pid}"
             )
-            self.cmd_raises(f"ip link set {if1} netns {switch.pid}")
+            self.cmd_raises_host(f"ip link set {if1} netns {switch.pid}")
             switch.register_interface(if1)
             host.register_interface(if2)
-            self.cmd_raises(f"ip link set {if1} master {switch.name}")
-            self.cmd_raises(f"ip link set {if1} up")
-            host.cmd_raises(f"ip link set {if2} up")
+            self.cmd_raises_host(f"ip link set {if1} master {switch.name}")
+            self.cmd_raises_host(f"ip link set {if1} up")
+            host.cmd_raises_host(f"ip link set {if2} up")
 
         # Cache the MAC values, and reverse mapping
         self.get_mac(name1, if1)
@@ -1030,7 +990,7 @@ class BaseMicronet(LinuxNamespace):
             dev = self.switches[name]
 
         if (name, ifname) not in self.macs:
-            _, output, _ = dev.cmd_status("ip -o link show " + ifname)
+            _, output, _ = dev.cmd_status_host("ip -o link show " + ifname)
             m = re.match(".*link/(loopback|ether) ([0-9a-fA-F:]+) .*", output)
             mac = m.group(2)
             self.macs[(name, ifname)] = mac
@@ -1048,7 +1008,7 @@ class BaseMicronet(LinuxNamespace):
 
             self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
 
-            rc, o, e = host.cmd_status(
+            rc, o, e = host.cmd_status_host(
                 [self.ip_path, "link", "delete", rif],
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,

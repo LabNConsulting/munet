@@ -22,6 +22,7 @@ import asyncio
 import ipaddress
 import logging
 import os
+import re
 import subprocess
 import tempfile
 
@@ -86,7 +87,7 @@ class L3Node(LinuxNamespace):
         cls.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, logger=None, unet=None, config=None, **kwargs):
+    def __init__(self, name=None, unet=None, config=None, **kwargs):
         """Create a linux Bridge."""
 
         self.id = self._get_next_ord()
@@ -94,21 +95,10 @@ class L3Node(LinuxNamespace):
             name = "r{}".format(self.id)
 
         self.cmd_p = None
-        self.cmd_cont_name = ""
+        self.container_id = ""
         self.config = config if config else {}
 
-        if "image" in self.config or "podman" in self.config:
-            # super().__init__(name, logger=logger, pid=True, cgroup=True, **kwargs)
-            super().__init__(
-                name,
-                logger=logger,
-                # cgroup=True,
-                # pid=True,
-                # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],
-                **kwargs,
-            )
-        else:
-            super().__init__(name, logger=logger, **kwargs)
+        super().__init__(name, **kwargs)
 
         # Setup node's networking
         if ip := get_ip_interface(self.config):
@@ -119,80 +109,41 @@ class L3Node(LinuxNamespace):
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
         self.unet = unet
 
-        self.cmd_raises(f"ip addr add {self.loopback_ip} dev lo")
-        self.cmd_raises("ip link set lo up")
+        self.cmd_raises_host(f"ip addr add {self.loopback_ip} dev lo")
+        self.cmd_raises_host("ip link set lo up")
 
         # Create rundir and arrange for future commands to run in it.
         self.rundir = os.path.join(unet.rundir, name)
-        self.cmd_raises(f"mkdir -p {self.rundir}")
+        self.cmd_raises_host(f"mkdir -p {self.rundir}")
         self.set_cwd(self.rundir)
 
         self.logger.debug("%s: node ip address %s", self, self.ip)
 
-    async def run_cmd(self):
-        """Run the configured commands for this node"""
+    def mount_volumes(self):
+        if "volumes" not in self.config:
+            return
 
-        image = None
-        podman_extra = []
-        if "podman" in self.config:
-            image = self.config["podman"].get("image", "").strip()
-            podman_extra = self.config["podman"].get("extra_args", "")
-            podman_extra = [x.strip() for x in podman_extra]
-        if not image:
-            image = self.config.get("image", "").strip()
+        for m in self.config["volumes"]:
+            if isinstance(m, str):
+                s = m.split(":", 1)
+                if len(s) == 1:
+                    self.tmpfs_mount(s[0])
+                else:
+                    spath = s[0]
+                    if spath[0] == ".":
+                        spath = os.path.abspath(
+                            os.path.join(
+                                os.path.basename(self.config["config_pathname"]), spath
+                            )
+                        )
+                    self.bind_mount(spath, s[1])
+                continue
+            raise NotImplementedError("complex mounts for non-containers")
 
-        cmd = self.config.get("cmd", "").strip()
-        if not cmd and not image:
-            return None
-
-        if cmd:
-            if cmd.find("\n") == -1:
-                cmd += "\n"
-            cmdpath = os.path.join(self.rundir, "cmd.txt")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(cmd)
-                cmdfile.flush()
-
-        if image:
-            self.cmd_cont_name = f"{self.name}-{os.getpid()}"
-            cmds = [
-                self.get_exec_path("podman"),
-                "run",
-                f"--name={self.cmd_cont_name}",
-                # "--privileged",
-                "--rm",
-                f"--net=ns:/proc/{self.pid}/ns/net",
-            ] + podman_extra
-
-            if not cmd:
-                cmds.append(image)
-            else:
-                bash_path = self.get_cont_exec_path(image, "bash")
-                cmds += [
-                    # u'--entrypoint=""',
-                    f"--volume={cmdpath}:/tmp/cmds.txt",
-                    image,
-                    bash_path,
-                    "/tmp/cmds.txt",
-                ]
-        else:
-            bash_path = self.get_exec_path("bash")
-            cmds = [bash_path, cmdpath]
-
-        self.cmd_p = await self.async_popen(
-            cmds,
-            stdin=subprocess.DEVNULL,
-            stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
-            stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
-            # start_new_session=True,  # allows us to signal all children to exit
-        )
-        self.logger.debug(
-            "%s: popen %s => %s",
-            self,
-            cmds,
-            self.cmd_p.pid,
-        )
-        return self.cmd_p
+    # def child_exit(self, pid):
+    #     """Called back when cmd finishes executing."""
+    #     if self.cmd_p && self.cmd_p.pid == pid:
+    #         self.container_id = None
 
     def set_lan_addr(self, ifname, switch):
 
@@ -222,12 +173,192 @@ class L3Node(LinuxNamespace):
         other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     def delete(self):
-        if not self.cmd_cont_name:
-            self.cleanup_proc(self.cmd_p)
-        elif self.cmd_p and self.cmd_p.returncode is None:
-            rc, o, e = self.cmd_status(
-                [self.get_exec_path("podman"), "stop", self.cmd_cont_name]
-            )
+        self.cleanup_proc(self.cmd_p)
+        super().delete()
+
+
+class L3ContainerNode(L3Node):
+    def __init__(self, name=None, config=None, **kwargs):
+        """Create a linux Bridge."""
+
+        if not config:
+            config = {}
+
+        self.cont_exec_paths = {}
+        self.container_id = None
+        self.container_image = config.get("image", "")
+        self.extra_mounts = []
+        assert self.container_image
+
+        super().__init__(
+            name=name,
+            config=config,
+            # cgroup=True,
+            # pid=True,
+            # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],
+            **kwargs,
+        )
+
+    @property
+    def is_container(self):
+        return True
+
+    def get_exec_path(self, binary):
+        """Return the full path to the binary executable inside the image.
+
+        `binary` :: binary name or list of binary names
+        """
+        return self._get_exec_path(binary, self.cmd_status, self.cont_exec_paths)
+
+    def get_exec_path_host(self, binary):
+        """Return the full path to the binary executable on the host.
+
+        `binary` :: binary name or list of binary names
+        """
+        return self._get_exec_path(binary, super().cmd_status, self.exec_paths)
+
+    def cmd_status_host(self, cmd, **kwargs):
+        return super().cmd_status(cmd, **kwargs)
+
+    def cmd_raises_host(self, cmd, **kwargs):
+        _, stdout, _ = super().cmd_status(cmd, raises=True, **kwargs)
+        return stdout
+
+    def cmd_status(self, cmd, **kwargs):
+        podman_path = self.get_exec_path_host("podman")
+        if self.container_id:
+            cmds = [podman_path, "exec", self.container_id]
+        else:
+            cmds = [
+                podman_path,
+                "run",
+                "--rm",
+                f"--net=ns:/proc/{self.pid}/ns/net",
+                self.container_image,
+            ]
+        if not isinstance(cmd, str):
+            cmds += cmd
+        else:
+            # Make sure the code doesn't think `cd` will work.
+            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
+            cmds += ["/bin/bash", "-c", cmd]
+
+        return self._cmd_status(cmds, **kwargs)
+
+    def tmpfs_mount(self, inner):
+        self.logger.debug("Mounting tmpfs on %s", inner)
+        self.cmd_raises("mkdir -p " + inner)
+        self.cmd_raises("mount -n -t tmpfs tmpfs " + inner)
+
+    def bind_mount(self, outer, inner):
+        self.logger.debug("Bind mounting %s on %s", outer, inner)
+        # self.cmd_raises("mkdir -p " + inner)
+        self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
+
+    def mount_volumes_args(self):
+        args = []
+        if "volumes" not in self.config:
+            return args
+        for m in self.config["volumes"]:
+            if isinstance(m, str):
+                args.append("--volume=" + m)
+                continue
+            margs = ["type=" + m["type"]]
+            for k, v in m.items():
+                if k == "type":
+                    continue
+                if v:
+                    margs.append("{}={}", k, v)
+                else:
+                    margs.append("{}", k)
+            args.append("--mount=" + ",".join(margs))
+        return args
+
+    async def run_cmd(self):
+        """Run the configured commands for this node"""
+
+        image = self.container_image
+        podman_extra = []
+        if "podman" in self.config:
+            podman_extra = self.config["podman"].get("extra_args", "")
+            podman_extra = [x.strip() for x in podman_extra]
+
+        #
+        # Get the commands to run.
+        #
+        cmd = self.config.get("cmd", "").strip()
+        if not cmd and not image:
+            return None
+
+        #
+        # Write commands to run to a file.
+        #
+        if cmd:
+            if cmd.find("\n") == -1:
+                cmd += "\n"
+            cmdpath = os.path.join(self.rundir, "cmd.txt")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(cmd)
+                cmdfile.flush()
+
+        self.container_id = f"{self.name}-{os.getpid()}"
+        cmds = [
+            self.get_exec_path_host("podman"),
+            "run",
+            f"--name={self.container_id}",
+            # "--privileged",
+            "--rm",
+            f"--net=ns:/proc/{self.pid}/ns/net",
+        ] + podman_extra
+
+        # Mount volumes
+        if "volumes" in self.config:
+            cmds += ["--volume=" + m for m in self.config["volumes"]]
+
+        if not cmd:
+            cmds.append(image)
+        else:
+            bash_path = self.get_exec_path("bash")
+            cmds += [
+                # u'--entrypoint=""',
+                f"--volume={cmdpath}:/tmp/cmds.txt",
+                image,
+                bash_path,
+                "/tmp/cmds.txt",
+            ]
+
+        self.cmd_p = await self.async_popen(
+            cmds,
+            stdin=subprocess.DEVNULL,
+            stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
+            stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
+            # start_new_session=True,  # allows us to signal all children to exit
+        )
+
+        self.logger.debug(
+            "%s: popen %s => %s",
+            self,
+            cmds,
+            self.cmd_p.pid,
+        )
+
+        return self.cmd_p
+
+    def cmd_completed(self, future):
+        try:
+            n = future.result()
+            self.container_id = None
+            self.logger.info("%s: cmd completed result: %s", self, n)
+        except asyncio.CancelledError:
+            # Should we stop the container if we have one?
+            self.logger.info("%s: cmd.wait() canceled", future)
+
+    def delete(self):
+        if self.container_id:
+            if self.cmd_p and self.cmd_p.returncode is None:
+                rc, o, e = self.cmd_status_host(
+                    [self.get_exec_path_host("podman"), "stop", self.container_id]
+                )
             if rc:
                 self.logger.warning(
                     "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
@@ -274,7 +405,11 @@ class Micronet(BaseMicronet):
     def add_l3_node(self, name, config, **kwargs):
         """Add a node to micronet."""
 
-        return super().add_host(name, cls=L3Node, unet=self, config=config, **kwargs)
+        if "image" in config:
+            cls = L3ContainerNode
+        else:
+            cls = L3Node
+        return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
 
     def add_l3_switch(self, name, config, **kwargs):
         """Add a switch to micronet."""

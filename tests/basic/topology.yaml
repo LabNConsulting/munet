@@ -21,6 +21,8 @@ topology:
         - to: "r3"
           name: "p2p1"
           match: 1
+          jitter: .300
+          delay: .030
         - to: "r3"
           ip: "192.168.202.0/31"
           name: "p2p2"

@@ -23,7 +23,6 @@ import asyncio
 import functools
 import logging
 import logging.config
-import os
 import signal
 import subprocess
 import sys
@@ -32,6 +31,7 @@ import tempfile
 from . import cli
 from . import parser
 from .cleanup import cleanup_previous
+from .native import L3Node
 from .native import to_thread
 
 
@@ -136,7 +136,7 @@ async def async_main(args, unet):
                 p = await node.run_cmd()
                 procs.append(p)
                 task = asyncio.create_task(p.wait(), name=f"Node-{node.name}-cmd")
-                task.add_done_callback(functools.partial(log_cmd_result, node))
+                task.add_done_callback(functools.partial(L3Node.cmd_complete, node))
                 tasks.append(task)
 
         # tasks = []
@@ -189,8 +189,8 @@ def main(*args):
     global logger
     logger = logging.getLogger("main")
 
-    config, fname = parser.get_config(args.config)
-    logger.info("Loaded config from %s/%s", os.getcwd(), fname)
+    config = parser.get_config(args.config)
+    logger.info("Loaded config from %s", config["config_pathname"])
     if not config["topology"]["nodes"]:
         logger.critical("No nodes defined in config file")
         return 1
@@ -198,12 +198,13 @@ def main(*args):
     if not args.no_cleanup:
         cleanup_previous()
 
-    # unet = parser.build_topology(config, logger, args.rundir)
+    # Setup the namespaces and network addressing.
     unet = parser.build_topology(config, rundir=args.rundir)
     logger.info("Topology up: rundir: %s", unet.rundir)
 
     status = 2
     try:
+        # Executes the cmd for each node.
         status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
         logger.info("Exiting, received KeyboardInterrupt")

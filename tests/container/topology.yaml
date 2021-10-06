@@ -12,5 +12,3 @@ topology:
       connections: ["net0", "r1"]
       cmd: |
         tail -f /dev/null
-
-        # ip addr

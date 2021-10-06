@@ -43,8 +43,8 @@ def find_matching_net_config(name, cconf, oconf):
     return None
 
 
-def get_config(fname, basename="topology", search=None, logf=logging.debug):
-    if not fname:
+def get_config(pathname=None, basename="topology", search=None, logf=logging.debug):
+    if not pathname:
         if not search:
             search = [os.getcwd()]
         elif isinstance(search, str):
@@ -55,31 +55,33 @@ def get_config(fname, basename="topology", search=None, logf=logging.debug):
                 'searching in "{}" for "{}".{{yaml, toml, json}}'.format(d, basename),
             )
             for ext in ("yaml", "toml", "json"):
-                fname = os.path.join(d, basename + "." + ext)
-                if os.path.exists(fname):
-                    logf("%s", 'Found "{}"'.format(fname))
+                pathname = os.path.join(d, basename + "." + ext)
+                if os.path.exists(pathname):
+                    logf("%s", 'Found "{}"'.format(pathname))
                     break
             else:
                 continue
             break
         else:
             raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
-    _, ext = fname.rsplit(".", 1)
+    _, ext = pathname.rsplit(".", 1)
     if ext == "json":
         import json  # pylint: disable=C0415
 
-        config = json.load(open(fname, encoding="utf-8"))
+        config = json.load(open(pathname, encoding="utf-8"))
     elif ext == "toml":
         import toml  # pylint: disable=C0415
 
-        config = toml.load(fname)
+        config = toml.load(pathname)
     elif ext == "yaml":
         import yaml  # pylint: disable=C0415
 
-        config = yaml.safe_load(open(fname, encoding="utf-8"))
+        config = yaml.safe_load(open(pathname, encoding="utf-8"))
     else:
-        config = {}
-    return config, fname
+        raise ValueError("Filename does not end with (.json|.toml|.yaml)")
+
+    config["config_pathname"] = pathname
+    return config
 
 
 def setup_logging(args):
@@ -97,11 +99,14 @@ def setup_logging(args):
             if args.verbose:
                 print("PRELOG: " + msg % p, **k, file=sys.stderr)
 
-        config, fname = get_config(args.log_config, "logconf", search, logf=logf)
+        config = get_config(args.log_config, "logconf", search, logf=logf)
+        pathname = config["config_pathname"]
+        del config["config_pathname"]
+
         if args.verbose:
             config["handlers"]["console"]["level"] = "DEBUG"
         logging.config.dictConfig(config)
-        logging.info("Loaded logging config %s", fname)
+        logging.info("Loaded logging config %s", pathname)
     finally:
         os.chdir(old)
 
@@ -110,7 +115,12 @@ def build_topology(config=None, logger=None, rundir=None):
     unet = Micronet(logger=logger, rundir=rundir)
 
     if not config:
-        config, fname = get_config(None)
+        config = get_config(basename="topology")
+
+    if config:
+        unet.config = config
+        unet.config_pathname = config["config_pathname"]
+
     if "topology" not in config:
         return unet
 
