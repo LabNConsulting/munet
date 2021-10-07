@@ -21,13 +21,11 @@ topology:
           name: "p2p0"
         - to: "r3"
           name: "p2p1"
-          match: 1
-          jitter: .300
-          delay: .030
+          remote-name: "eth1"
         - to: "r3"
           ip: "192.168.202.0/31"
           name: "p2p2"
-          match: 2
+          remote-name: "eth2"
       image: localhost/morn/ffd:latest-amd64
       podman:
         extra_args: []
@@ -38,10 +36,10 @@ topology:
       connections:
         - to: "net1"
         - to: "r2"
-          match: 1
+          remote-name: "p2p1"
         - to: "r2"
           ip: "192.168.202.1/31"
-          match: 2
+          remote-name: "p2p2"
       cmd: |
         stat -f -c %T /sys/fs/cgroup
         ip addr show

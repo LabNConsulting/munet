@@ -32,14 +32,17 @@ def find_matching_net_config(name, cconf, oconf):
     oconnections = oconf.get("connections", None)
     if not oconnections:
         return {}
-    match = cconf.get("match", None)
-    for conn in oconnections:
-        if isinstance(conn, str):
-            if conn == name:
+    rname = cconf.get("remote-name", None)
+    for oconn in oconnections:
+        if isinstance(oconn, str):
+            if oconn == name:
                 return {}
             continue
-        if conn["to"] == name and match == conn.get("match", None):
-            return conn
+        if oconn["to"] == name:
+            if not rname:
+                return oconn
+            if rname == oconn.get("name", None):
+                return oconn
     return None
 
 
