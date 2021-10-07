@@ -69,7 +69,7 @@ class L3Bridge(Bridge):
         """Create a linux Bridge."""
 
         self.unet = unet
-        super().__init__(name, unet=unet, logger=logger)
+        super().__init__(name=name, unet=unet, logger=logger)
 
         self.config = config if config else {}
         ip = get_ip_network(self.config)
@@ -98,7 +98,7 @@ class L3Node(LinuxNamespace):
         self.container_id = ""
         self.config = config if config else {}
 
-        super().__init__(name, **kwargs)
+        super().__init__(name=name, **kwargs)
 
         # Setup node's networking
         if ip := get_ip_interface(self.config):

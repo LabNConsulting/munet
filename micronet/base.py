@@ -92,7 +92,7 @@ class Commander:
 
     tmux_wait_gen = 0
 
-    def __init__(self, name, logger=None):
+    def __init__(self, name, logger=None, **kwargs):
         """Create a Commander."""
         self.name = name
         self.last = None
@@ -104,6 +104,8 @@ class Commander:
             self.logger = logging.getLogger(__name__ + ".commander." + name)
         else:
             self.logger = logger
+
+        super().__init__()
 
     @property
     def is_container(self):
@@ -462,7 +464,35 @@ class Commander:
         pass
 
 
-class LinuxNamespace(Commander):
+class InterfaceMixin:
+    def __init__(self, **kwargs):
+        self.intf_addrs = {}
+        self.next_intf_index = 0
+        self.basename = "eth"
+        # self.basename = name + "-eth"
+        super().__init__()
+
+    @property
+    def intfs(self):
+        return self.intf_addrs.keys()
+
+    def set_intf_basename(self, basename):
+        self.basename = basename
+
+    def get_next_intf_name(self):
+        while True:
+            ifname = self.basename + str(self.next_intf_index)
+            self.next_intf_index += 1
+            if ifname not in self.intf_addrs:
+                break
+        return ifname
+
+    def register_interface(self, ifname):
+        if ifname not in self.intf_addrs:
+            self.intf_addrs[ifname] = None
+
+
+class LinuxNamespace(Commander, InterfaceMixin):
     """
     A linux Namespace.
 
@@ -504,14 +534,11 @@ class LinuxNamespace(Commander):
                 passed to `mkdir -p`.
             logger: Passed to superclass.
         """
-        super(LinuxNamespace, self).__init__(name, logger)
+        super().__init__(name=name, logger=logger)
 
         self.logger.debug("%s: Creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
-
-        self.intf_addrs = {}
-        self.next_intf_index = 0
 
         nslist = []
         # cmd = [] if os.geteuid() == 0 else ["/usr/bin/sudo"]
@@ -664,10 +691,6 @@ class LinuxNamespace(Commander):
         self.ip_path = self.get_exec_path_host("ip")
         cmdf(self, [self.ip_path, "link", "set", "lo", "up"])
 
-    @property
-    def intfs(self):
-        return self.intf_addrs.keys()
-
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
         self.cmd_raises("mkdir -p " + inner)
@@ -744,15 +767,6 @@ class LinuxNamespace(Commander):
         self.logger.debug("%s: new CWD %s", self, cwd)
         self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
-    def get_next_intf_name(self):
-        ifname = self.name + "-eth" + str(self.next_intf_index)
-        self.next_intf_index += 1
-        return ifname
-
-    def register_interface(self, ifname):
-        if ifname not in self.intf_addrs:
-            self.intf_addrs[ifname] = None
-
     def cleanup_proc(self, p):
         if not p or p.returncode is not None:
             return None
@@ -800,14 +814,12 @@ class SharedNamespace(Commander):
             name: Internal name for the namespace.
             pid: PID of the process to share with.
         """
-        super(SharedNamespace, self).__init__(name, logger)
+        super().__init__(name=name, logger=logger)
 
         self.logger.debug("%s: Creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
         self.pid = pid
-        self.intfs = []
-        self.next_intf_index = 0
 
         self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
         self.set_pre_cmd(self.base_pre_cmd)
@@ -822,17 +834,8 @@ class SharedNamespace(Commander):
         self.logger.debug("%s: new CWD %s", self, cwd)
         self.set_pre_cmd(self.base_pre_cmd + ["--wd=" + cwd])
 
-    def get_next_intf_name(self):
-        ifname = self.name + "-eth" + str(self.next_intf_index)
-        self.next_intf_index += 1
-        return ifname
 
-    def register_interface(self, ifname):
-        if ifname not in self.intfs:
-            self.intfs.append(ifname)
-
-
-class Bridge(SharedNamespace):
+class Bridge(SharedNamespace, InterfaceMixin):
     """
     A linux bridge.
     """
@@ -845,13 +848,15 @@ class Bridge(SharedNamespace):
         cls.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, unet=None, logger=None):
+    def __init__(self, name=None, unet=None, logger=None, **kwargs):
         """Create a linux Bridge."""
 
         self.id = self._get_next_id()
         if not name:
             name = "br{}".format(self.id)
-        super(Bridge, self).__init__(name, unet.pid, logger)
+        super().__init__(name=name, pid=unet.pid, logger=logger, **kwargs)
+
+        self.set_intf_basename(self.name + "-eth")
 
         self.unet = unet
 
@@ -905,7 +910,7 @@ class BaseMicronet(LinuxNamespace):
         self.macs = {}
         self.rmacs = {}
 
-        super().__init__("micronet", mount=True, net=True, uts=True, **kwargs)
+        super().__init__(name="micronet", mount=True, net=True, uts=True, **kwargs)
 
         # this is for testing purposes do not use
         if not BaseMicronet.g_unet:
@@ -991,18 +996,24 @@ class BaseMicronet(LinuxNamespace):
         else:
             switch = self.switches[name1]
             host = self.hosts[name2]
+            lifname = "i1{:x}".format(switch.pid)
+            rifname = "i1{:x}".format(host.pid)
 
             assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
             self.cmd_raises_host(
-                f"ip link add {if1} type veth peer name {if2} netns {host.pid}"
+                f"ip link add {lifname} type veth peer name {rifname} netns {host.pid}"
             )
-            self.cmd_raises_host(f"ip link set {if1} netns {switch.pid}")
+            self.cmd_raises_host(f"ip link set {lifname} netns {switch.pid}")
+            switch.cmd_raises_host(f"ip link set {lifname} name {if1}")
+            host.cmd_raises_host(f"ip link set {rifname} name {if2}")
+
             switch.register_interface(if1)
             host.register_interface(if2)
-            self.cmd_raises_host(f"ip link set {if1} master {switch.name}")
-            self.cmd_raises_host(f"ip link set {if1} up")
+
+            switch.cmd_raises_host(f"ip link set {if1} master {switch.name}")
+            switch.cmd_raises_host(f"ip link set {if1} up")
             host.cmd_raises_host(f"ip link set {if2} up")
 
         # Cache the MAC values, and reverse mapping

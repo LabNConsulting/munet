@@ -9,7 +9,7 @@ topology:
   nodes:
     r1:
       # Simple config
-      connections: ["net0", "net1", "r2"]
+      connections: ["net0:xyz0", "net1", "r2"]
       cmd: |
         ip addr show
         tail -f /dev/null

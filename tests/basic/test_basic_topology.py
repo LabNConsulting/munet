@@ -27,8 +27,10 @@ def test_basic_topology(unet):
 
 
 def test_basic_ping(unet):
-    logging.info("hosts: %s", unet.hosts.keys())
-    logging.info("interfaces: %s", unet.hosts["r2"].intf_addrs.keys())
-    other_ip = unet.hosts["r2"].intf_addrs["r2-eth0"].ip
+    other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
     o = unet.hosts["r1"].cmd_raises(f"ping -w1 -c1 {other_ip}")
-    logging.info("ping output: %s", o)
+    logging.info("ping r2 output: %s", o)
+
+    other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
+    o = unet.hosts["r2"].cmd_raises(f"ping -w1 -c1 {other_ip}")
+    logging.info("ping r1 output: %s", o)

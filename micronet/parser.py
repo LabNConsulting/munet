@@ -144,7 +144,10 @@ def build_topology(config=None, logger=None, rundir=None):
         for cconf in nconf["connections"]:
             # Replace string only with a dictionary
             if isinstance(cconf, str):
-                cconf = {"to": cconf}
+                cconf = cconf.split(":", 1)
+                cconf = {"to": cconf[0]}
+                if len(cconf) == 2:
+                    cconf["name"] = cconf[1]
             # Allocate a name if not already assigned
             if "name" not in cconf:
                 cconf["name"] = node.get_next_intf_name()
