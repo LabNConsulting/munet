@@ -100,6 +100,8 @@ class L3Node(LinuxNamespace):
 
         super().__init__(name=name, **kwargs)
 
+        self.mount_volumes()
+
         # Setup node's networking
         if ip := get_ip_interface(self.config):
             self.loopback_ip = ipaddress.ip_interface(ip)
@@ -213,6 +215,11 @@ class L3Node(LinuxNamespace):
         self.logger.debug("%s: adding %s to other p2p intf %s", other, oipaddr, oifname)
         other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
+    async def async_delete(self):
+        self.logger.info("XXXASYNCDEL: %s L3Node", self)
+        self.cleanup_proc(self.cmd_p)
+        await super().async_delete()
+
     def delete(self):
         self.cleanup_proc(self.cmd_p)
         super().delete()
@@ -225,6 +232,7 @@ class L3ContainerNode(L3Node):
         if not config:
             config = {}
 
+        self.counter = 0
         self.cont_exec_paths = {}
         self.container_id = None
         self.container_image = config.get("image", "")
@@ -267,6 +275,7 @@ class L3ContainerNode(L3Node):
                 podman_path,
                 "run",
                 "--rm",
+                "--init",
                 f"--net=ns:/proc/{self.pid}/ns/net",
                 self.container_image,
             ]
@@ -308,10 +317,10 @@ class L3ContainerNode(L3Node):
         # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
 
-    def mount_volumes_args(self):
-        args = []
+    def mount_volumes(self):
         if "volumes" not in self.config:
-            return args
+            return
+        args = []
         for m in self.config["volumes"]:
             if isinstance(m, str):
                 args.append("--volume=" + m)
@@ -325,7 +334,9 @@ class L3ContainerNode(L3Node):
                 else:
                     margs.append("{}", k)
             args.append("--mount=" + ",".join(margs))
-        return args
+
+        # Need to work on a way to mount into live container too
+        self.extra_mounts += args
 
     async def run_cmd(self):
         """Run the configured commands for this node"""
@@ -361,13 +372,15 @@ class L3ContainerNode(L3Node):
             self.get_exec_path_host("podman"),
             "run",
             f"--name={self.container_id}",
+            "--init",
             # "--privileged",
-            "--rm",
+            # u"--rm",
             f"--net=ns:/proc/{self.pid}/ns/net",
         ] + podman_extra
 
         # Mount volumes
-        if "volumes" in self.config:
+        if self.extra_mounts:
+            cmds += self.extra_mounts
             cmds += ["--volume=" + m for m in self.config["volumes"]]
 
         if not cmd:
@@ -407,15 +420,45 @@ class L3ContainerNode(L3Node):
             # Should we stop the container if we have one?
             self.logger.info("%s: cmd.wait() canceled", future)
 
-    def delete(self):
+    async def async_delete(self):
+        self.counter += 1
+        self.logger.info("XXXASYNCDEL: %s: L3ContainerNode: %d", self, self.counter)
         if self.container_id:
-            if self.cmd_p and self.cmd_p.returncode is None:
+            if self.cmd_p and (rc := self.cmd_p.returncode) is None:
                 rc, o, e = self.cmd_status_host(
                     [self.get_exec_path_host("podman"), "stop", self.container_id]
                 )
-            if rc:
+            if rc and rc < 128:
                 self.logger.warning(
                     "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
+                )
+            # now remove the container
+            rc, o, e = self.cmd_status_host(
+                [self.get_exec_path_host("podman"), "rm", self.container_id]
+            )
+            if rc:
+                self.logger.warning(
+                    "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
+                )
+        await super().async_delete()
+
+    def delete(self):
+        if self.container_id:
+            if self.cmd_p and (rc := self.cmd_p.returncode) is None:
+                rc, o, e = self.cmd_status_host(
+                    [self.get_exec_path_host("podman"), "stop", self.container_id]
+                )
+            if rc and rc < 128:
+                self.logger.warning(
+                    "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
+                )
+            # now remove the container
+            rc, o, e = self.cmd_status_host(
+                [self.get_exec_path_host("podman"), "rm", self.container_id]
+            )
+            if rc:
+                self.logger.warning(
+                    "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
                 )
         super().delete()
 

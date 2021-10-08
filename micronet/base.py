@@ -30,6 +30,7 @@ import sys
 import tempfile
 import time as time_mod
 
+
 root_hostname = subprocess.check_output("hostname")
 
 # This allows us to cleanup any leftovers later on
@@ -460,9 +461,6 @@ class Commander:
 
         return pane_info
 
-    def delete(self):
-        pass
-
 
 class InterfaceMixin:
     def __init__(self, **kwargs):
@@ -651,10 +649,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # We do not want cmd_status in child classes (e.g., container) for the remaining
         # setup calls in this __init__ function.
         #
-        cmdf = LinuxNamespace.cmd_status
-        cmdf(self, f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
-        cmdf(self, "mount -t sysfs sysfs /sys")
-        cmdf(self, f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
+        self.cmd_status_host(f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
+        self.cmd_status_host("mount -t sysfs sysfs /sys")
+        self.cmd_status_host(f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
         # self.cmd_raises(
         #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
         #     skip_pre_cmd=True,
@@ -665,7 +662,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # Set the hostname to the namespace name
         if uts and set_hostname:
             # Debugging get the root hostname
-            cmdf(self, "hostname " + self.name)
+            self.cmd_status_host("hostname " + self.name)
             nroot = subprocess.check_output("hostname")
             if root_hostname != nroot:
                 result = self.p.poll()
@@ -683,13 +680,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 else:
                     self.bind_mount(s[0], s[1])
 
-        o = cmdf(self, "ls -l /proc/{}/ns".format(self.pid))
+        o = self.cmd_status_host("ls -l /proc/{}/ns".format(self.pid))
         self.logger.debug("namespaces:\n %s", o)
 
         # will cache the path, which is important in delete to avoid running a shell
         # which can hang during cleanup
         self.ip_path = self.get_exec_path_host("ip")
-        cmdf(self, [self.ip_path, "link", "set", "lo", "up"])
+        self.cmd_status_host([self.ip_path, "link", "set", "lo", "up"])
 
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
@@ -793,6 +790,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 return p
         return None
 
+    async def async_delete(self):
+        self.logger.info("XXXASYNCDEL: %s: LinuxNamespace", self)
+        LinuxNamespace.delete(self)
+
     def delete(self):
         self.logger.debug("%s: delete", self)
         self.cleanup_proc(self.p)
@@ -868,6 +869,10 @@ class Bridge(SharedNamespace, InterfaceMixin):
         self.cmd_raises(f"ip link set {name} up")
 
         self.logger.debug("%s: Created, Running", self)
+
+    async def async_delete(self):
+        self.logger.info("XXXASYNCDEL: %s: Bridge", self)
+        Bridge.delete(self)
 
     def delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
@@ -1042,28 +1047,51 @@ class BaseMicronet(LinuxNamespace):
 
         return self.macs[(name, ifname)]
 
+    async def _delete_link(self, lname):
+        rname, rif = self.links[lname][2:4]
+        host = self.hosts[rname]
+
+        self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
+        rc, o, e = host.cmd_status_host(
+            [self.ip_path, "link", "delete", rif],
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            warn=False,
+        )
+        if rc:
+            self.logger.error(
+                "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)
+            )
+
+    def _delete_links(self):
+        return asyncio.gather(*[self._delete_link(x) for x in self.links])
+
+    async def async_delete(self):
+        self.logger.debug("%s: ASYNC Deleting.", self)
+
+        ltask = self._delete_links()
+        htask = asyncio.gather(*[x.async_delete() for x in self.hosts.values()])
+        stask = asyncio.gather(*[x.async_delete() for x in self.switches.values()])
+        try:
+            # First delete links, then hosts and switches
+            await ltask
+            await asyncio.gather(htask, stask)
+        except Exception as error:
+            self.logger.error("%s: error deleting hosts and switches: %s", self, error)
+
+        self.links = {}
+        self.hosts = {}
+        self.switches = {}
+
+        self.logger.debug("%s: ASYNC Deleted.", self)
+        await super().async_delete()
+
     def delete(self):
         """Delete the micronet topology."""
 
         self.logger.debug("%s: Deleting.", self)
 
-        for lname, (_, _, rname, rif) in self.links.items():
-            host = self.hosts[rname]
-
-            self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
-
-            rc, o, e = host.cmd_status_host(
-                [self.ip_path, "link", "delete", rif],
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-                warn=False,
-            )
-            if rc:
-                self.logger.error(
-                    "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)
-                )
-
-        self.links = {}
+        asyncio.run(_delete_links())
 
         for host in self.hosts.values():
             try:

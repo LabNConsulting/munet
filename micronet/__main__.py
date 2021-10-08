@@ -75,6 +75,16 @@ class FailSignalError(BaseException):
     pass
 
 
+# async def forever():
+#     try:
+#         while True:
+#             await asyncio.sleep(3600)
+#             logger.critical("XXX done sleeping, looping")
+#     except asyncio.CancelledError:
+#         logger.critical("XXX canceled sleeping")
+#         return
+
+
 async def forever():
     while True:
         await asyncio.sleep(3600)
@@ -142,17 +152,17 @@ async def async_main(args, unet):
         # tasks = []
         if sys.stdin.isatty() and not args.no_cli:
             # Run an interactive CLI
-            coro = asyncio.create_task(to_thread(lambda: cli.cli(unet)))
-            tasks.append(coro)
+            task = asyncio.create_task(to_thread(lambda: cli.cli(unet)))
+            tasks.append(task)
         elif not args.no_wait:
             logger.info("Waiting on signal to exit")
-            coro = asyncio.create_task(forever())
-            tasks.append(coro)
+            task = asyncio.create_task(forever())
+            tasks.append(task)
         else:
             # Wait on our tasks
             logger.info("Waiting for all node cmd to complete")
-            coro = asyncio.gather(*tasks)
-        await coro
+            task = asyncio.gather(*tasks)
+        await task
     except asyncio.CancelledError as ex:
         logger.info("Exiting, task canceled: %s tasks: %s", ex, tasks)
         return 1
@@ -198,12 +208,13 @@ def main(*args):
     if not args.no_cleanup:
         cleanup_previous()
 
-    # Setup the namespaces and network addressing.
-    unet = parser.build_topology(config, rundir=args.rundir)
-    logger.info("Topology up: rundir: %s", unet.rundir)
-
-    status = 2
+    status = 4
     try:
+        # Setup the namespaces and network addressing.
+        unet = parser.build_topology(config, rundir=args.rundir)
+        logger.info("Topology up: rundir: %s", unet.rundir)
+
+        status = 3
         # Executes the cmd for each node.
         status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
@@ -211,10 +222,15 @@ def main(*args):
     except ExitSignalError as error:
         logger.info("Exiting, received ExitSignalError: %s", error)
     except Exception as error:
-        logger.info("Exiting, received unexpected exception %s", error, exc_info=True)
+        logger.info("Exiting, unexpected exception %s", error, exc_info=True)
 
-    logger.info("Deleting unet")
-    unet.delete()
+    try:
+        logger.info("ASYNC Deleting unet")
+        asyncio.run(unet.async_delete())
+    except Exception as error:
+        status = 2
+        logger.info("Deleting, unexpected exception %s", error, exc_info=True)
+
     return status
 
 
