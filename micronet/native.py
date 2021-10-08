@@ -32,10 +32,14 @@ from .base import LinuxNamespace
 from .base import cmd_error
 
 
-def get_ip_interface(c):
-    if "ip" in c and c["ip"] != "auto":
-        return ipaddress.ip_interface(c["ip"])
-    return None
+def get_loopback_ips(c, nid):
+    if "ip" in c and c["ip"]:
+        if c["ip"] == "auto":
+            return [ipaddress.ip_interface("10.255.0.0/32") + self.id]
+        if isinstance(c["ip"], str):
+            return [ipaddress.ip_interface(c["ip"])]
+        return [ipaddress.ip_interface(x) for x in c["ip"]]
+    return []
 
 
 def get_ip_network(c):
@@ -68,10 +72,11 @@ class L3Bridge(Bridge):
     def __init__(self, name=None, unet=None, logger=None, config=None):
         """Create a linux Bridge."""
 
-        self.unet = unet
         super().__init__(name=name, unet=unet, logger=logger)
 
         self.config = config if config else {}
+        self.unet = unet
+
         ip = get_ip_network(self.config)
         self.ip = ip if ip else make_ip_network("10.0.0.0/24", self.id)
         self.cmd_raises(f"ip addr add {self.ip} dev {name}")
@@ -90,36 +95,42 @@ class L3Node(LinuxNamespace):
     def __init__(self, name=None, unet=None, config=None, **kwargs):
         """Create a linux Bridge."""
 
-        self.id = self._get_next_ord()
-        if not name:
-            name = "r{}".format(self.id)
+        self.config = config if config else {}
+        config = self.config
 
         self.cmd_p = None
         self.container_id = ""
-        self.config = config if config else {}
+        self.id = int(config["id"]) if "id" in config else self._get_next_ord()
+        self.unet = unet
 
+        if not name:
+            name = "r{}".format(self.id)
         super().__init__(name=name, **kwargs)
 
         self.mount_volumes()
 
+        # -----------------------
         # Setup node's networking
-        if ip := get_ip_interface(self.config):
-            self.loopback_ip = ipaddress.ip_interface(ip)
-        else:
-            self.loopback_ip = ipaddress.ip_interface("10.255.0.0/32") + self.id
-        self.ip = self.loopback_ip.ip
+        # -----------------------
+
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
-        self.unet = unet
 
-        self.cmd_raises_host(f"ip addr add {self.loopback_ip} dev lo")
-        self.cmd_raises_host("ip link set lo up")
+        self.loopback_ip = None
+        self.loopback_ips = get_loopback_ips(self.config, self.id)
+        self.loopback_ip = self.loopback_ips[0] if self.loopback_ips else None
+        if self.loopback_ip:
+            self.cmd_raises_host(f"ip addr add {self.loopback_ip} dev lo")
+            self.cmd_raises_host("ip link set lo up")
+            for i, ip in enumerate(self.loopback_ips[1:]):
+                self.cmd_raises_host(f"ip addr add {ip} dev lo:{i}")
 
-        # Create rundir and arrange for future commands to run in it.
+        # -------------------
+        # Setup node's rundir
+        # -------------------
+
         self.rundir = os.path.join(unet.rundir, name)
         self.cmd_raises_host(f"mkdir -p {self.rundir}")
         self.set_cwd(self.rundir)
-
-        self.logger.debug("%s: node ip address %s", self, self.ip)
 
     def mount_volumes(self):
         if "volumes" not in self.config:
@@ -212,11 +223,12 @@ class L3Node(LinuxNamespace):
 
         self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
         self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+
         self.logger.debug("%s: adding %s to other p2p intf %s", other, oipaddr, oifname)
         other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     async def async_delete(self):
-        self.logger.info("XXXASYNCDEL: %s L3Node", self)
+        self.logger.debug("XXXASYNCDEL: %s L3Node", self)
         self.cleanup_proc(self.cmd_p)
         await super().async_delete()
 
@@ -232,7 +244,6 @@ class L3ContainerNode(L3Node):
         if not config:
             config = {}
 
-        self.counter = 0
         self.cont_exec_paths = {}
         self.container_id = None
         self.container_image = config.get("image", "")
@@ -421,8 +432,7 @@ class L3ContainerNode(L3Node):
             self.logger.info("%s: cmd.wait() canceled", future)
 
     async def async_delete(self):
-        self.counter += 1
-        self.logger.info("XXXASYNCDEL: %s: L3ContainerNode: %d", self, self.counter)
+        self.logger.debug("XXXASYNCDEL: %s: L3ContainerNode", self)
         if self.container_id:
             if self.cmd_p and (rc := self.cmd_p.returncode) is None:
                 rc, o, e = self.cmd_status_host(

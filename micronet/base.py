@@ -791,7 +791,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         return None
 
     async def async_delete(self):
-        self.logger.info("XXXASYNCDEL: %s: LinuxNamespace", self)
+        self.logger.debug("XXXASYNCDEL: %s: LinuxNamespace", self)
         LinuxNamespace.delete(self)
 
     def delete(self):
@@ -871,7 +871,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
         self.logger.debug("%s: Created, Running", self)
 
     async def async_delete(self):
-        self.logger.info("XXXASYNCDEL: %s: Bridge", self)
+        self.logger.debug("XXXASYNCDEL: %s: Bridge", self)
         Bridge.delete(self)
 
     def delete(self):
