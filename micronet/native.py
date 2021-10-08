@@ -42,6 +42,22 @@ def get_loopback_ips(c, nid):
     return []
 
 
+# Uneeded
+# def get_ip_config(cconfig, cname, remote_name=None):
+#     "Get custom IP config for a given connection"
+#     for c in cconfig:
+#         if isinstance(x, str):
+#             if c == cname:
+#                 return None
+#             continue
+#         if "to" not in c or c["to"] != cname:
+#             continue
+#         if remote_name and ("remote_name" not in c or c["remote_name"] != remote_name):
+#             continue
+#         return c["ip"] if "ip" in c else None
+#     return None
+
+
 def get_ip_network(c):
     if "ip" in c and c["ip"] != "auto":
         return ipaddress.ip_network(c["ip"])
@@ -199,33 +215,47 @@ class L3Node(LinuxNamespace):
     #     if self.cmd_p && self.cmd_p.pid == pid:
     #         self.container_id = None
 
-    def set_lan_addr(self, ifname, switch):
-
+    def set_lan_addr(self, cconf, switch):
         self.logger.debug(
             "%s: prefixlen of switch %s is %s", self, switch.name, switch.ip.prefixlen
         )
-        ipaddr = ipaddress.ip_interface(
-            (switch.ip.network_address + self.id, switch.ip.prefixlen)
-        )
+        if "ip" in cconf:
+            ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" else None
+        else:
+            ipaddr = ipaddress.ip_interface(
+                (switch.ip.network_address + self.id, switch.ip.prefixlen)
+            )
+        ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
         self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
-    def set_p2p_addr(self, ifname, other, oifname):
-        n = self.next_p2p_network
-        self.next_p2p_network = make_ip_network(n, 1)
+    def set_p2p_addr(self, cconf, other, occonf):
+        if "ip" in cconf:
+            ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf["ip"] else None
+            oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf["ip"] else None
+        else:
+            n = self.next_p2p_network
+            self.next_p2p_network = make_ip_network(n, 1)
 
-        ipaddr = ipaddress.ip_interface(n)
-        oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
+            ipaddr = ipaddress.ip_interface(n)
+            oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
+
+        ifname = cconf["name"]
+        oifname = occonf["name"]
 
         self.intf_addrs[ifname] = ipaddr
         other.intf_addrs[oifname] = oipaddr
 
-        self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
-        self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+        if ipaddr:
+            self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
+            self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
-        self.logger.debug("%s: adding %s to other p2p intf %s", other, oipaddr, oifname)
-        other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
+        if oipaddr:
+            self.logger.debug(
+                "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
+            )
+            other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     async def async_delete(self):
         self.logger.debug("XXXASYNCDEL: %s L3Node", self)
@@ -312,11 +342,13 @@ class L3ContainerNode(L3Node):
             a subprocess.Popen object.
         """
         cmds = self._get_podman_precmd(cmd)
-        return self._popen("popen", cmds, async_exec=False, **kwargs)[0]
+        return self._popen(
+            "popen", cmds, skip_pre_cmd=True, async_exec=False, **kwargs
+        )[0]
 
     def cmd_status(self, cmd, **kwargs):
         cmds = self._get_podman_precmd(cmd)
-        return self._cmd_status(cmds, **kwargs)
+        return self._cmd_status(cmds, skip_pre_cmd=True, **kwargs)
 
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
@@ -499,15 +531,20 @@ class Micronet(BaseMicronet):
             assert node1.name in self.hosts
             isp2p = True
 
-        if1 = c1["name"] if "name" in c1 else node1.get_next_intf_name()
-        if2 = c2["name"] if "name" in c2 else node2.get_next_intf_name()
+        if "name" not in c1:
+            c1["name"] = node1.get_next_intf_name()
+        if1 = c1["name"]
+
+        if "name" not in c2:
+            c2["name"] = node2.get_next_intf_name()
+        if2 = c2["name"]
 
         super().add_link(node1, node2, if1, if2)
 
         if isp2p:
-            node1.set_p2p_addr(if1, node2, if2)
+            node1.set_p2p_addr(c1, node2, c2)
         else:
-            node2.set_lan_addr(if2, node1)
+            node2.set_lan_addr(c2, node1)
 
     def add_l3_node(self, name, config, **kwargs):
         """Add a node to micronet."""
