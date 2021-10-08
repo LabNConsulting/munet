@@ -18,8 +18,8 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-import asyncio
 import argparse
+import asyncio
 import logging
 import os
 import pty
@@ -110,10 +110,38 @@ def doline(unet, line, writef):
     cmd = m.group(1)
     oargs = m.group(2) if m.group(2) else ""
 
+    def run_command(on_host):
+        if on_host:
+            hosts, cmd = host_cmd_split(unet, oargs)
+        else:
+            hosts, cmd = host_cmd_split(unet, line)
+        for host in hosts:
+            if len(hosts) > 1:
+                writef(
+                    "------ Host: %s type(%s) ------\n"
+                    % (host, str(type(unet.hosts[host])))
+                )
+
+            if sys.stdin.isatty() and not on_host:
+                spawn(unet, host, cmd)
+            else:
+                if on_host:
+                    cmdf = unet.hosts[host].cmd_status_host
+                else:
+                    cmdf = unet.hosts[host].cmd_status
+                rc, o, _ = cmdf(cmd, stderr=subprocess.STDOUT)
+                if rc:
+                    writef("*** non-zero exit status: %d\n" % rc)
+                writef(o)
+
+            if len(hosts) > 1:
+                writef("------- End: %s ------\n" % host)
+        writef("\n")
+
     if cmd in ("q", "quit"):
         return False
 
-    if cmd == "hosts":
+    if cmd in ("h", "hosts"):
         writef("%% hosts: %s\n" % " ".join(sorted(unet.hosts.keys())))
     elif cmd in ["term", "vtysh", "xterm"]:
         args = oargs.split()
@@ -128,43 +156,20 @@ def doline(unet, line, writef):
             elif cmd in ("x", "xterm"):
                 host.run_in_window("bash", forcex=True)
     elif cmd == "sh":
-        hosts, cmd = host_cmd_split(unet, oargs)
-        for host in hosts:
-            if len(hosts) > 1:
-                writef(
-                    "------ Host: %s type(%s) ------\n"
-                    % (host, str(type(unet.hosts[host])))
-                )
-            if sys.stdin.isatty():
-                spawn(unet, host, cmd)
-            else:
-                rc, o, _ = unet.hosts[host].cmd_status(cmd, stderr=subprocess.STDOUT)
-                if rc:
-                    writef("*** non-zero exit status: %d\n" % rc)
-                writef(o)
-            if len(hosts) > 1:
-                writef("------- End: %s ------\n" % host)
-        writef("\n")
-    elif cmd in ("h", "help"):
+        run_command(True)
+    elif cmd in ("help"):
         writef(
             """
 Commands:
   help                       :: this help
-  sh [hosts] <shell-command> :: execute <shell-command> on <host>
-  term [hosts]               :: open shell terminals for hosts
-  vtysh [hosts]              :: open vtysh terminals for hosts
-  [hosts] <vtysh-command>    :: execute vtysh-command on hosts\n\n"""
+  hosts                      :: list hosts
+  sh [hosts] <shell-command> :: execute <shell-command> on hosts
+  term [hosts]               :: open shell terminals on hosts
+  vtysh [hosts]      :: open vtysh terminals for hosts
+  [hosts] <command>  :: execute common-command on hosts\n\n"""
         )
     else:
-        hosts, cmd = host_cmd_split(unet, line)
-        for host in hosts:
-            if len(hosts) > 1:
-                writef("------ Host: %s ------\n" % host)
-            output = unet.hosts[host].cmd_legacy('vtysh -c "{}"'.format(cmd))
-            writef(output)
-            if len(hosts) > 1:
-                writef("------- End: %s ------\n" % host)
-        writef("\n")
+        run_command(False)
     return True
 
 
