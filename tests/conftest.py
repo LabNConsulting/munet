@@ -18,16 +18,18 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import logging
 import os
 import sys
 
 import pytest
 
-from micronet.cleanup import cleanup_current, cleanup_previous
+from micronet.base import BaseMicronet
+from micronet.cleanup import cleanup_current
+from micronet.cleanup import cleanup_previous
 from micronet.cli import cli
 from micronet.parser import build_topology
-from micronet.base import BaseMicronet
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -50,17 +52,61 @@ def session_autouse():
 def module_autouse(request):
     cwd = os.getcwd()
     sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("changing cwd from %s to %s", cwd, sdir)
+    logging.debug("conftest: changing cwd from %s to %s", cwd, sdir)
     os.chdir(sdir)
     yield
     os.chdir(cwd)
 
 
+def get_test_logdir():
+    """Get log directory relative pathname."""
+    xdist_worker = os.getenv("PYTEST_XDIST_WORKER", "")
+    mode = os.getenv("PYTEST_XDIST_MODE", "no")
+
+    # nodeid: all_protocol_startup/test_all_protocol_startup.py::test_router_running
+    nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
+    cur_test = nodeid.replace("[", "_").replace("]", "_")
+    path, testname = cur_test.split("::")
+    path = path[:-3].replace("/", ".")
+
+    # We use different logdir paths based on how xdist is running.
+    if mode == "each":
+        return os.path.join(path, testname, xdist_worker)
+    if mode == "load":
+        return os.path.join(path, testname)
+    assert mode in ("no", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
+    return path
+
+
 @pytest.fixture(scope="module")
-def unet():
-    _unet = build_topology()
+def rundir():
+    d = os.path.join("/tmp/unet-test", get_test_logdir())
+    logging.debug("conftest: rundir %s", d)
+    return d
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    logging.debug("conftest: got event loop")
+    yield loop
+    loop.close()
+
+
+@pytest.fixture(scope="module")
+async def unet(rundir):
+    _unet = build_topology(rundir=rundir)
+    tasks = await _unet.run()
+    logging.debug("conftest: containers running")
+
     yield _unet
-    _unet.delete()
+
+    # No one ever awaits these so cancel them
+    logging.debug("conftest: canceling container waits")
+    for task in tasks:
+        task.cancel()
+    await _unet.async_delete()
 
 
 # @pytest.hookimpl(hookwrapper=True)

@@ -18,19 +18,27 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import logging
 
+import pytest
 
-def test_basic_topology(unet):
-    logging.info("switches: %s", unet.switches)
-    logging.info("hosts: %s", unet.hosts)
+from micronet.parser import build_topology
 
 
-def test_basic_ping(unet):
+# All tests are coroutines
+pytestmark = pytest.mark.asyncio
+
+
+async def test_basic_ping(unet):
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
-    o = unet.hosts["r1"].cmd_raises(f"ping -w1 -c1 {other_ip}")
+    o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping r2 output: %s", o)
 
     other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
-    o = unet.hosts["r2"].cmd_raises(f"ping -w1 -c1 {other_ip}")
+    o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping r1 output: %s", o)
+
+    # useful for manually testing the CLI
+    # from micronet.cli import async_cli
+    # await async_cli(unet, title="First", prompt="primary> ")

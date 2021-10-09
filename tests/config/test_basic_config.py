@@ -24,6 +24,8 @@ import sys
 
 from subprocess import DEVNULL
 
+import pytest
+
 from micronet import Commander
 from micronet import cmd_error
 from micronet.__main__ import main
@@ -43,31 +45,35 @@ def check(p):
     logging.info("Success: %s", s)
 
 
-stdargs = [
-    "poetry",
-    "run",
-    "micronet",
-    "--no-cleanup",
-    "--no-cli",
-    "--no-wait",
-]
+@pytest.fixture
+def stdargs(rundir):
+    a = [
+        "poetry",
+        "run",
+        "micronet",
+        "--no-cleanup",
+        "--no-cli",
+        "--no-wait",
+        f"--rundir={rundir}",
+    ]
+    return a
 
 
-def test_load_default():
+def test_load_default(stdargs):
     p = commander.popen(stdargs)
     check(p)
 
 
-def test_load_yaml_config():
+def test_load_yaml_config(stdargs):
     p = commander.popen(stdargs + ["-c", "topology.yaml"])
     check(p)
 
 
-def test_load_toml_config():
+def test_load_toml_config(stdargs):
     p = commander.popen(stdargs + ["-c", "topology.toml"])
     check(p)
 
 
-def test_load_json_config():
+def test_load_json_config(stdargs):
     p = commander.popen(stdargs + ["-c", "topology.json"])
     check(p)

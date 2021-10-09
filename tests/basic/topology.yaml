@@ -12,6 +12,7 @@ topology:
       connections: ["net0:xyz0", "net1", "r2"]
       cmd: |
         ip addr show
+        which ping
         tail -f /dev/null
     r2:
       # More detailed connection config
@@ -31,6 +32,7 @@ topology:
         extra_args: []
       cmd: |
         ip addr show
+        which ping
         tail -f /dev/null
     r3:
       connections:

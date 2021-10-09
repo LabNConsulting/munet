@@ -21,7 +21,9 @@
 import importlib.resources
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 
 from copy import deepcopy
 
@@ -115,6 +117,10 @@ def setup_logging(args):
 
 
 def build_topology(config=None, logger=None, rundir=None):
+    if not rundir:
+        rundir = tempfile.mkdtemp(prefix="unet")
+    subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
+
     unet = Micronet(logger=logger, rundir=rundir)
 
     if not config:

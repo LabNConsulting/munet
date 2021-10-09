@@ -5,10 +5,19 @@ topology:
   nodes:
     r1:
       connections: ["net0", "r2"]
-      cmd: ip addr show
+      cmd: |
+        ip addr show
     r2:
       # image: ubuntu
-      image: localhost/morn/ffd:latest-amd64
+      image: docker.io/labn/docker-ci-test:20.04
       connections: ["net0", "r1"]
       cmd: |
+        ip addr show
         tail -f /dev/null
+      volumes:
+        - type: tmpfs
+          tmpfs-size: 512M
+          destination: /mytmp
+        - type: bind
+          src: /etc
+          destination: /mybind

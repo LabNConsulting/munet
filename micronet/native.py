@@ -29,13 +29,16 @@ import tempfile
 from .base import BaseMicronet
 from .base import Bridge
 from .base import LinuxNamespace
+from .base import Timeout
+from .base import acomm_error
 from .base import cmd_error
+from .base import get_exec_path_host
 
 
 def get_loopback_ips(c, nid):
     if "ip" in c and c["ip"]:
         if c["ip"] == "auto":
-            return [ipaddress.ip_interface("10.255.0.0/32") + self.id]
+            return [ipaddress.ip_interface("10.255.0.0/32") + nid]
         if isinstance(c["ip"], str):
             return [ipaddress.ip_interface(c["ip"])]
         return [ipaddress.ip_interface(x) for x in c["ip"]]
@@ -52,7 +55,8 @@ def get_loopback_ips(c, nid):
 #             continue
 #         if "to" not in c or c["to"] != cname:
 #             continue
-#         if remote_name and ("remote_name" not in c or c["remote_name"] != remote_name):
+#         if remote_name and ("remote_name" not in c or
+#             c["remote_name"] != remote_name):
 #             continue
 #         return c["ip"] if "ip" in c else None
 #     return None
@@ -162,7 +166,7 @@ class L3Node(LinuxNamespace):
                     if spath[0] == ".":
                         spath = os.path.abspath(
                             os.path.join(
-                                os.path.basename(self.config["config_pathname"]), spath
+                                os.path.dirname(self.config["config_pathname"]), spath
                             )
                         )
                     self.bind_mount(spath, s[1])
@@ -172,21 +176,24 @@ class L3Node(LinuxNamespace):
     async def run_cmd(self):
         """Run the configured commands for this node"""
 
+        self.logger.debug(
+            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
+        )
+
         cmd = self.config.get("cmd", "").strip()
-        if not cmd and not image:
+        if not cmd:
             return None
+        cmd += "\n"
+        cmdpath = os.path.join(self.rundir, "cmd.txt")
+        self.logger.debug("[cmdpath %s]", cmdpath)
+        with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+            cmdfile.write(cmd)
+            cmdfile.flush()
 
-        if cmd:
-            if cmd.find("\n") == -1:
-                cmd += "\n"
-            cmdpath = os.path.join(self.rundir, "cmd.txt")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(cmd)
-                cmdfile.flush()
-
-        bash_path = self.get_exec_path("bash")
+        # This command just takes too long
+        # bash_path = await self.async_get_exec_path("bash")
+        bash_path = "/bin/bash"
         cmds = [bash_path, cmdpath]
-
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,
@@ -195,7 +202,7 @@ class L3Node(LinuxNamespace):
             # start_new_session=True,  # allows us to signal all children to exit
         )
         self.logger.debug(
-            "%s: popen %s => %s",
+            "%s: async_popen %s => %s",
             self,
             cmds,
             self.cmd_p.pid,
@@ -208,7 +215,7 @@ class L3Node(LinuxNamespace):
             self.logger.info("%s: cmd completed result: %s", self, n)
         except asyncio.CancelledError:
             # Should we stop the container if we have one?
-            self.logger.info("%s: cmd.wait() canceled", future)
+            self.logger.debug("%s: cmd.wait() canceled", future)
 
     # def child_exit(self, pid):
     #     """Called back when cmd finishes executing."""
@@ -220,11 +227,10 @@ class L3Node(LinuxNamespace):
             "%s: prefixlen of switch %s is %s", self, switch.name, switch.ip.prefixlen
         )
         if "ip" in cconf:
-            ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" else None
+            ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" in cconf else None
         else:
-            ipaddr = ipaddress.ip_interface(
-                (switch.ip.network_address + self.id, switch.ip.prefixlen)
-            )
+            n = switch.ip
+            ipaddr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
         ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
@@ -258,16 +264,20 @@ class L3Node(LinuxNamespace):
             other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     async def async_delete(self):
-        self.logger.debug("XXXASYNCDEL: %s L3Node", self)
-        self.cleanup_proc(self.cmd_p)
+        if type(self) == L3Node:  # pylint: disable=C0123
+            self.logger.info("%s: node async deleting", self.name)
+        else:
+            self.logger.debug("%s: node async_delete", self.name)
+        await self.async_cleanup_proc(self.cmd_p)
         await super().async_delete()
 
     def delete(self):
-        self.cleanup_proc(self.cmd_p)
-        super().delete()
+        asyncio.run(L3Node.async_delete(self))
 
 
 class L3ContainerNode(L3Node):
+    "A node that runs a container image using podman"
+
     def __init__(self, name=None, config=None, **kwargs):
         """Create a linux Bridge."""
 
@@ -300,26 +310,43 @@ class L3ContainerNode(L3Node):
         """
         return self._get_exec_path(binary, self.cmd_status, self.cont_exec_paths)
 
+    async def async_get_exec_path(self, binary):
+        """Return the full path to the binary executable inside the image.
+
+        `binary` :: binary name or list of binary names
+        """
+        path = await self._async_get_exec_path(
+            binary, self.async_cmd_status, self.cont_exec_paths
+        )
+        return path
+
     def get_exec_path_host(self, binary):
         """Return the full path to the binary executable on the host.
 
         `binary` :: binary name or list of binary names
         """
-        return self._get_exec_path(binary, super().cmd_status, self.exec_paths)
+        return get_exec_path_host(binary)
 
-    def _get_podman_precmd(self, cmd):
-        podman_path = self.get_exec_path_host("podman")
+    def _get_podman_precmd(self, cmd, sudo=False, tty=False):
+        cmds = []
+        if sudo:
+            cmds.append(get_exec_path_host("sudo"))
+        cmds.append(get_exec_path_host("podman"))
         if self.container_id:
-            cmds = [podman_path, "exec", self.container_id]
+            cmds.append("exec")
+            if tty:
+                cmds.append("-it")
+            cmds.append(self.container_id)
         else:
-            cmds = [
-                podman_path,
+            cmds += [
                 "run",
                 "--rm",
                 "--init",
                 f"--net=ns:/proc/{self.pid}/ns/net",
-                self.container_image,
             ]
+            if tty:
+                cmds.append("-it")
+            cmds.append(self.container_image)
         if not isinstance(cmd, str):
             cmds += cmd
         else:
@@ -327,6 +354,9 @@ class L3ContainerNode(L3Node):
             assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
             cmds += ["/bin/bash", "-c", cmd]
         return cmds
+
+    def get_cmd_container(self, cmd, sudo=False, tty=False):
+        return " ".join(self._get_podman_precmd(cmd, sudo=sudo, tty=tty))
 
     def popen(self, cmd, **kwargs):
         """
@@ -341,41 +371,95 @@ class L3ContainerNode(L3Node):
         Returns:
             a subprocess.Popen object.
         """
-        cmds = self._get_podman_precmd(cmd)
-        return self._popen(
-            "popen", cmds, skip_pre_cmd=True, async_exec=False, **kwargs
-        )[0]
+        if not self.cmd_p:
+            return super().popen(cmd, **kwargs)
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+        kwargs["skip_pre_cmd"] = True
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
+        return self._popen("popen", cmds, async_exec=False, **kwargs)[0]
+
+    async def async_popen(self, cmd, **kwargs):
+        if not self.cmd_p:
+            return await super().async_popen(cmd, **kwargs)
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+        kwargs["skip_pre_cmd"] = True
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
+        p, _ = await self._popen("async_popen", cmds, async_exec=True, **kwargs)
+        return p
 
     def cmd_status(self, cmd, **kwargs):
-        cmds = self._get_podman_precmd(cmd)
-        return self._cmd_status(cmds, skip_pre_cmd=True, **kwargs)
+        if not self.cmd_p:
+            return super().cmd_status(cmd, **kwargs)
+        if tty := kwargs.get("tty", False):
+            skip_pre_cmd = False
+            del kwargs["tty"]
+        else:
+            skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        kwargs["skip_pre_cmd"] = True
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
+        cmds = self.cmd_get_cmd_list(cmds)
+        return self._cmd_status(cmds, **kwargs)
+
+    import pdb
+
+    async def async_cmd_status(self, cmd, **kwargs):
+        if not self.cmd_p:
+            return await super().async_cmd_status(cmd, **kwargs)
+        if tty := kwargs.get("tty", False):
+            skip_pre_cmd = False
+            del kwargs["tty"]
+        else:
+            skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        kwargs["skip_pre_cmd"] = True
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
+        cmds = self.cmd_get_cmd_list(cmds)
+        return await self._async_cmd_status(cmds, **kwargs)
 
     def tmpfs_mount(self, inner):
+        # eventually would be nice to support live mounting
+        assert not self.container_id
         self.logger.debug("Mounting tmpfs on %s", inner)
-        self.cmd_raises("mkdir -p " + inner)
-        self.cmd_raises("mount -n -t tmpfs tmpfs " + inner)
+        self.extra_mounts.append(f"--mount=type=tmpfs,destination={inner}")
 
     def bind_mount(self, outer, inner):
+        # eventually would be nice to support live mounting
+        assert not self.container_id
         self.logger.debug("Bind mounting %s on %s", outer, inner)
-        # self.cmd_raises("mkdir -p " + inner)
-        self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
+        self.extra_mounts.append(f"--mount=type=bind,src={outer},dst={inner}")
 
     def mount_volumes(self):
         if "volumes" not in self.config:
             return
+
         args = []
         for m in self.config["volumes"]:
             if isinstance(m, str):
-                args.append("--volume=" + m)
+                s = m.split(":", 1)
+                if len(s) == 1:
+                    args.append("--mount=type=tmpfs,destination=" + m)
+                else:
+                    spath = s[0]
+                    spath = os.path.abspath(
+                        os.path.join(
+                            os.path.dirname(self.unet.config["config_pathname"]), spath
+                        )
+                    )
+                    args.append(f"--mount=type=bind,src={spath},dst={s[1]}")
                 continue
             margs = ["type=" + m["type"]]
             for k, v in m.items():
                 if k == "type":
                     continue
                 if v:
-                    margs.append("{}={}", k, v)
+                    if k in ("src", "source"):
+                        v = os.path.abspath(
+                            os.path.join(
+                                os.path.dirname(self.unet.config["config_pathname"]), v
+                            )
+                        )
+                    margs.append(f"{k}={v}")
                 else:
-                    margs.append("{}", k)
+                    margs.append(f"{k}")
             args.append("--mount=" + ",".join(margs))
 
         # Need to work on a way to mount into live container too
@@ -384,6 +468,11 @@ class L3ContainerNode(L3Node):
     async def run_cmd(self):
         """Run the configured commands for this node"""
 
+        self.logger.debug("%s: starting container", self.name)
+        self.logger.debug(
+            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
+        )
+
         image = self.container_image
         podman_extra = []
         if "podman" in self.config:
@@ -391,45 +480,46 @@ class L3ContainerNode(L3Node):
             podman_extra = [x.strip() for x in podman_extra]
 
         #
-        # Get the commands to run.
+        # Write commands to run to a file (if any).
         #
         cmd = self.config.get("cmd", "").strip()
-        if not cmd and not image:
-            return None
-
-        #
-        # Write commands to run to a file.
-        #
         if cmd:
+            # This command just takes too long
+            # bash_path = await self.async_get_exec_path("bash")
+            bash_path = "/bin/bash"
             if cmd.find("\n") == -1:
                 cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.txt")
+            self.logger.debug("[cmdpath %s]", cmdpath)
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(cmd)
                 cmdfile.flush()
 
-        bash_path = self.get_exec_path("bash")
-
         self.container_id = f"{self.name}-{os.getpid()}"
         cmds = [
-            self.get_exec_path_host("podman"),
+            get_exec_path_host("podman"),
             "run",
-            f"--name={self.container_id}",
             "--init",
-            # "--privileged",
-            # u"--rm",
+            f"--name={self.container_id}",
             f"--net=ns:/proc/{self.pid}/ns/net",
+            "--cap-add=SYS_ADMIN",
+            "--cap-add=NET_ADMIN",
+            "--cap-add=NET_RAW",
+            f"--hostname={self.name}",
+            # We can't use --rm here b/c podman fails on "stop".
+            # u"--rm",
         ] + podman_extra
 
         # Mount volumes
         if self.extra_mounts:
             cmds += self.extra_mounts
-            cmds += ["--volume=" + m for m in self.config["volumes"]]
+            # ucmds += ["--volume=" + m for m in self.config["volumes"]]
 
         if not cmd:
             cmds.append(image)
         else:
             cmds += [
+                # How can we override this?
                 # u'--entrypoint=""',
                 f"--volume={cmdpath}:/tmp/cmds.txt",
                 image,
@@ -443,14 +533,34 @@ class L3ContainerNode(L3Node):
             stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
             stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
             # start_new_session=True,  # allows us to signal all children to exit
+            skip_pre_cmd=True,
         )
 
-        self.logger.debug(
-            "%s: popen %s => %s",
-            self,
-            cmds,
-            self.cmd_p.pid,
-        )
+        self.logger.debug("%s: async_popen => %s", self, self.cmd_p.pid)
+
+        # ---------------------------------------
+        # Now let's wait until container shows up
+        # ---------------------------------------
+        timeout = Timeout(30)
+        while self.cmd_p.returncode is None and not timeout.is_expired():
+            o = await self.async_cmd_raises_host(
+                f"podman ps -q -f name={self.container_id}"
+            )
+            if o.strip():
+                break
+            elapsed = int(timeout.elapsed())
+            if elapsed <= 3:
+                await asyncio.sleep(0.1)
+            else:
+                self.logger.info("%s: run_cmd taking more than %ss", self, elapsed)
+                await asyncio.sleep(1)
+        if self.cmd_p.returncode:
+            self.logger.error(
+                "%s: run_cmd failed: %s", self, await acomm_error(self.cmd_p)
+            )
+        assert self.cmd_p.returncode is None
+
+        self.logger.info("%s: started container", self.name)
 
         return self.cmd_p
 
@@ -458,51 +568,42 @@ class L3ContainerNode(L3Node):
         try:
             n = future.result()
             self.container_id = None
-            self.logger.info("%s: cmd completed result: %s", self, n)
+            self.logger.info("%s: contianer cmd completed result: %s", self, n)
         except asyncio.CancelledError:
             # Should we stop the container if we have one?
-            self.logger.info("%s: cmd.wait() canceled", future)
+            self.logger.debug("%s: container cmd.wait() canceled", future)
 
     async def async_delete(self):
-        self.logger.debug("XXXASYNCDEL: %s: L3ContainerNode", self)
+        if type(self) == L3ContainerNode:  # pylint: disable=C0123
+            self.logger.info("%s: container async deleting", self.name)
+        else:
+            self.logger.debug("%s: container async delete", self.name)
+
         if self.container_id:
             if self.cmd_p and (rc := self.cmd_p.returncode) is None:
-                rc, o, e = self.cmd_status_host(
-                    [self.get_exec_path_host("podman"), "stop", self.container_id]
+                rc, o, e = await self.async_cmd_status_host(
+                    [get_exec_path_host("podman"), "stop", self.container_id]
                 )
             if rc and rc < 128:
                 self.logger.warning(
                     "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
                 )
             # now remove the container
-            rc, o, e = self.cmd_status_host(
-                [self.get_exec_path_host("podman"), "rm", self.container_id]
+            rc, o, e = await self.async_cmd_status_host(
+                [get_exec_path_host("podman"), "rm", self.container_id]
             )
             if rc:
                 self.logger.warning(
                     "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
                 )
+            else:
+                # It's gone
+                self.cmd_p = None
+        # From here on out we do not want our cmd_* overrides to take effect.
         await super().async_delete()
 
     def delete(self):
-        if self.container_id:
-            if self.cmd_p and (rc := self.cmd_p.returncode) is None:
-                rc, o, e = self.cmd_status_host(
-                    [self.get_exec_path_host("podman"), "stop", self.container_id]
-                )
-            if rc and rc < 128:
-                self.logger.warning(
-                    "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
-                )
-            # now remove the container
-            rc, o, e = self.cmd_status_host(
-                [self.get_exec_path_host("podman"), "rm", self.container_id]
-            )
-            if rc:
-                self.logger.warning(
-                    "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
-                )
-        super().delete()
+        asyncio.run(L3ContainerNode.async_delete(self))
 
 
 class Micronet(BaseMicronet):
@@ -559,3 +660,13 @@ class Micronet(BaseMicronet):
         """Add a switch to micronet."""
 
         return super().add_switch(name, cls=L3Bridge, config=config, **kwargs)
+
+    async def run(self):
+        tasks = []
+        run_nodes = [x for x in self.hosts.values() if hasattr(x, "run_cmd")]
+        await asyncio.gather(*[x.run_cmd() for x in run_nodes])
+        for node in run_nodes:
+            task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
+            # utask.add_done_callback(node.cmd_completed)
+            tasks.append(task)
+        return tasks

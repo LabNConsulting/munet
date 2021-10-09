@@ -75,16 +75,6 @@ class FailSignalError(BaseException):
     pass
 
 
-# async def forever():
-#     try:
-#         while True:
-#             await asyncio.sleep(3600)
-#             logger.critical("XXX done sleeping, looping")
-#     except asyncio.CancelledError:
-#         logger.critical("XXX canceled sleeping")
-#         return
-
-
 async def forever():
     while True:
         await asyncio.sleep(3600)
@@ -133,23 +123,8 @@ async def async_main(args, unet):
     setup_signals(tasks)
     try:
         if not args.topology_only:
+            tasks.extend(await unet.run())
 
-            def log_cmd_result(node, future):
-                try:
-                    n = future.result()
-                    logger.info("%s: cmd completed result: %s", node.name, n)
-                except asyncio.CancelledError:
-                    logger.info("%s: cmd.wait() canceled", future)
-
-            procs = []
-            for node in unet.hosts.values():
-                p = await node.run_cmd()
-                procs.append(p)
-                task = asyncio.create_task(p.wait(), name=f"Node-{node.name}-cmd")
-                task.add_done_callback(functools.partial(L3Node.cmd_completed, node))
-                tasks.append(task)
-
-        # tasks = []
         if sys.stdin.isatty() and not args.no_cli:
             # Run an interactive CLI
             task = asyncio.create_task(to_thread(lambda: cli.cli(unet)))
@@ -225,8 +200,8 @@ def main(*args):
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
 
     try:
-        logger.info("ASYNC Deleting unet")
-        asyncio.run(unet.async_delete())
+        logger.debug("ASYNC Deleting unet")
+        asyncio.run(unet.async_delete(), debug=True)
     except Exception as error:
         status = 2
         logger.info("Deleting, unexpected exception %s", error, exc_info=True)

@@ -23,6 +23,7 @@ import datetime
 import logging
 import os
 import re
+import readline
 import shlex
 import signal
 import subprocess
@@ -65,7 +66,10 @@ def cmd_error(rc, o, e):
 
 
 def proc_error(p, o, e):
-    args = p.args if isinstance(p.args, str) else " ".join(p.args)
+    if hasattr(p, "args"):
+        args = p.args if isinstance(p.args, str) else " ".join(p.args)
+    else:
+        args = ""
     s = f"rc {p.returncode} pid {p.pid}\n\targs: {args}"
     o = "\n\tstdout: " + o.strip() if o and o.strip() else ""
     e = "\n\tstderr: " + e.strip() if e and e.strip() else ""
@@ -80,11 +84,19 @@ def comm_error(p):
     return proc_error(p, *p.saved_output)
 
 
+async def acomm_error(p):
+    rc = p.returncode
+    assert rc is not None
+    if not hasattr(p, "saved_output"):
+        p.saved_output = await p.communicate()
+    return proc_error(p, *p.saved_output)
+
+
 def get_tmp_dir(uniq):
     return os.path.join(tempfile.mkdtemp(), uniq)
 
 
-class Commander:
+class Commander:  # pylint: disable=R0904
     """
     Commander.
 
@@ -95,6 +107,7 @@ class Commander:
 
     def __init__(self, name, logger=None, **kwargs):
         """Create a Commander."""
+        del kwargs  # deal with lint warning
         self.name = name
         self.last = None
         self.exec_paths = {}
@@ -136,7 +149,7 @@ class Commander:
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
-    def _get_exec_path(self, binary, cmdf, cache):
+    def _get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
         if isinstance(binary, str):
             bins = [binary]
         else:
@@ -151,12 +164,47 @@ class Commander:
                 return cache[b]
         return None
 
+    async def _async_get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
+        if isinstance(binary, str):
+            bins = [binary]
+        else:
+            bins = binary
+        for b in bins:
+            if b in cache:
+                return cache[b]
+
+            rc, output, _ = await cmdf("which " + b, warn=False)
+            if not rc:
+                cache[b] = os.path.abspath(output.strip())
+                return cache[b]
+        return None
+
+    async def async_get_exec_path(self, binary):
+        """Return the full path to the binary executable.
+
+        `binary` :: binary name or list of binary names
+        """
+        return await self._async_get_exec_path(
+            binary, self.async_cmd_status_host, self.exec_paths
+        )
+
     def get_exec_path(self, binary):
         """Return the full path to the binary executable.
 
         `binary` :: binary name or list of binary names
         """
         return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
+
+    def get_exec_path_host(self, binary):  # pylint: disable=R0201
+        """Return the full path to the binary executable.
+
+        If the object is actually a derived class (e.g., a container) this method will
+        return the exec path for the native namespace rather than the container. The
+        path is the one which the other xxx_host methods will use.
+
+        `binary` :: binary name or list of binary names
+        """
+        return get_exec_path_host(binary)
 
     def test(self, flags, arg):
         """Run test binary, with flags and arg"""
@@ -167,6 +215,11 @@ class Commander:
     def path_exists(self, path):
         """Check if path exists."""
         return self.test("-e", path)
+
+    def get_cmd_container(self, cmd, sudo=False, tty=False):
+        if sudo:
+            return "sudo " + cmd
+        return cmd
 
     def _get_cmd_str(self, cmd):
         if isinstance(cmd, str):
@@ -186,7 +239,7 @@ class Commander:
         return pre_cmd, cmd, defaults
 
     def _popen(self, method, cmd, skip_pre_cmd=False, async_exec=False, **kwargs):
-        if sys.version_info[0] >= 3 and not async_exec:
+        if not async_exec:
             defaults = {
                 "encoding": "utf-8",
                 "stdout": subprocess.PIPE,
@@ -270,49 +323,118 @@ class Commander:
             self, "async_popen_host", cmd, async_exec=True, **kwargs
         )[0]
 
-    def _cmd_status(
-        self, cmds, raises=False, warn=True, stdin=None, no_container=False, **kwargs
-    ):
-        """Execute a command."""
-
+    @staticmethod
+    def _cmd_status_input(stdin):
         pinput = None
         if isinstance(stdin, (bytes, str)):
             pinput = stdin
             stdin = subprocess.PIPE
+        return pinput, stdin
 
-        p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
-        stdout, stderr = p.communicate(input=pinput)
-        rc = p.wait()
-
-        # For debugging purposes.
-        self.last = (rc, actual_cmd, cmds, stdout, stderr)
-
+    def _cmd_status_finish(self, p, c, ac, o, e, raises, warn):
+        rc = p.returncode
+        self.last = (rc, ac, c, o, e)
         if rc:
             if warn:
-                self.logger.warning(
-                    "%s: proc failed: %s:", self, proc_error(p, stdout, stderr)
-                )
+                self.logger.warning("%s: proc failed: %s:", self, proc_error(p, o, e))
             if raises:
                 # error = Exception("stderr: {}".format(stderr))
                 # This annoyingly doesnt' show stderr when printed normally
-                error = subprocess.CalledProcessError(rc, actual_cmd)
-                error.stdout, error.stderr = stdout, stderr
+                error = subprocess.CalledProcessError(rc, ac)
+                error.stdout, error.stderr = o, e
                 raise error
+        return rc, o, e
 
-        return rc, stdout, stderr
+    def _cmd_status(self, cmds, raises=False, warn=True, stdin=None, **kwargs):
+        """Execute a command."""
+        pinput, stdin = self._cmd_status_input(stdin)
+        p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
+        o, e = p.communicate(pinput)
+        return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
-    def cmd_status(self, cmd, **kwargs):
+    async def _async_cmd_status(
+        self, cmds, raises=False, warn=True, stdin=None, text=None, **kwargs
+    ):
+        """Execute a command."""
+        pinput, stdin = Commander._cmd_status_input(stdin)
+        p, actual_cmd = self._popen(
+            "async_cmd_status", cmds, async_exec=True, stdin=stdin, **kwargs
+        )
+        p = await p
+
+        if text is False:
+            encoding = None
+        else:
+            encoding = kwargs.get("encoding", "utf-8")
+
+        if encoding is not None and isinstance(pinput, str):
+            pinput = pinput.encode(encoding)
+        o, e = await p.communicate(pinput)
+        if encoding is not None:
+            o = o.decode(encoding) if o is not None else o
+            e = e.decode(encoding) if e is not None else e
+        return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
+
+    def cmd_get_cmd_list(self, cmd):
         if not isinstance(cmd, str):
             cmds = cmd
         else:
             # Make sure the code doesn't think `cd` will work.
             assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
             cmds = ["/bin/bash", "-c", cmd]
+        return cmds
+
+    def cmd_status(self, cmd, **kwargs):
+        "Run given command returning status and outputs"
+        #
+        # This method serves as the basis for all derived sync cmd variations, so to
+        # override sync cmd behavior simply override this function and *not* the other
+        # variations, unless you are changing only that variation's behavior
+        #
+        cmds = self.cmd_get_cmd_list(cmd)
         return self._cmd_status(cmds, **kwargs)
+
+    def cmd_raises(self, cmd, **kwargs):
+        """Execute a command. Raise an exception on errors"""
+
+        _, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
+        return stdout
 
     def cmd_status_host(self, cmd, **kwargs):
         # Make sure the command runs on the host and not in any container.
         return Commander.cmd_status(self, cmd, **kwargs)
+
+    def cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return Commander.cmd_status(self, cmd, raises=True, **kwargs)
+
+    async def async_cmd_status(self, cmd, **kwargs):
+        #
+        # This method serves as the basis for all derived async cmd variations, so to
+        # override async cmd behavior simply override this function and *not* the other
+        # variations, unless you are changing only that variation's behavior
+        #
+        cmds = self.cmd_get_cmd_list(cmd)
+        return await self._async_cmd_status(cmds, **kwargs)
+
+    async def async_cmd_raises(self, cmd, **kwargs):
+        """Execute a command. Raise an exception on errors"""
+        if cmd == "echo foobar":
+            pdb.set_trace()
+
+        _, stdout, _ = await self.async_cmd_status(cmd, raises=True, **kwargs)
+        return stdout
+
+    async def async_cmd_status_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return await Commander.async_cmd_status(self, cmd, **kwargs)
+
+    async def async_cmd_raises_host(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        _, stdout, _ = await Commander.async_cmd_status(
+            self, cmd, raises=True, **kwargs
+        )
+        return stdout
 
     def cmd_legacy(self, cmd, **kwargs):
         """Execute a command with stdout and stderr joined, *IGNORES ERROR*."""
@@ -321,17 +443,6 @@ class Commander:
         defaults.update(kwargs)
         _, stdout, _ = self.cmd_status(cmd, raises=False, **defaults)
         return stdout
-
-    def cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors"""
-
-        rc, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
-        assert rc == 0
-        return stdout
-
-    def cmd_raises_host(self, cmd, **kwargs):
-        # Make sure the command runs on the host and not in any container.
-        return Commander.cmd_status(self, cmd, raises=True, **kwargs)
 
     # Run a command in a new window (gnome-terminal, screen, tmux, xterm)
     def run_in_window(
@@ -344,6 +455,7 @@ class Commander:
         forcex=False,
         new_window=False,
         tmux_target=None,
+        on_host=False,
     ):
         """
         Run a command in a new window (TMUX, Screen or XTerm).
@@ -369,10 +481,16 @@ class Commander:
             channel = "{}-wait-{}".format(os.getpid(), Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
 
-        sudo_path = self.get_exec_path_host(["sudo"])
-        nscmd = sudo_path + " " + self.pre_cmd_str + cmd
+        sudo_path = get_exec_path_host(["sudo"])
+
+        if not self.is_container or on_host:
+            # This is the command to execute to be inside the namespace.
+            nscmd = sudo_path + " " + self.pre_cmd_str + cmd
+        else:
+            nscmd = self.get_cmd_container(cmd, sudo=True, tty=True)
+
         if "TMUX" in os.environ and not forcex:
-            cmd = [self.get_exec_path_host("tmux")]
+            cmd = [get_exec_path_host("tmux")]
             if new_window:
                 cmd.append("new-window")
                 cmd.append("-P")
@@ -401,7 +519,7 @@ class Commander:
         elif "STY" in os.environ and not forcex:
             # wait for not supported in screen for now
             channel = None
-            cmd = [self.get_exec_path_host("screen")]
+            cmd = [get_exec_path_host("screen")]
             if not os.path.exists(
                 "/run/screen/S-{}/{}".format(os.environ["USER"], os.environ["STY"])
             ):
@@ -410,10 +528,10 @@ class Commander:
         elif "DISPLAY" in os.environ:
             # We need it broken up for xterm
             user_cmd = cmd
-            cmd = [self.get_exec_path_host("xterm")]
+            cmd = [get_exec_path_host("xterm")]
             if "SUDO_USER" in os.environ:
                 cmd = [
-                    self.get_exec_path_host("sudo"),
+                    get_exec_path_host("sudo"),
                     "-u",
                     os.environ["SUDO_USER"],
                 ] + cmd
@@ -456,7 +574,7 @@ class Commander:
 
         # Wait here if we weren't handed the channel to wait for
         if channel and wait_for is True:
-            cmd = [self.get_exec_path_host("tmux"), "wait", channel]
+            cmd = [get_exec_path_host("tmux"), "wait", channel]
             self.cmd_status(cmd, skip_pre_cmd=True)
 
         return pane_info
@@ -464,6 +582,7 @@ class Commander:
 
 class InterfaceMixin:
     def __init__(self, **kwargs):
+        del kwargs  # get rid of lint
         self.intf_addrs = {}
         self.next_intf_index = 0
         self.basename = "eth"
@@ -534,7 +653,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         """
         super().__init__(name=name, logger=logger)
 
-        self.logger.debug("%s: Creating", self)
+        self.logger.debug("%s: creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
 
@@ -579,7 +698,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         cmd.append(flags)
         if pid:
-            cmd.append(self.get_exec_path_host("tini"))
+            cmd.append(get_exec_path_host("tini"))
             cmd.append("-vvv")
         cmd.append("/bin/cat")
 
@@ -685,8 +804,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # will cache the path, which is important in delete to avoid running a shell
         # which can hang during cleanup
-        self.ip_path = self.get_exec_path_host("ip")
+        self.ip_path = get_exec_path_host("ip")
         self.cmd_status_host([self.ip_path, "link", "set", "lo", "up"])
+
+        self.logger.info("%s: created", self)
 
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
@@ -697,9 +818,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
         # self.cmd_raises("mkdir -p " + inner)
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
-
-    def get_exec_path_host(self, binary):
-        return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
 
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)
@@ -771,33 +889,60 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
         os.kill(-p.pid, signal.SIGTERM)
         try:
-            if isinstance(p, subprocess.Popen):
-                p.communicate(timeout=10)
-            else:
-                asyncio.wait_for(p.communicate(), timeout=10)
-        except (subprocess.TimeoutExpired, asyncio.TimeoutError):
+            assert isinstance(p, subprocess.Popen)
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
             self.logger.warning(
                 "%s: terminate timeout, killing %s (%s)", self, p.pid, p
             )
             os.kill(-p.pid, signal.SIGKILL)
             try:
-                if isinstance(p, subprocess.Popen):
-                    p.communicate(timeout=2)
-                else:
-                    asyncio.wait_for(p.communicate(), timeout=2)
-            except (subprocess.TimeoutExpired, asyncio.TimeoutError):
+                assert isinstance(p, subprocess.Popen)
+                p.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
                 self.logger.warning("%s: kill timeout", self)
                 return p
+            except Exception as error:
+                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+        except Exception as error:
+            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
         return None
 
-    async def async_delete(self):
-        self.logger.debug("XXXASYNCDEL: %s: LinuxNamespace", self)
-        LinuxNamespace.delete(self)
+    async def async_cleanup_proc(self, p):
+        if not p or p.returncode is not None:
+            return None
+
+        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+        os.kill(-p.pid, signal.SIGTERM)
+        try:
+            assert not isinstance(p, subprocess.Popen)
+            await asyncio.wait_for(p.communicate(), timeout=10)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
+            )
+            os.kill(-p.pid, signal.SIGKILL)
+            try:
+                assert not isinstance(p, subprocess.Popen)
+                await asyncio.wait_for(p.communicate(), timeout=2)
+            except asyncio.TimeoutError:
+                self.logger.warning("%s: kill timeout", self)
+                return p
+            except Exception as error:
+                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+        except Exception as error:
+            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
+        return None
 
     def delete(self):
-        self.logger.debug("%s: delete", self)
+        asyncio.run(LinuxNamespace.async_delete(self))
+
+    async def async_delete(self):
+        if type(self) == LinuxNamespace:  # pylint: disable=C0123
+            self.logger.info("%s: async linuxnamespace deleting", self.name)
         self.cleanup_proc(self.p)
         self.set_pre_cmd(["/bin/false"])
+        self.logger.info("%s: deleted", self.name)
 
 
 class SharedNamespace(Commander):
@@ -870,21 +1015,21 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         self.logger.debug("%s: Created, Running", self)
 
-    async def async_delete(self):
-        self.logger.debug("XXXASYNCDEL: %s: Bridge", self)
-        Bridge.delete(self)
-
     def delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
+        asyncio.run(Bridge.async_delete(self))
 
-        rc, o, e = self.cmd_status(
+    async def async_delete(self):
+        """Stop the bridge (i.e., delete the linux resources)."""
+
+        rc, o, e = await self.async_cmd_status(
             [self.ip_path, "link", "show", self.name],
             stdin=subprocess.DEVNULL,
             start_new_session=True,
             warn=False,
         )
         if not rc:
-            rc, o, e = self.cmd_status(
+            rc, o, e = await self.async_cmd_status(
                 [self.ip_path, "link", "delete", self.name],
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
@@ -898,7 +1043,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
                 cmd_error(rc, o, e),
             )
         else:
-            self.logger.debug("%s: Deleted.", self)
+            self.logger.info("%s: deleted", self.name)
 
 
 class BaseMicronet(LinuxNamespace):
@@ -914,6 +1059,10 @@ class BaseMicronet(LinuxNamespace):
         self.links = {}
         self.macs = {}
         self.rmacs = {}
+
+        self.cli_server = None
+        self.cli_sockpath = None
+        self.cli_histfile = None
 
         super().__init__(name="micronet", mount=True, net=True, uts=True, **kwargs)
 
@@ -934,10 +1083,11 @@ class BaseMicronet(LinuxNamespace):
         self.logger.debug("%s: add_host %s(%s)", self, cls.__name__, name)
 
         self.hosts[name] = cls(name, **kwargs)
+
         # Create a new mounted FS for tracking nested network namespaces creatd by the
         # user with `ip netns add`
 
-        # XXX add me back smarter to handle containers
+        # XXX why is this failing with podman???
         # self.hosts[name].tmpfs_mount("/run/netns")
 
         return self.hosts[name]
@@ -1052,7 +1202,7 @@ class BaseMicronet(LinuxNamespace):
         host = self.hosts[rname]
 
         self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
-        rc, o, e = host.cmd_status_host(
+        rc, o, e = await host.async_cmd_status_host(
             [self.ip_path, "link", "delete", rif],
             stdin=subprocess.DEVNULL,
             start_new_session=True,
@@ -1066,7 +1216,12 @@ class BaseMicronet(LinuxNamespace):
     def _delete_links(self):
         return asyncio.gather(*[self._delete_link(x) for x in self.links])
 
+    def delete(self):
+        """Delete the micronet topology."""
+        asyncio.run(BaseMicronet.async_delete(self))
+
     async def async_delete(self):
+        """Delete the micronet topology."""
         self.logger.debug("%s: ASYNC Deleting.", self)
 
         ltask = self._delete_links()
@@ -1077,44 +1232,26 @@ class BaseMicronet(LinuxNamespace):
             await ltask
             await asyncio.gather(htask, stask)
         except Exception as error:
-            self.logger.error("%s: error deleting hosts and switches: %s", self, error)
+            self.logger.error(
+                "%s: error deleting hosts and switches: %s", self, error, exc_info=True
+            )
 
         self.links = {}
         self.hosts = {}
         self.switches = {}
 
+        if self.cli_server:
+            self.cli_server.cancel()
+            self.cli_server = None
+        if self.cli_sockpath:
+            await self.async_cmd_status("rm -rf " + os.path.dirname(self.cli_sockpath))
+            self.cli_sockpath = None
+        if self.cli_histfile:
+            readline.write_history_file(histfile)
+            self.cli_histfile = None
+
         self.logger.debug("%s: ASYNC Deleted.", self)
         await super().async_delete()
-
-    def delete(self):
-        """Delete the micronet topology."""
-
-        self.logger.debug("%s: Deleting.", self)
-
-        asyncio.run(_delete_links())
-
-        for host in self.hosts.values():
-            try:
-                host.delete()
-            except Exception as error:
-                self.logger.error(
-                    "%s: error while deleting host %s: %s", self, host, error
-                )
-
-        self.hosts = {}
-
-        for switch in self.switches.values():
-            try:
-                switch.delete()
-            except Exception as error:
-                self.logger.error(
-                    "%s: error while deleting switch %s: %s", self, switch, error
-                )
-        self.switches = {}
-
-        self.logger.debug("%s: Deleted.", self)
-
-        super().delete()
 
 
 BaseMicronet.g_unet = None
@@ -1126,8 +1263,11 @@ BaseMicronet.g_unet = None
 
 
 def get_exec_path(binary):
-    base = Commander("base")
-    return base.get_exec_path(binary)
+    return commander.get_exec_path(binary)
+
+
+def get_exec_path_host(binary):
+    return commander.get_exec_path(binary)
 
 
 commander = Commander("micronet")

@@ -18,19 +18,49 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import asyncio
 import logging
 
-
-def test_container_launch(unet):
-    logging.info("switches: %s", unet.switches)
-    logging.info("hosts: %s", unet.hosts)
+import pytest
 
 
-def test_container_ping(unet):
+# All tests are coroutines
+pytestmark = pytest.mark.asyncio
+
+
+async def test_containers_up(unet):
+    output = unet.cmd_raises("podman ps")
+    logging.info("Containers:\n%s\n\n", output)
+
+
+async def test_ping_the_container(unet):
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
-    o = unet.hosts["r1"].cmd_raises(f"ping -w1 -c1 {other_ip}")
+    o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping output: %s", o)
 
     other_ip = unet.hosts["r2"].intf_addrs["eth1"].ip
-    o = unet.hosts["r1"].cmd_raises(f"ping -w1 -c1 {other_ip}")
+    o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping output: %s", o)
+
+
+async def test_ping_from_container(unet):
+    other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
+    o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
+    logging.info("ping output: %s", o)
+
+    other_ip = unet.hosts["r1"].intf_addrs["eth1"].ip
+    o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
+    logging.info("ping output: %s", o)
+
+
+async def test_container_mounts(unet):
+    await unet.hosts["r2"].async_cmd_raises("echo foobar > /mytmp/foobar.txt")
+    o = await unet.hosts["r2"].async_cmd_raises("cat /mytmp/foobar.txt")
+    assert o == "foobar\n"
+
+    o = await unet.hosts["r2"].async_cmd_raises("df -T ")
+    logging.info("DF:\n%s\n", o)
+
+    await unet.hosts["r2"].async_cmd_raises("echo foobaz > /mybind/foobar.txt")
+    o = await unet.hosts["r2"].async_cmd_raises("cat /mybind/foobar.txt")
+    assert o == "foobaz\n"
