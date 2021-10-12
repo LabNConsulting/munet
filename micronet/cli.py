@@ -309,7 +309,7 @@ async def remote_cli(unet, prompt, title, background):
         if prompt:
             cmd += " --prompt='{}'".format(prompt)
         cmd += " " + unet.cli_sockpath
-        unet.run_in_window(cmd, new_window=True, title=title, background=background)
+        unet.run_in_window(cmd, title=title, background=background)
     except Exception as error:
         logging.error("cli server: unexpected exception: %s", error)
 
