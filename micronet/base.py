@@ -750,7 +750,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 )
                 time_mod.sleep(1)
         if p.poll():
-            logger.error("%s: namespace process failed: %s", self, comm_error(p))
+            self.logger.error("%s: namespace process failed: %s", self, comm_error(p))
         assert p.poll() is None, "unshare unexpectedly exited!"
         # assert not nslist, "unshare never unshared!"
 
@@ -1222,7 +1222,7 @@ class BaseMicronet(LinuxNamespace):
 
     async def async_delete(self):
         """Delete the micronet topology."""
-        self.logger.debug("%s: ASYNC Deleting.", self)
+        self.logger.debug("%s: deleting.", self)
 
         ltask = self._delete_links()
         htask = asyncio.gather(*[x.async_delete() for x in self.hosts.values()])
@@ -1250,7 +1250,7 @@ class BaseMicronet(LinuxNamespace):
             readline.write_history_file(histfile)
             self.cli_histfile = None
 
-        self.logger.debug("%s: ASYNC Deleted.", self)
+        self.logger.debug("%s: deleted", self)
         await super().async_delete()
 
 

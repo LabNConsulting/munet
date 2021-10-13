@@ -185,6 +185,7 @@ def main(*args):
         cleanup_previous()
 
     status = 4
+    unet = None
     try:
         # Setup the namespaces and network addressing.
         unet = parser.build_topology(config, rundir=args.rundir)
@@ -201,8 +202,9 @@ def main(*args):
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
 
     try:
-        logger.debug("ASYNC Deleting unet")
-        asyncio.run(unet.async_delete(), debug=True)
+        logger.debug("%s: async deleting")
+        if unet:
+            asyncio.run(unet.async_delete(), debug=True)
     except Exception as error:
         status = 2
         logger.info("Deleting, unexpected exception %s", error, exc_info=True)

@@ -41,7 +41,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run tests
-        run: poetry run pytest --cov=micronet --cov-report=xml
+        run: sudo env PATH=$PATH poetry run pytest --cov=micronet --cov-report=xml
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v1
