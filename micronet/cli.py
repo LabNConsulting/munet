@@ -131,7 +131,6 @@ async def doline(unet, line, writef, background):
                     "------ Host: %s type(%s) ------\n"
                     % (host, str(type(unet.hosts[host])))
                 )
-
             if sys.stdin.isatty() and on_host and with_pty:
                 spawn(unet, host, cmd)
             else:
@@ -180,14 +179,22 @@ Commands:
         args = oargs.split()
         if not args or (len(args) == 1 and args[0] == "*"):
             args = sorted(unet.hosts.keys())
+        unknowns = [x for x in args if x not in unet.hosts]
+        if unknowns:
+            writef("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
+            return True
         hosts = [unet.hosts[x] for x in args]
-        for host in hosts:
-            if cmd in ("s", "shell"):
-                host.run_in_window("bash", on_host=True)
-            if cmd in ("t", "term"):
-                host.run_in_window("bash")
-            elif cmd in ("x", "xterm"):
-                host.run_in_window("bash", forcex=True)
+        try:
+            for host in hosts:
+                if cmd in ("s", "shell"):
+                    host.run_in_window("bash", on_host=True)
+                if cmd in ("t", "term"):
+                    host.run_in_window("bash")
+                elif cmd in ("x", "xterm"):
+                    host.run_in_window("bash", forcex=True)
+        except Exception as error:
+            writef("%% Error: %s\n" % str(error))
+            return True
     elif cmd == "sh":
         run_command(True)
     elif cmd == "pty":
@@ -242,14 +249,17 @@ async def cli_client(sockpath, prompt="unet> "):
 async def local_cli(unet, outf, prompt, background):
     print("\n--- Micronet CLI Starting ---\n\n")
     while True:
-        if aioconsole:
-            line = await aioconsole.ainput(prompt)
-        else:
-            line = input(prompt)
-        if line is None:
-            return
-        if not await doline(unet, line, outf.write, background):
-            return
+        try:
+            if aioconsole:
+                line = await aioconsole.ainput(prompt)
+            else:
+                line = input(prompt)
+            if line is None:
+                return
+            if not await doline(unet, line, outf.write, background):
+                return
+        except KeyboardInterrupt:
+            outf.write("%% Caught KeyboardInterrupt\nUse ^D or 'quit' to exit")
 
 
 def init_history(unet, histfile):
@@ -396,4 +406,12 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
 
     cli_prompt = cli_args.prompt if cli_args.prompt else "unet> "
-    asyncio.run(async_cli(None, cli_args.histfile, cli_args.socket, prompt=cli_prompt))
+    asyncio.run(
+        async_cli(
+            None,
+            cli_args.histfile,
+            cli_args.socket,
+            prompt=cli_prompt,
+            background=False,
+        )
+    )

@@ -150,7 +150,12 @@ class L3Node(LinuxNamespace):
 
         self.rundir = os.path.join(unet.rundir, name)
         self.cmd_raises_host(f"mkdir -p {self.rundir}")
+        # Not host path based, but we assume same
         self.set_cwd(self.rundir)
+
+        hosts_file = os.path.join(self.rundir, "hosts.txt")
+        if os.path.exists(hosts_file):
+            self.bind_mount(os.path.join(self.rundir, "hosts.txt"), "/etc/hosts")
 
     def mount_volumes(self):
         if "volumes" not in self.config:
@@ -172,6 +177,12 @@ class L3Node(LinuxNamespace):
                     self.bind_mount(spath, s[1])
                 continue
             raise NotImplementedError("complex mounts for non-containers")
+
+    def get_ifname(self, netname):
+        for c in self.config["connections"]:
+            if c["to"] == netname:
+                return c["name"]
+        return None
 
     async def run_cmd(self):
         """Run the configured commands for this node"""

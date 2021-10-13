@@ -116,6 +116,27 @@ def setup_logging(args):
         os.chdir(old)
 
 
+def write_hosts_files(unet, netname):
+    entries = []
+    for name, node in unet.hosts.items():
+        ifname = node.get_ifname(netname)
+        if ifname in node.intf_addrs:
+            entries.append((name, node.intf_addrs[ifname].ip))
+    for name, node in unet.hosts.items():
+        with open(os.path.join(node.rundir, "hosts.txt"), "w", encoding="ascii") as hf:
+            hf.write(
+                """127.0.0.1\tlocalhost
+::1\tip6-localhost ip6-loopback
+fe00::0\tip6-localnet
+ff00::0\tip6-mcastprefix
+ff02::1\tip6-allnodes
+ff02::2\tip6-allrouters
+"""
+            )
+            for e in entries:
+                hf.write(f"{e[1]}\t{e[0]}\n")
+
+
 def build_topology(config=None, logger=None, rundir=None):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
@@ -181,5 +202,8 @@ def build_topology(config=None, logger=None, rundir=None):
                 other = unet.hosts[to]
                 oconf = find_matching_net_config(name, cconf, other.config)
                 unet.add_l3_link(node, other, cconf, oconf)
+
+    if "dns" in config:
+        write_hosts_files(unet, config["dns"])
 
     return unet

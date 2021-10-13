@@ -50,7 +50,7 @@ ign_signals = {
 }
 exit_signals = {
     signal.SIGHUP,
-    signal.SIGINT,
+    # signal.SIGINT,
     signal.SIGQUIT,
     signal.SIGTERM,
 }
@@ -93,10 +93,11 @@ def setup_signals(tasklist):
     for sn in signal.valid_signals():
         h = signal.getsignal(sn)
         is_handled = h and h not in {signal.SIG_IGN, signal.SIG_DFL}
-        if is_handled and sn != signal.SIGINT:
-            logger.warning(
-                "skipping python handled signum %s %s", sn, signal.strsignal(sn)
-            )
+        if is_handled:
+            if sn != signal.SIGINT:
+                logger.warning(
+                    "skipping python handled signum %s %s", sn, signal.strsignal(sn)
+                )
         elif sn in ign_signals and is_handled != signal.SIG_IGN:
             try:
                 signal.signal(sn, signal.SIG_IGN)
