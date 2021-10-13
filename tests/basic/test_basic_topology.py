@@ -35,10 +35,6 @@ async def test_basic_ping(unet):
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping r2 output: %s", o)
 
-    other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
-    o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
-    logging.info("ping r1 output: %s", o)
-
     # useful for manually testing the CLI
     # from micronet.cli import async_cli
     # await async_cli(unet, title="First", prompt="primary> ")

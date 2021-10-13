@@ -27,9 +27,6 @@ topology:
           ip: "192.168.202.0/31"
           name: "p2p2"
           remote-name: "eth2"
-      image: docker.io/labn/docker-ci-test:20.04
-      podman:
-        extra_args: []
       cmd: |
         ip addr show
         which ping
