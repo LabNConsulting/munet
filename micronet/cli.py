@@ -19,6 +19,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 import argparse
+import asyncio
+import functools
 import logging
 import os
 import pty
@@ -33,9 +35,18 @@ import termios
 import tty
 
 
+try:
+    import aioconsole
+except ImportError:
+    aioconsole = None
+
+
 ENDMARKER = b"\x00END\x00"
 
 logger = logging.getLogger(__name__)
+
+if not aioconsole:
+    logger.warning("No asynchronous CLI available, multiple CLIs unsuported")
 
 
 def lineiter(sock):
@@ -86,18 +97,20 @@ def spawn(unet, host, cmd):
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
 
 
-def doline(unet, line, writef):
-    def host_cmd_split(unet, cmd):
-        csplit = cmd.split()
-        i = 0
-        for i, e in enumerate(csplit):
-            if e not in unet.hosts:
-                break
-        hosts = csplit[:i]
-        if not hosts:
-            hosts = sorted(unet.hosts.keys())
-        cmd = " ".join(csplit[i:])
-        return hosts, cmd
+def host_cmd_split(unet, cmd):
+    csplit = cmd.split()
+    i = 0
+    for i, e in enumerate(csplit):
+        if e not in unet.hosts:
+            break
+    hosts = csplit[:i]
+    if not hosts:
+        hosts = sorted(unet.hosts.keys())
+    cmd = " ".join(csplit[i:])
+    return hosts, cmd
+
+
+async def doline(unet, line, writef, background):
 
     line = line.strip()
     m = re.match(r"^(\S+)(?:\s+(.*))?$", line)
@@ -106,91 +119,92 @@ def doline(unet, line, writef):
 
     cmd = m.group(1)
     oargs = m.group(2) if m.group(2) else ""
+
+    def run_command(on_host=False, with_pty=False):
+        if on_host:
+            hosts, cmd = host_cmd_split(unet, oargs)
+        else:
+            hosts, cmd = host_cmd_split(unet, line)
+        for host in hosts:
+            if len(hosts) > 1:
+                writef(
+                    "------ Host: %s type(%s) ------\n"
+                    % (host, str(type(unet.hosts[host])))
+                )
+            if sys.stdin.isatty() and on_host and with_pty:
+                spawn(unet, host, cmd)
+            else:
+                if on_host:
+                    cmdf = unet.hosts[host].cmd_status_host
+                else:
+                    cmdf = unet.hosts[host].cmd_status
+                rc, o, _ = cmdf(cmd, stderr=subprocess.STDOUT)
+                if rc:
+                    writef("*** non-zero exit status: %d\n" % rc)
+                writef(o)
+
+            if len(hosts) > 1:
+                writef("------- End: %s ------\n" % host)
+        writef("\n")
+
     if cmd in ("q", "quit"):
         return False
-    if cmd == "hosts":
+
+    if cmd == "help":
+        writef(
+            """
+If a host is a container then "pyt" "sh" and "shell" execute in the network
+namespace but outside the container. The other commands execute within the
+container.
+
+Commands:
+  help                       :: this help
+  hosts                      :: list hosts
+  pty [hosts] <shell-command>   :: execute <shell-command> in pty on hosts
+  sh [hosts] <shell-command>    :: execute <shell-command> on hosts
+  shell [hosts] <shell-command> :: open shell terminals on hosts (no container)
+  term [hosts]                  :: open shell terminals (poss. in container)
+  [hosts] <command>          :: execute command (possibly inside container)\n\n"""
+        )
+    elif cmd in ("h", "hosts"):
         writef("%% hosts: %s\n" % " ".join(sorted(unet.hosts.keys())))
-    elif cmd in ["term", "vtysh", "xterm"]:
+    elif cmd == "cli":
+        await remote_cli(
+            unet,
+            "secondary> ",
+            "Secondary CLI",
+            background,
+        )
+    elif cmd in ("shell", "term", "xterm"):
         args = oargs.split()
         if not args or (len(args) == 1 and args[0] == "*"):
             args = sorted(unet.hosts.keys())
+        unknowns = [x for x in args if x not in unet.hosts]
+        if unknowns:
+            writef("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
+            return True
         hosts = [unet.hosts[x] for x in args]
-        for host in hosts:
-            if cmd in ("t", "term"):
-                host.run_in_window("bash")
-            elif cmd in ("v", "vtysh"):
-                host.run_in_window("vtysh")
-            elif cmd in ("x", "xterm"):
-                host.run_in_window("bash", forcex=True)
+        try:
+            for host in hosts:
+                if cmd in ("s", "shell"):
+                    host.run_in_window("bash", on_host=True)
+                if cmd in ("t", "term"):
+                    host.run_in_window("bash")
+                elif cmd in ("x", "xterm"):
+                    host.run_in_window("bash", forcex=True)
+        except Exception as error:
+            writef("%% Error: %s\n" % str(error))
+            return True
     elif cmd == "sh":
-        hosts, cmd = host_cmd_split(unet, oargs)
-        for host in hosts:
-            if len(hosts) > 1:
-                writef("------ Host: %s ------\n" % host)
-            if sys.stdin.isatty():
-                spawn(unet, host, cmd)
-            else:
-                output = unet.hosts[host].cmd_legacy(cmd)
-                writef(output)
-            if len(hosts) > 1:
-                writef("------- End: %s ------\n" % host)
-        writef("\n")
-    elif cmd in ("h", "help"):
-        writef(
-            """
-Commands:
-  help                       :: this help
-  sh [hosts] <shell-command> :: execute <shell-command> on <host>
-  term [hosts]               :: open shell terminals for hosts
-  vtysh [hosts]              :: open vtysh terminals for hosts
-  [hosts] <vtysh-command>    :: execute vtysh-command on hosts\n\n"""
-        )
+        run_command(True)
+    elif cmd == "pty":
+        run_command(True, True)
     else:
-        hosts, cmd = host_cmd_split(unet, line)
-        for host in hosts:
-            if len(hosts) > 1:
-                writef("------ Host: %s ------\n" % host)
-            output = unet.hosts[host].cmd_legacy('vtysh -c "{}"'.format(cmd))
-            writef(output)
-            if len(hosts) > 1:
-                writef("------- End: %s ------\n" % host)
-        writef("\n")
+        run_command(False)
     return True
 
 
-def cli_server_setup(unet):
-    sockdir = tempfile.mkdtemp("-sockdir", "pyt")
-    sockpath = os.path.join(sockdir, "cli-server.sock")
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        sock.bind(sockpath)
-        sock.listen(1)
-        return sock, sockdir, sockpath
-    except Exception:
-        unet.cmd_status("rm -rf " + sockdir)
-        raise
-
-
-def cli_server(unet, server_sock):
-    sock, _ = server_sock.accept()
-
-    # Go into full non-blocking mode now
-    sock.settimeout(None)
-
-    for line in lineiter(sock):
-        line = line.strip()
-
-        def writef(x):
-            xb = x.encode("utf-8")
-            sock.send(xb)
-
-        if not doline(unet, line, writef):
-            return
-        sock.send(ENDMARKER)
-
-
-def cli_client(sockpath, prompt="unet> "):
+async def cli_client(sockpath, prompt="unet> "):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(10)
     sock.connect(sockpath)
@@ -200,7 +214,10 @@ def cli_client(sockpath, prompt="unet> "):
 
     print("\n--- Micronet CLI Starting ---\n\n")
     while True:
-        line = input(prompt)
+        if aioconsole:
+            line = await aioconsole.ainput(prompt)
+        else:
+            line = input(prompt)
         if line is None:
             return
 
@@ -229,14 +246,82 @@ def cli_client(sockpath, prompt="unet> "):
         sys.stdout.write(rb.decode("utf-8"))
 
 
-def local_cli(unet, outf, prompt="unet> "):
+async def local_cli(unet, outf, prompt, background):
     print("\n--- Micronet CLI Starting ---\n\n")
     while True:
-        line = input(prompt)
-        if line is None:
+        try:
+            if aioconsole:
+                line = await aioconsole.ainput(prompt)
+            else:
+                line = input(prompt)
+            if line is None:
+                return
+            if not await doline(unet, line, outf.write, background):
+                return
+        except KeyboardInterrupt:
+            outf.write("%% Caught KeyboardInterrupt\nUse ^D or 'quit' to exit")
+
+
+def init_history(unet, histfile):
+    try:
+        if histfile is None:
+            histfile = os.path.expanduser("~/.micronet-history.txt")
+            if not os.path.exists(histfile):
+                if unet:
+                    unet.cmd("touch " + histfile)
+                else:
+                    subprocess.run("touch " + histfile, check=True)
+        if histfile:
+            readline.read_history_file(histfile)
+    except Exception:
+        pass
+
+
+async def cli_client_connected(unet, background, reader, writer):
+    # # Go into full non-blocking mode now
+    # client.settimeout(None)
+    logging.debug("cli client connected")
+    while True:
+        line = await reader.readline()
+        if not line:
+            logging.debug("client closed cli connection")
+            break
+        line = line.decode("utf-8").strip()
+
+        def writef(x):
+            writer.write(x.encode("utf-8"))
+
+        if not await doline(unet, line, writef, background):
+            logging.debug("server closing cli connection")
             return
-        if not doline(unet, line, outf.write):
-            return
+
+        writer.write(ENDMARKER)
+        await writer.drain()
+
+
+async def remote_cli(unet, prompt, title, background):
+    "Open a CLI in a new window"
+    try:
+        if not unet.cli_sockpath:
+            sockpath = os.path.join(tempfile.mkdtemp("-sockdir", "pty-"), "cli.sock")
+            ccfunc = functools.partial(cli_client_connected, unet, background)
+            s = await asyncio.start_unix_server(ccfunc, path=sockpath)
+            unet.cli_server = asyncio.create_task(s.serve_forever(), name="cli-task")
+            unet.cli_sockpath = sockpath
+            logging.info("server created on :\n%s\n", sockpath)
+
+        # Open a new window with a new CLI
+        python_path = await unet.async_get_exec_path(["python3", "python"])
+        us = os.path.realpath(__file__)
+        cmd = "{} {}".format(python_path, us)
+        if unet.cli_histfile:
+            cmd += " --histfile=" + unet.cli_histfile
+        if prompt:
+            cmd += " --prompt='{}'".format(prompt)
+        cmd += " " + unet.cli_sockpath
+        unet.run_in_window(cmd, title=title, background=background)
+    except Exception as error:
+        logging.error("cli server: unexpected exception: %s", error)
 
 
 def cli(
@@ -252,46 +337,19 @@ def cli(
         prompt = "unet> "
 
     if force_window or not sys.stdin.isatty():
-        # Run CLI in another window b/c we have no tty.
-        sock, sockdir, sockpath = cli_server_setup(unet)
-
-        python_path = unet.get_exec_path(["python3", "python"])
-        us = os.path.realpath(__file__)
-        cmd = "{} {}".format(python_path, us)
-        if histfile:
-            cmd += " --histfile=" + histfile
-        if title:
-            cmd += " --prompt={}".format(title)
-        cmd += " " + sockpath
-
-        try:
-            unet.run_in_window(cmd, new_window=True, title=title, background=background)
-            cli_server(unet, sock)
-            return
-        finally:
-            unet.cmd_status("rm -rf " + sockdir)
+        asyncio.run(remote_cli(unet, prompt, title, background))
+        return
 
     if not unet:
         logger.debug("client-cli using sockpath %s", sockpath)
 
-    try:
-        if histfile is None:
-            histfile = os.path.expanduser("~/.micronet-history.txt")
-            if not os.path.exists(histfile):
-                if unet:
-                    unet.cmd("touch " + histfile)
-                else:
-                    subprocess.run("touch " + histfile, check=True)
-        if histfile:
-            readline.read_history_file(histfile)
-    except Exception:
-        pass
+    init_history(unet, histfile)
 
     try:
         if sockpath:
-            cli_client(sockpath, prompt=prompt)
+            asyncio.run(cli_client(sockpath, prompt))
         else:
-            local_cli(unet, sys.stdout, prompt=prompt)
+            asyncio.run(local_cli(unet, sys.stdout, prompt, background))
     except EOFError:
         pass
     except Exception as ex:
@@ -301,18 +359,59 @@ def cli(
         readline.write_history_file(histfile)
 
 
+async def async_cli(
+    unet,
+    histfile=None,
+    sockpath=None,
+    force_window=False,
+    title=None,
+    prompt=None,
+    background=True,
+):
+    init_history(unet, histfile)
+
+    if prompt is None:
+        prompt = "unet> "
+
+    if force_window or not sys.stdin.isatty():
+        await remote_cli(unet, prompt, title, background)
+
+    if not unet:
+        logger.debug("client-cli using sockpath %s", sockpath)
+
+    init_history(unet, histfile)
+
+    try:
+        if sockpath:
+            await cli_client(sockpath, prompt)
+        else:
+            await local_cli(unet, sys.stdout, prompt, background)
+    except EOFError:
+        pass
+    except Exception as ex:
+        logger.critical("cli: got exception: %s", ex, exc_info=True)
+        raise
+
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG, filename="/tmp/topotests/cli-client.log")
+    # logging.basicConfig(level=logging.DEBUG, filename="/tmp/topotests/cli-client.log")
+    logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger("cli-client")
     logger.info("Start logging cli-client")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--histfile", help="file to user for history")
-    parser.add_argument("--prompt-text", help="prompt string to use")
+    parser.add_argument("--prompt", help="prompt string to use")
     parser.add_argument("socket", help="path to pair of sockets to communicate over")
     cli_args = parser.parse_args()
 
-    cli_prompt = (
-        "{}> ".format(cli_args.prompt_text) if cli_args.prompt_text else "unet> "
+    cli_prompt = cli_args.prompt if cli_args.prompt else "unet> "
+    asyncio.run(
+        async_cli(
+            None,
+            cli_args.histfile,
+            cli_args.socket,
+            prompt=cli_prompt,
+            background=False,
+        )
     )
-    cli(None, cli_args.histfile, cli_args.socket, prompt=cli_prompt)

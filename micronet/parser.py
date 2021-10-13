@@ -18,8 +18,13 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+import importlib.resources
 import logging
 import os
+import subprocess
+import sys
+import tempfile
+
 from copy import deepcopy
 
 from .native import Micronet
@@ -29,53 +34,126 @@ def find_matching_net_config(name, cconf, oconf):
     oconnections = oconf.get("connections", None)
     if not oconnections:
         return {}
-    match = cconf.get("match", None)
-    for conn in oconnections:
-        if isinstance(conn, str):
-            if conn == name:
+    rname = cconf.get("remote-name", None)
+    for oconn in oconnections:
+        if isinstance(oconn, str):
+            if oconn == name:
                 return {}
             continue
-        if conn["to"] == name and match == conn.get("match", None):
-            return conn
+        if oconn["to"] == name:
+            if not rname:
+                return oconn
+            if rname == oconn.get("name", None):
+                return oconn
     return None
 
 
-def get_config(fname):
-    if not fname:
-        for ext in ("yaml", "toml", "json"):
-            if os.path.exists("topology." + ext):
-                fname = "topology." + ext
-                break
+def get_config(pathname=None, basename="topology", search=None, logf=logging.debug):
+    if not pathname:
+        if not search:
+            search = [os.getcwd()]
+        elif isinstance(search, str):
+            search = [search]
+        for d in search:
+            logf(
+                "%s",
+                'searching in "{}" for "{}".{{yaml, toml, json}}'.format(d, basename),
+            )
+            for ext in ("yaml", "toml", "json"):
+                pathname = os.path.join(d, basename + "." + ext)
+                if os.path.exists(pathname):
+                    logf("%s", 'Found "{}"'.format(pathname))
+                    break
+            else:
+                continue
+            break
         else:
-            raise FileNotFoundError("topology.{json,toml,yaml}")
-    _, ext = fname.rsplit(".", 1)
+            raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
+    _, ext = pathname.rsplit(".", 1)
     if ext == "json":
         import json  # pylint: disable=C0415
 
-        logging.info("loading json config from %s/%s", os.getcwd(), fname)
-        config = json.load(open(fname, encoding="utf-8"))
+        config = json.load(open(pathname, encoding="utf-8"))
     elif ext == "toml":
         import toml  # pylint: disable=C0415
 
-        logging.info("loading toml config from %s/%s", os.getcwd(), fname)
-        config = toml.load(fname)
+        config = toml.load(pathname)
     elif ext == "yaml":
         import yaml  # pylint: disable=C0415
 
-        logging.info("loading yaml config from %s/%s", os.getcwd(), fname)
-        config = yaml.safe_load(open(fname, encoding="utf-8"))
+        config = yaml.safe_load(open(pathname, encoding="utf-8"))
     else:
-        config = {}
+        raise ValueError("Filename does not end with (.json|.toml|.yaml)")
+
+    config["config_pathname"] = pathname
     return config
 
 
-def build_topology(config=None, logger=None):
-    unet = Micronet()
+def setup_logging(args):
+    # Create rundir and arrange for future commands to run in it.
+
+    # Change CWD to the rundir prior to parsing config
+    old = os.getcwd()
+    os.chdir(args.rundir)
+    try:
+        search = [old]
+        with importlib.resources.path("micronet", "logconf.yaml") as datapath:
+            search.append(datapath.parent)
+
+        def logf(msg, *p, **k):
+            if args.verbose:
+                print("PRELOG: " + msg % p, **k, file=sys.stderr)
+
+        config = get_config(args.log_config, "logconf", search, logf=logf)
+        pathname = config["config_pathname"]
+        del config["config_pathname"]
+
+        if args.verbose:
+            config["handlers"]["console"]["level"] = "DEBUG"
+        logging.config.dictConfig(config)
+        logging.info("Loaded logging config %s", pathname)
+    finally:
+        os.chdir(old)
+
+
+def write_hosts_files(unet, netname):
+    entries = []
+    for name, node in unet.hosts.items():
+        ifname = node.get_ifname(netname)
+        if ifname in node.intf_addrs:
+            entries.append((name, node.intf_addrs[ifname].ip))
+    for name, node in unet.hosts.items():
+        with open(os.path.join(node.rundir, "hosts.txt"), "w", encoding="ascii") as hf:
+            hf.write(
+                """127.0.0.1\tlocalhost
+::1\tip6-localhost ip6-loopback
+fe00::0\tip6-localnet
+ff00::0\tip6-mcastprefix
+ff02::1\tip6-allnodes
+ff02::2\tip6-allrouters
+"""
+            )
+            for e in entries:
+                hf.write(f"{e[1]}\t{e[0]}\n")
+
+
+def build_topology(config=None, logger=None, rundir=None):
+    if not rundir:
+        rundir = tempfile.mkdtemp(prefix="unet")
+    subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
+
+    unet = Micronet(logger=logger, rundir=rundir)
 
     if not config:
-        config = get_config(None)
+        config = get_config(basename="topology")
+
+    if config:
+        unet.config = config
+        unet.config_pathname = config["config_pathname"]
+
     if "topology" not in config:
         return unet
+
     config = config["topology"]
 
     if "switches" in config:
@@ -96,7 +174,10 @@ def build_topology(config=None, logger=None):
         for cconf in nconf["connections"]:
             # Replace string only with a dictionary
             if isinstance(cconf, str):
-                cconf = {"to": cconf}
+                cconf = cconf.split(":", 1)
+                cconf = {"to": cconf[0]}
+                if len(cconf) == 2:
+                    cconf["name"] = cconf[1]
             # Allocate a name if not already assigned
             if "name" not in cconf:
                 cconf["name"] = node.get_next_intf_name()
@@ -121,5 +202,8 @@ def build_topology(config=None, logger=None):
                 other = unet.hosts[to]
                 oconf = find_matching_net_config(name, cconf, other.config)
                 unet.add_l3_link(node, other, cconf, oconf)
+
+    if "dns" in config:
+        write_hosts_files(unet, config["dns"])
 
     return unet
