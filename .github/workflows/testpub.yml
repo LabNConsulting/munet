@@ -1,0 +1,14 @@
+name: Test Publish to PyPI
+on:
+  push:
+    tags:
+      - '*.*.*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: poetry config repositories.testpypi https://test.pypi.org/legacy/
+      - run: poetry config pypi-token.testpypi ${{ secrets.TEST_PYPI_API_KEY }}
+      - name: Test publish package
+        run: poetry publish --build -r testpypi
