@@ -26,9 +26,9 @@ from subprocess import DEVNULL
 
 import pytest
 
-from micronet import Commander
-from micronet import cmd_error
-from micronet.__main__ import main
+from munet import Commander
+from munet import cmd_error
+from munet.__main__ import main
 
 
 commander = Commander("base")
@@ -50,7 +50,7 @@ def stdargs(rundir):
     a = [
         "poetry",
         "run",
-        "micronet",
+        "munet",
         "--no-cleanup",
         "--no-cli",
         "--no-wait",

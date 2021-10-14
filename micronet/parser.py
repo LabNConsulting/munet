@@ -27,7 +27,7 @@ import tempfile
 
 from copy import deepcopy
 
-from .native import Micronet
+from .native import Munet
 
 
 def find_matching_net_config(name, cconf, oconf):
@@ -97,7 +97,7 @@ def setup_logging(args):
     os.chdir(args.rundir)
     try:
         search = [old]
-        with importlib.resources.path("micronet", "logconf.yaml") as datapath:
+        with importlib.resources.path("munet", "logconf.yaml") as datapath:
             search.append(datapath.parent)
 
         def logf(msg, *p, **k):
@@ -142,7 +142,7 @@ def build_topology(config=None, logger=None, rundir=None):
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
 
-    unet = Micronet(logger=logger, rundir=rundir)
+    unet = Munet(logger=logger, rundir=rundir)
 
     if not config:
         config = get_config(basename="topology")

@@ -51,9 +51,7 @@ def get_pids_with_env(has_var, has_val=None):
 def _kill_piddict(pids_by_upid, sig):
     ourpid = str(os.getpid())
     for upid, pids in pids_by_upid:
-        logging.info(
-            "Sending %s to (%s) of micronet pid %s", sig, ", ".join(pids), upid
-        )
+        logging.info("Sending %s to (%s) of munet pid %s", sig, ", ".join(pids), upid)
         for pid in pids:
             try:
                 if pid != ourpid:
@@ -69,7 +67,7 @@ def _kill_piddict(pids_by_upid, sig):
 
 def _get_our_pids():
     ourpid = str(os.getpid())
-    piddict = get_pids_with_env("MICRONET_PID", ourpid)
+    piddict = get_pids_with_env("MUNET_PID", ourpid)
     pids = [x for x in piddict if x != ourpid]
     if pids:
         return {ourpid: pids}
@@ -77,13 +75,13 @@ def _get_our_pids():
 
 
 def _get_other_pids():
-    piddict = get_pids_with_env("MICRONET_PID")
-    unet_pids = {d["MICRONET_PID"] for d in piddict.values()}
+    piddict = get_pids_with_env("MUNET_PID")
+    unet_pids = {d["MUNET_PID"] for d in piddict.values()}
     pids_by_upid = {p: set() for p in unet_pids}
     for pid, envdict in piddict.items():
-        unet_pid = envdict["MICRONET_PID"]
+        unet_pid = envdict["MUNET_PID"]
         pids_by_upid[unet_pid].add(pid)
-    # Filter out any child pid sets whos micronet pid is still running
+    # Filter out any child pid sets whos munet pid is still running
     return {x: y for x, y in pids_by_upid.items() if x not in y}
 
 
@@ -99,7 +97,7 @@ def _cleanup_pids(ours):
         return
 
     t = "current" if ours else "previous"
-    logging.info("Reaping %s  micronet processes", t)
+    logging.info("Reaping %s  munet processes", t)
 
     _kill_piddict(pids_by_upid, signal.SIGTERM)
 

@@ -25,11 +25,11 @@ import sys
 
 import pytest
 
-from micronet.base import BaseMicronet
-from micronet.cleanup import cleanup_current
-from micronet.cleanup import cleanup_previous
-from micronet.cli import cli
-from micronet.parser import build_topology
+from munet.base import BaseMunet
+from munet.cleanup import cleanup_current
+from munet.cleanup import cleanup_previous
+from munet.cli import cli
+from munet.parser import build_topology
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -170,17 +170,17 @@ def pytest_runtest_makereport(item, call):
 
     if error and isatty and item.config.getoption("--cli-on-error"):
         print("\nCLI-ON-ERROR: %s" % call.excinfo.typename)
-        if BaseMicronet.g_unet:
-            cli(BaseMicronet.g_unet)
+        if BaseMunet.g_unet:
+            cli(BaseMunet.g_unet)
         else:
-            logging.error("Could not launch CLI b/c no micronet exists yet")
+            logging.error("Could not launch CLI b/c no munet exists yet")
 
     while pause and isatty:
         user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
         user = user.strip()
 
         if user == "cli":
-            cli(BaseMicronet.g_unet)
+            cli(BaseMunet.g_unet)
         elif user == "pdb":
             breakpoint()  # pylint: disable=W1515
         elif user:

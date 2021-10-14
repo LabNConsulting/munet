@@ -37,11 +37,11 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --no-interaction --no-root
 
-      - name: Install micronet project
+      - name: Install munet project
         run: poetry install --no-interaction
 
       - name: Run tests
-        run: sudo env PATH=$PATH poetry run pytest --cov=micronet --cov-report=xml tests/config tests/basic
+        run: sudo env PATH=$PATH poetry run pytest --cov=munet --cov-report=xml tests/config tests/basic
 
       # - name: Upload coverage report
       #   uses: codecov/codecov-action@v1

@@ -23,7 +23,7 @@ import logging
 
 import pytest
 
-from micronet.base import get_exec_path_host
+from munet.base import get_exec_path_host
 
 
 # All tests are coroutines

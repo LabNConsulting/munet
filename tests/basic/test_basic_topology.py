@@ -23,7 +23,7 @@ import logging
 
 import pytest
 
-from micronet.parser import build_topology
+from munet.parser import build_topology
 
 
 # All tests are coroutines
@@ -36,5 +36,5 @@ async def test_basic_ping(unet):
     logging.info("ping r2 output: %s", o)
 
     # useful for manually testing the CLI
-    # from micronet.cli import async_cli
+    # from munet.cli import async_cli
     # await async_cli(unet, title="First", prompt="primary> ")

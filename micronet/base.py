@@ -35,7 +35,7 @@ import time as time_mod
 root_hostname = subprocess.check_output("hostname")
 
 # This allows us to cleanup any leftovers later on
-os.environ["MICRONET_PID"] = str(os.getpid())
+os.environ["MUNET_PID"] = str(os.getpid())
 
 
 class Timeout:
@@ -704,7 +704,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # Using cat and a stdin PIPE is nice as it will exit when we do. However, we
         # also detach it from the pgid so that signals do not propagate to it. This is
-        # b/c it would exit early (e.g., ^C) then, at least the main micronet proc which
+        # b/c it would exit early (e.g., ^C) then, at least the main munet proc which
         # has no other processes like frr daemons running, will take the main network
         # namespace with it, which will remove the bridges and the veth pair (because
         # the bridge side veth is deleted).
@@ -1046,13 +1046,13 @@ class Bridge(SharedNamespace, InterfaceMixin):
             self.logger.info("%s: deleted", self.name)
 
 
-class BaseMicronet(LinuxNamespace):
+class BaseMunet(LinuxNamespace):
     """
-    Micronet.
+    Munet.
     """
 
     def __init__(self, **kwargs):
-        """Create a Micronet."""
+        """Create a Munet."""
 
         self.hosts = {}
         self.switches = {}
@@ -1064,11 +1064,11 @@ class BaseMicronet(LinuxNamespace):
         self.cli_sockpath = None
         self.cli_histfile = None
 
-        super().__init__(name="micronet", mount=True, net=True, uts=True, **kwargs)
+        super().__init__(name="munet", mount=True, net=True, uts=True, **kwargs)
 
         # this is for testing purposes do not use
-        if not BaseMicronet.g_unet:
-            BaseMicronet.g_unet = self
+        if not BaseMunet.g_unet:
+            BaseMunet.g_unet = self
 
         self.logger.debug("%s: Creating", self)
 
@@ -1078,7 +1078,7 @@ class BaseMicronet(LinuxNamespace):
         return self.hosts[key]
 
     def add_host(self, name, cls=LinuxNamespace, **kwargs):
-        """Add a host to micronet."""
+        """Add a host to munet."""
 
         self.logger.debug("%s: add_host %s(%s)", self, cls.__name__, name)
 
@@ -1176,7 +1176,7 @@ class BaseMicronet(LinuxNamespace):
         self.get_mac(name2, if2)
 
     def add_switch(self, name, cls=Bridge, **kwargs):
-        """Add a switch to micronet."""
+        """Add a switch to munet."""
 
         self.logger.debug("%s: add_switch %s(%s)", self, cls.__name__, name)
         self.switches[name] = cls(name, unet=self, **kwargs)
@@ -1217,11 +1217,11 @@ class BaseMicronet(LinuxNamespace):
         return asyncio.gather(*[self._delete_link(x) for x in self.links])
 
     def delete(self):
-        """Delete the micronet topology."""
-        asyncio.run(BaseMicronet.async_delete(self))
+        """Delete the munet topology."""
+        asyncio.run(BaseMunet.async_delete(self))
 
     async def async_delete(self):
-        """Delete the micronet topology."""
+        """Delete the munet topology."""
         self.logger.debug("%s: deleting.", self)
 
         ltask = self._delete_links()
@@ -1254,7 +1254,7 @@ class BaseMicronet(LinuxNamespace):
         await super().async_delete()
 
 
-BaseMicronet.g_unet = None
+BaseMunet.g_unet = None
 
 
 # ---------------------------
@@ -1270,4 +1270,4 @@ def get_exec_path_host(binary):
     return commander.get_exec_path(binary)
 
 
-commander = Commander("micronet")
+commander = Commander("munet")

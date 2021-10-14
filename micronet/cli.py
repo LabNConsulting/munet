@@ -212,7 +212,7 @@ async def cli_client(sockpath, prompt="unet> "):
     # Go into full non-blocking mode now
     sock.settimeout(None)
 
-    print("\n--- Micronet CLI Starting ---\n\n")
+    print("\n--- Munet CLI Starting ---\n\n")
     while True:
         if aioconsole:
             line = await aioconsole.ainput(prompt)
@@ -247,7 +247,7 @@ async def cli_client(sockpath, prompt="unet> "):
 
 
 async def local_cli(unet, outf, prompt, background):
-    print("\n--- Micronet CLI Starting ---\n\n")
+    print("\n--- Munet CLI Starting ---\n\n")
     while True:
         try:
             if aioconsole:
@@ -265,7 +265,7 @@ async def local_cli(unet, outf, prompt, background):
 def init_history(unet, histfile):
     try:
         if histfile is None:
-            histfile = os.path.expanduser("~/.micronet-history.txt")
+            histfile = os.path.expanduser("~/.munet-history.txt")
             if not os.path.exists(histfile):
                 if unet:
                     unet.cmd("touch " + histfile)

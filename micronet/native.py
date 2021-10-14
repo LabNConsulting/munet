@@ -26,7 +26,7 @@ import re
 import subprocess
 import tempfile
 
-from .base import BaseMicronet
+from .base import BaseMunet
 from .base import Bridge
 from .base import LinuxNamespace
 from .base import Timeout
@@ -617,9 +617,9 @@ class L3ContainerNode(L3Node):
         asyncio.run(L3ContainerNode.async_delete(self))
 
 
-class Micronet(BaseMicronet):
+class Munet(BaseMunet):
     """
-    Micronet.
+    Munet.
     """
 
     def __init__(self, rundir=None, **kwargs):
@@ -659,7 +659,7 @@ class Micronet(BaseMicronet):
             node2.set_lan_addr(c2, node1)
 
     def add_l3_node(self, name, config, **kwargs):
-        """Add a node to micronet."""
+        """Add a node to munet."""
 
         if "image" in config:
             cls = L3ContainerNode
@@ -668,7 +668,7 @@ class Micronet(BaseMicronet):
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
 
     def add_l3_switch(self, name, config, **kwargs):
-        """Add a switch to micronet."""
+        """Add a switch to munet."""
 
         return super().add_switch(name, cls=L3Bridge, config=config, **kwargs)
 

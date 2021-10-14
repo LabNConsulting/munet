@@ -18,33 +18,29 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-from .base import (
-    Bridge,
-    Commander,
-    LinuxNamespace,
-    BaseMicronet,
-    SharedNamespace,
-    cmd_error,
-    comm_error,
-    get_exec_path,
-    proc_error,
-)
+from .base import BaseMunet
+from .base import Bridge
+from .base import Commander
+from .base import LinuxNamespace
+from .base import SharedNamespace
+from .base import cmd_error
+from .base import comm_error
+from .base import get_exec_path
+from .base import proc_error
+from .native import L3Bridge
+from .native import L3Node
+from .native import Munet
+from .native import to_thread
 
-from .native import (
-    L3Bridge,
-    L3Node,
-    Micronet,
-    to_thread,
-)
 
 __all__ = [
-    "BaseMicronet",
+    "BaseMunet",
     "Bridge",
     "Commander",
     "L3Bridge",
     "L3Node",
     "LinuxNamespace",
-    "Micronet",
+    "Munet",
     "SharedNamespace",
     "cmd_error",
     "comm_error",
