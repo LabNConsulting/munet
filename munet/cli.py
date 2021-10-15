@@ -204,7 +204,7 @@ Commands:
     return True
 
 
-async def cli_client(sockpath, prompt="unet> "):
+async def cli_client(sockpath, prompt="munet> "):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(10)
     sock.connect(sockpath)
@@ -334,7 +334,7 @@ def cli(
     background=True,
 ):
     if prompt is None:
-        prompt = "unet> "
+        prompt = "munet> "
 
     if force_window or not sys.stdin.isatty():
         asyncio.run(remote_cli(unet, prompt, title, background))
@@ -371,7 +371,7 @@ async def async_cli(
     init_history(unet, histfile)
 
     if prompt is None:
-        prompt = "unet> "
+        prompt = "munet> "
 
     if force_window or not sys.stdin.isatty():
         await remote_cli(unet, prompt, title, background)
@@ -405,7 +405,7 @@ if __name__ == "__main__":
     parser.add_argument("socket", help="path to pair of sockets to communicate over")
     cli_args = parser.parse_args()
 
-    cli_prompt = cli_args.prompt if cli_args.prompt else "unet> "
+    cli_prompt = cli_args.prompt if cli_args.prompt else "munet> "
     asyncio.run(
         async_cli(
             None,
