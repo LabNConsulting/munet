@@ -7,7 +7,7 @@ topology:
     r1:
       connections: ["net0"]
       init: false
-      shell: /sbin/tini
+      shell: false
       cmd: /sbin/tini bash -- -c 'ip addr; ls -l /; tail -f /dev/null'
     r2:
       connections: ["net0"]
