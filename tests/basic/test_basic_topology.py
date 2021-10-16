@@ -30,11 +30,11 @@ from munet.parser import build_topology
 pytestmark = pytest.mark.asyncio
 
 
-async def test_basic_ping(unet):
+@pytest.mark.parametrize(
+    "unet_param", ["topology", "noinit", "noinit-noshell"], indirect=["unet_param"]
+)
+async def test_basic_ping(unet_param):
+    unet = unet_param
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping r2 output: %s", o)
-
-    # useful for manually testing the CLI
-    # from munet.cli import async_cli
-    # await async_cli(unet, title="First", prompt="primary> ")

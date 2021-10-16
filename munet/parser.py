@@ -20,6 +20,7 @@
 #
 import importlib.resources
 import logging
+import logging.config
 import os
 import subprocess
 import sys

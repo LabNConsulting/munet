@@ -23,6 +23,7 @@ import ipaddress
 import logging
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 
@@ -411,8 +412,6 @@ class L3ContainerNode(L3Node):
         cmds = self.cmd_get_cmd_list(cmds)
         return self._cmd_status(cmds, **kwargs)
 
-    import pdb
-
     async def async_cmd_status(self, cmd, **kwargs):
         if not self.cmd_p:
             return await super().async_cmd_status(cmd, **kwargs)
@@ -485,58 +484,72 @@ class L3ContainerNode(L3Node):
         )
 
         image = self.container_image
-        podman_extra = []
-        if "podman" in self.config:
-            podman_extra = self.config["podman"].get("extra_args", "")
-            podman_extra = [x.strip() for x in podman_extra]
-
-        #
-        # Write commands to run to a file (if any).
-        #
-        cmd = self.config.get("cmd", "").strip()
-        if cmd:
-            # This command just takes too long
-            # bash_path = await self.async_get_exec_path("bash")
-            bash_path = "/bin/bash"
-            if cmd.find("\n") == -1:
-                cmd += "\n"
-            cmdpath = os.path.join(self.rundir, "cmd.txt")
-            self.logger.debug("[cmdpath %s]", cmdpath)
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(cmd)
-                cmdfile.flush()
 
         self.container_id = f"{self.name}-{os.getpid()}"
         cmds = [
             get_exec_path_host("podman"),
             "run",
-            "--init",
             f"--name={self.container_id}",
             f"--net=ns:/proc/{self.pid}/ns/net",
-            "--cap-add=SYS_ADMIN",
-            "--cap-add=NET_ADMIN",
-            "--cap-add=NET_RAW",
             f"--hostname={self.name}",
             # We can't use --rm here b/c podman fails on "stop".
             # u"--rm",
-        ] + podman_extra
+        ]
 
-        # Mount volumes
+        if self.config.get("init", True):
+            cmds.append("--init")
+
+        if self.config.get("privileged", False):
+            cmds.append("--privileged")
+        else:
+            cmds.extend(
+                [
+                    "--cap-add=SYS_ADMIN",
+                    "--cap-add=NET_ADMIN",
+                    "--cap-add=NET_RAW",
+                ]
+            )
+
+        # Add volumes:
         if self.extra_mounts:
             cmds += self.extra_mounts
-            # ucmds += ["--volume=" + m for m in self.config["volumes"]]
 
-        if not cmd:
-            cmds.append(image)
-        else:
+        # Add environment variables:
+        envdict = self.config.get("env", {})
+        if envdict is None:
+            envdict = {}
+        for k, v in envdict.items():
+            cmds.append(f"--env={k}='{v}'")
+
+        # Add extra flags from user:
+        if "podman" in self.config:
+            for x in self.config["podman"].get("extra_args", []):
+                cmds.append(x.strip())
+
+        shell_cmd = self.config.get("shell", "/bin/bash")
+        cmd = self.config.get("cmd", "").strip()
+        if shell_cmd and cmd:
+            if not isinstance(shell_cmd, str):
+                shell_cmd = "/bin/bash"
+            if cmd.find("\n") == -1:
+                cmd += "\n"
+            cmdpath = os.path.join(self.rundir, "cmd.shebang")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(f"#!{shell_cmd}\n")
+                cmdfile.write(cmd)
+                cmdfile.flush()
+            self.cmd_raises_host(f"chmod 755 {cmdpath}")
             cmds += [
                 # How can we override this?
                 # u'--entrypoint=""',
-                f"--volume={cmdpath}:/tmp/cmds.txt",
+                f"--volume={cmdpath}:/tmp/cmds.shebang",
                 image,
-                bash_path,
-                "/tmp/cmds.txt",
+                "/tmp/cmds.shebang",
             ]
+        else:
+            cmds.append(image)
+            if cmd:
+                cmds.extend(shlex.split(cmd))
 
         self.cmd_p = await self.async_popen(
             cmds,

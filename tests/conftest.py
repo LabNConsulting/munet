@@ -23,6 +23,8 @@ import logging
 import os
 import sys
 
+from pathlib import Path
+
 import pytest
 
 from munet.base import BaseMunet
@@ -30,6 +32,62 @@ from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
 from munet.cli import cli
 from munet.parser import build_topology
+from munet.parser import get_config
+
+
+# def pytest_runtest_logstart(nodeid, location):
+#     # location is (filename, lineno, testname)
+#     # topolog.logstart(nodeid, location, topotest_extra_config["rundir"])
+
+#     mode = os.getenv("PYTEST_XDIST_MODE", "no")
+#     worker = os.getenv("PYTEST_TOPOTEST_WORKER", "")
+
+#     # We only per-test log in the workers (or non-dist)
+#     if not worker and mode != "no":
+#         return
+
+#     handler_id = nodeid + worker
+#     assert handler_id not in handlers
+
+#     rel_log_dir = get_test_logdir(nodeid)
+#     exec_log_dir = os.path.join(rundir, rel_log_dir)
+#     subprocess.check_call(
+#         "mkdir -p {0} && chmod 1777 {0}".format(exec_log_dir), shell=True
+#     )
+
+#     exec_log_path = os.path.join(exec_log_dir, "exec-pytest.log")
+
+#     logging_plugin=config.pluginmanager.get_plugin("logging-plugin")
+#     filename=Path('pytest-logs', item._request.node.name+".log")
+#     logging_plugin.set_log_path(str(filename))
+
+#     set log path
+
+#     if worker:
+#         logger.info(
+#             "Logging on worker %s for %s into %s", worker, handler_id, exec_log_path
+#         )
+#     else:
+#         logger.info("Logging for %s into %s", handler_id, exec_log_path)
+
+
+# def pytest_runtest_logfinish(nodeid, location):
+#     # location is (filename, lineno, testname)
+#     topolog.logfinish(nodeid, location)
+
+
+# =================
+# Sessions Fixtures
+# =================
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for the session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    logging.debug("conftest: got event loop")
+    yield loop
+    loop.close()
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -43,28 +101,26 @@ def session_autouse():
 
     if not is_worker:
         cleanup_previous()
+
     yield
+
     if not is_worker:
         cleanup_current()
 
 
-@pytest.fixture(autouse=True, scope="module")
-def module_autouse(request):
-    cwd = os.getcwd()
-    sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("conftest: changing cwd from %s to %s", cwd, sdir)
-    os.chdir(sdir)
-    yield
-    os.chdir(cwd)
+# ===============
+# Module Fixtures
+# ===============
 
 
-def get_test_logdir():
+def get_test_logdir(nodeid=None, module=False):
     """Get log directory relative pathname."""
     xdist_worker = os.getenv("PYTEST_XDIST_WORKER", "")
     mode = os.getenv("PYTEST_XDIST_MODE", "no")
 
     # nodeid: all_protocol_startup/test_all_protocol_startup.py::test_router_running
-    nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
+    if not nodeid:
+        nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
     cur_test = nodeid.replace("[", "_").replace("]", "_")
     path, testname = cur_test.split("::")
     path = path[:-3].replace("/", ".")
@@ -75,28 +131,90 @@ def get_test_logdir():
     if mode == "load":
         return os.path.join(path, testname)
     assert mode in ("no", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
-    return path
+    return path if module else os.path.join(path, testname)
 
 
 @pytest.fixture(scope="module")
-def rundir():
-    d = os.path.join("/tmp/unet-test", get_test_logdir())
-    logging.debug("conftest: rundir %s", d)
+def rundir_module():
+    d = os.path.join("/tmp/unet-test", get_test_logdir(module=True))
+    logging.debug("conftest: test module rundir %s", d)
     return d
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    logging.debug("conftest: got event loop")
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True, scope="module")
+def module_autouse(request):
+    # is_xdist = os.environ.get("PYTEST_XDIST_MODE", "no") != "no"
+    # if "PYTEST_TOPOTEST_WORKER" not in os.environ:
+    #     is_worker = False
+    # elif not os.environ["PYTEST_TOPOTEST_WORKER"]:
+    #     is_worker = False
+    # else:
+    #     is_worker = True
+
+    cwd = os.getcwd()
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    logging.debug("conftest: changing cwd from %s to %s", cwd, sdir)
+    os.chdir(sdir)
+
+    # if not is_xdist or is_worker:
+    #     subprocess.check_call(
+    #         "mkdir -p {0} && chmod 1777 {0}".format(rundir_module), shell=True
+    #     )
+    #     # XXX get verbose from somewhere
+    #     # args = SimpleNamespace(rundir=rundir_module, log_config=None, verbose=False)
+    #     # setup_logging(args)
+
+    yield
+
+    os.chdir(cwd)
 
 
 @pytest.fixture(scope="module")
-async def unet(rundir):
-    _unet = build_topology(rundir=rundir)
+async def unet(rundir_module):  # pylint: disable=W0621
+    _unet = build_topology(rundir=rundir_module)
+    tasks = await _unet.run()
+    logging.debug("conftest: containers running")
+
+    yield _unet
+
+    # No one ever awaits these so cancel them
+    logging.debug("conftest: canceling container waits")
+    for task in tasks:
+        task.cancel()
+    await _unet.async_delete()
+
+
+# =================
+# Function Fixtures
+# =================
+
+
+@pytest.fixture(scope="function")
+def rundir():
+    d = os.path.join("/tmp/unet-test", get_test_logdir(module=False))
+    logging.debug("conftest: test function rundir %s", d)
+    return d
+
+
+# Configure logging
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_setup(item):
+    d = os.path.join(
+        "/tmp/unet-test", get_test_logdir(nodeid=item.nodeid, module=False)
+    )
+    logging.debug("conftest: test function setup: rundir %s", d)
+
+    config = item.config
+    logging_plugin = config.pluginmanager.get_plugin("logging-plugin")
+    filename = Path(d, "exec-hook.log")
+    logging_plugin.set_log_path(str(filename))
+    yield
+
+
+@pytest.fixture
+async def unet_param(request, rundir):  # pylint: disable=W0621
+    """Build unet per test function with an optional topology basename parameter"""
+    _unet = build_topology(config=get_config(basename=request.param), rundir=rundir)
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
 
@@ -113,6 +231,11 @@ async def unet(rundir):
 # def pytest_runtest_call(item: pytest.Item) -> None:
 #     "Hook the function that is called to execute the test."
 #     yield
+
+
+# ===================
+# Hooks (non-fixture)
+# ===================
 
 
 def pytest_addoption(parser):
@@ -169,7 +292,7 @@ def pytest_runtest_makereport(item, call):
             pause = item.config.getoption("--pause-on-error")
 
     if error and isatty and item.config.getoption("--cli-on-error"):
-        print("\nCLI-ON-ERROR: %s" % call.excinfo.typename)
+        print(f"\nCLI-ON-ERROR: {call.excinfo.typename}")
         if BaseMunet.g_unet:
             cli(BaseMunet.g_unet)
         else:

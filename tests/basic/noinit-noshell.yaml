@@ -1,0 +1,14 @@
+version: 1
+topology:
+  switches:
+    net0:
+      type: bridge
+  nodes:
+    r1:
+      connections: ["net0"]
+      init: false
+      shell: /sbin/tini
+      cmd: /sbin/tini bash -- -c 'ip addr; ls -l /; tail -f /dev/null'
+    r2:
+      connections: ["net0"]
+      cmd: tail -f /dev/null
