@@ -150,6 +150,7 @@ def main(*args):
     ap = argparse.ArgumentParser(args)
     ap.add_argument("--cli", action="store_true", help="Run the CLI")
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
+    ap.add_argument("--kinds-config", help="kinds config file (yaml, toml, json, ...)")
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
         "--no-cleanup", action="store_true", help="Do not cleanup previous runs"
@@ -188,7 +189,7 @@ def main(*args):
     unet = None
     try:
         # Setup the namespaces and network addressing.
-        unet = parser.build_topology(config, rundir=args.rundir)
+        unet = parser.build_topology(config, rundir=args.rundir, args=args)
         logger.info("Topology up: rundir: %s", unet.rundir)
 
         status = 3

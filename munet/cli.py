@@ -214,10 +214,10 @@ async def cli_client(sockpath, prompt="munet> "):
 
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
-        if aioconsole:
-            line = await aioconsole.ainput(prompt)
-        else:
-            line = input(prompt)
+        # if aioconsole:
+        #     line = await aioconsole.ainput(prompt)
+        # else:
+        line = input(prompt)
         if line is None:
             return
 
@@ -319,7 +319,7 @@ async def remote_cli(unet, prompt, title, background):
         if prompt:
             cmd += " --prompt='{}'".format(prompt)
         cmd += " " + unet.cli_sockpath
-        unet.run_in_window(cmd, title=title, background=background)
+        unet.run_in_window(cmd, title=title, background=False)
     except Exception as error:
         logging.error("cli server: unexpected exception: %s", error)
 

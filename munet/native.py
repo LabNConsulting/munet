@@ -22,6 +22,7 @@ import asyncio
 import ipaddress
 import logging
 import os
+import random
 import re
 import shlex
 import subprocess
@@ -192,20 +193,31 @@ class L3Node(LinuxNamespace):
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
+        shell_cmd = self.config.get("shell", "/bin/bash")
         cmd = self.config.get("cmd", "").strip()
         if not cmd:
             return None
-        cmd += "\n"
-        cmdpath = os.path.join(self.rundir, "cmd.txt")
-        self.logger.debug("[cmdpath %s]", cmdpath)
-        with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-            cmdfile.write(cmd)
-            cmdfile.flush()
 
-        # This command just takes too long
-        # bash_path = await self.async_get_exec_path("bash")
-        bash_path = "/bin/bash"
-        cmds = [bash_path, cmdpath]
+        # See if we have a custom update for this `kind`
+        if kind := self.config.get("kind", None):
+            if kind in kind_run_cmd_update:
+                kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
+
+        if shell_cmd:
+            if not isinstance(shell_cmd, str):
+                shell_cmd = "/bin/bash"
+            if cmd.find("\n") == -1:
+                cmd += "\n"
+            cmdpath = os.path.join(self.rundir, "cmd.shebang")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(f"#!{shell_cmd}\n")
+                cmdfile.write(cmd)
+                cmdfile.flush()
+            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+            cmds = [cmdpath]
+        else:
+            cmds = shlex.split(cmd)
+
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,
@@ -504,7 +516,7 @@ class L3ContainerNode(L3Node):
         else:
             cmds.extend(
                 [
-                    "--cap-add=SYS_ADMIN",
+                    # "--cap-add=SYS_ADMIN",
                     "--cap-add=NET_ADMIN",
                     "--cap-add=NET_RAW",
                 ]
@@ -519,7 +531,11 @@ class L3ContainerNode(L3Node):
         if envdict is None:
             envdict = {}
         for k, v in envdict.items():
-            cmds.append(f"--env={k}='{v}'")
+            cmds.append(f"--env={k}={v}")
+
+        # Update capabilities
+        cmds += [f"--cap-add={x}" for x in self.config.get("cap-add", [])]
+        cmds += [f"--cap-drop={x}" for x in self.config.get("cap-drop", [])]
 
         # Add extra flags from user:
         if "podman" in self.config:
@@ -528,6 +544,12 @@ class L3ContainerNode(L3Node):
 
         shell_cmd = self.config.get("shell", "/bin/bash")
         cmd = self.config.get("cmd", "").strip()
+
+        # See if we have a custom update for this `kind`
+        if kind := self.config.get("kind", None):
+            if kind in kind_run_cmd_update:
+                cmds, cmd = await kind_run_cmd_update[kind](self, shell_cmd, cmds, cmd)
+
         if shell_cmd and cmd:
             if not isinstance(shell_cmd, str):
                 shell_cmd = "/bin/bash"
@@ -549,7 +571,10 @@ class L3ContainerNode(L3Node):
         else:
             cmds.append(image)
             if cmd:
-                cmds.extend(shlex.split(cmd))
+                if isinstance(cmd, str):
+                    cmds.extend(shlex.split(cmd))
+                else:
+                    cmds.extend(cmd)
 
         self.cmd_p = await self.async_popen(
             cmds,
@@ -694,3 +719,55 @@ class Munet(BaseMunet):
             # utask.add_done_callback(node.cmd_completed)
             tasks.append(task)
         return tasks
+
+
+async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
+    cmd = cmd.strip()
+    if shell_cmd or cmd != "/sbin/init":
+        return
+
+    #
+    # Add flash dir and mount it
+    #
+    flashdir = os.path.join(node.rundir, "flash")
+    node.cmd_raises_host(f"mkdir -p {flashdir} && chmod 775 {flashdir}")
+    cmds += [f"--volume={flashdir}:/mnt/flash"]
+
+    #
+    # Startup config (if not present already)
+    #
+    if startup_config := node.config.get("startup-config", None):
+        dest = os.path.join(flashdir, "startup-config")
+        if os.path.exists(dest):
+            node.logger.info("Skipping copy of startup-config, already present")
+        else:
+            source = os.path.join(node.unet.config_dirname, startup_config)
+            node.cmd_raises_host(f"cp {source} {dest} && chmod 664 {dest}")
+
+    #
+    # system mac address (if not present already
+    #
+    dest = os.path.join(flashdir, "system_mac_address")
+    if os.path.exists(dest):
+        node.logger.info("Skipping system-mac generation, already present")
+    else:
+        random_arista_mac = "00:1c:73:%02x:%02x:%02x" % (
+            random.randint(0, 255),
+            random.randint(0, 255),
+            random.randint(0, 255),
+        )
+        system_mac = node.config.get("system-mac", random_arista_mac)
+        with open(dest, "w") as f:
+            f.write(system_mac + "\n")
+        node.cmd_raises_host(f"chmod 664 {dest}")
+
+    args = []
+
+    # Pass special args for the environment variables
+    if "env" in node.config:
+        args += [f"systemd.setenv={k}={v}" for k, v in node.config["env"].items()]
+
+    return cmds, [cmd] + args
+
+
+kind_run_cmd_update = {"ceos": run_cmd_update_ceos}

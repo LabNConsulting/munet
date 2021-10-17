@@ -138,7 +138,36 @@ ff02::2\tip6-allrouters
                 hf.write(f"{e[1]}\t{e[0]}\n")
 
 
-def build_topology(config=None, logger=None, rundir=None):
+def load_kinds(args):
+    # Change CWD to the rundir prior to parsing config
+    old = os.getcwd()
+    if args:
+        os.chdir(args.rundir)
+
+    try:
+        search = [old]
+        with importlib.resources.path("munet", "kinds.yaml") as datapath:
+            search.append(datapath.parent)
+
+        args_config = args.kinds_config if args else None
+        config = get_config(args_config, "kinds", search)
+        del config["config_pathname"]
+        return config["kinds"] if "kinds" in config else {}
+    finally:
+        if args:
+            os.chdir(old)
+    return {}
+
+
+def value_merge_deepcopy(s1, s2):
+    "Create a deepcopy of the result of merging the values of keys from dicts d1 and d2"
+    d = {}
+    for k, v in s1.items():
+        if k not in s2:
+            d[k] = deepcopy(v)
+
+
+def build_topology(config=None, logger=None, rundir=None, args=None):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
@@ -151,19 +180,39 @@ def build_topology(config=None, logger=None, rundir=None):
     if config:
         unet.config = config
         unet.config_pathname = config["config_pathname"]
+        unet.config_dirname = os.path.abspath(
+            os.path.dirname(config["config_pathname"])
+        )
 
-    if "topology" not in config:
+    if not config or "topology" not in config:
         return unet
 
     config = config["topology"]
+    kinds = load_kinds(args)
+    if "kinds" in config and config["kinds"]:
+        kinds = {**kinds, **config["kinds"]}
 
     if "switches" in config:
-        for name, swconf in config["switches"].items():
-            unet.add_l3_switch(name, deepcopy(swconf), logger=logger)
+        for name, conf in config["switches"].items():
+            if conf is None:
+                conf = {}
+            kind = conf.get("kind")
+            kconf = kinds.get(kind) if kind else None
+            if kconf:
+                conf = {**kconf, **conf}
+                config["switches"][name] = conf
+            unet.add_l3_switch(name, conf, logger=logger)
 
     if "nodes" in config:
-        for name, nconf in config["nodes"].items():
-            unet.add_l3_node(name, deepcopy(nconf), logger=logger)
+        for name, conf in config["nodes"].items():
+            if conf is None:
+                conf = {}
+            kind = conf.get("kind")
+            kconf = kinds.get(kind) if kind else {}
+            if kconf:
+                conf = {**kconf, **conf}
+                config["switches"][name] = conf
+            unet.add_l3_node(name, conf, logger=logger)
 
     # Go through all connections and name them so they are sane to the user
     # otherwise when we do p2p links the names/ords skip around based oddly
