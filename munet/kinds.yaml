@@ -1,0 +1,30 @@
+kinds:
+  frr:
+    cap-add:
+      # Zebra requires these
+      - SYS_ADMIN
+      - NET_ADMIN
+      - NET_RAW
+  ceos:
+    init: false
+    shell: false
+    cap-add:
+      # cEOS requires these
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+      - SYS_RESOURCE            # Required for the CLI
+    # ceos kind is special. munet will add args to /sbin/init for each
+    # environment variable of the form `systemd.setenv=ENVNAME=VALUE` for each
+    # environment varialbe named ENVNAME with a value of `VALUE`. If cmd: is
+    # changed to anything but `/sbin/init` munet will not do this.
+    cmd: /sbin/init
+    env:
+      EOS_PLATFORM: ceoslab
+      container: docker
+      ETBA: 4
+      SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT: 1
+      INTFTYPE: eth
+      MAPETH0: 1
+      MGMT_INTF: eth0
+      CEOS: 1

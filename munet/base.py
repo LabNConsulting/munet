@@ -778,6 +778,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # o = self.cmd_raises("ls -l /sys/fs/cgroup")
         # self.logger.warning("XXX %s", o)
 
+        # self.cmd_status_host(f"mount --make-rprivate /")
+
         # Set the hostname to the namespace name
         if uts and set_hostname:
             # Debugging get the root hostname
