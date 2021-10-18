@@ -20,6 +20,7 @@
 #
 import argparse
 import asyncio
+import concurrent.futures
 import functools
 import logging
 import os
@@ -108,6 +109,27 @@ def host_cmd_split(unet, cmd):
         hosts = sorted(unet.hosts.keys())
     cmd = " ".join(csplit[i:])
     return hosts, cmd
+
+
+def proc_readline(fd, prompt):
+    histfile = init_history(None, None)
+    try:
+        sys.stdin = os.fdopen(fd)
+        line = input(prompt)
+        readline.write_history_file(histfile)
+    except Exception:
+        return None
+    if not line:
+        return None
+    return str(line)
+
+
+async def async_input(prompt):
+    loop = asyncio.get_running_loop()
+    input_pool = concurrent.futures.ProcessPoolExecutor()
+    partial = functools.partial(proc_readline, sys.stdin.fileno(), prompt)
+    result = await loop.run_in_executor(input_pool, partial)
+    return result
 
 
 async def doline(unet, line, writef, background):
@@ -217,6 +239,7 @@ async def cli_client(sockpath, prompt="munet> "):
         # if aioconsole:
         #     line = await aioconsole.ainput(prompt)
         # else:
+        # line = await async_input(prompt)
         line = input(prompt)
         if line is None:
             return
@@ -250,12 +273,15 @@ async def local_cli(unet, outf, prompt, background):
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
         try:
-            if aioconsole:
-                line = await aioconsole.ainput(prompt)
-            else:
-                line = input(prompt)
+            # if aioconsole:
+            #     line = await aioconsole.ainput(prompt)
+            # else:
+            #     line = input(prompt)
+            line = await async_input(prompt)
+            logging.critical("XXX async_input returns line: %s", line)
             if line is None:
                 return
+
             if not await doline(unet, line, outf.write, background):
                 return
         except KeyboardInterrupt:
@@ -273,6 +299,7 @@ def init_history(unet, histfile):
                     subprocess.run("touch " + histfile, check=True)
         if histfile:
             readline.read_history_file(histfile)
+        return histfile
     except Exception:
         pass
 
@@ -343,8 +370,6 @@ def cli(
     if not unet:
         logger.debug("client-cli using sockpath %s", sockpath)
 
-    init_history(unet, histfile)
-
     try:
         if sockpath:
             asyncio.run(cli_client(sockpath, prompt))
@@ -356,7 +381,8 @@ def cli(
         logger.critical("cli: got exception: %s", ex, exc_info=True)
         raise
     finally:
-        readline.write_history_file(histfile)
+        # readline.write_history_file(histfile)
+        pass
 
 
 async def async_cli(
@@ -368,8 +394,6 @@ async def async_cli(
     prompt=None,
     background=True,
 ):
-    init_history(unet, histfile)
-
     if prompt is None:
         prompt = "munet> "
 
@@ -378,8 +402,6 @@ async def async_cli(
 
     if not unet:
         logger.debug("client-cli using sockpath %s", sockpath)
-
-    init_history(unet, histfile)
 
     try:
         if sockpath:

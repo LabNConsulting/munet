@@ -128,7 +128,7 @@ async def async_main(args, unet):
 
         if sys.stdin.isatty() and not args.no_cli:
             # Run an interactive CLI
-            task = asyncio.create_task(to_thread(lambda: cli.cli(unet)))
+            task = asyncio.create_task(cli.async_cli(unet))
             tasks.append(task)
         elif not args.no_wait:
             logger.info("Waiting on signal to exit")
@@ -203,7 +203,7 @@ def main(*args):
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
 
     try:
-        logger.debug("%s: async deleting")
+        logger.debug("main: async deleting")
         if unet:
             asyncio.run(unet.async_delete(), debug=True)
     except Exception as error:
