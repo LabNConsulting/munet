@@ -37,6 +37,45 @@ from .base import cmd_error
 from .base import get_exec_path_host
 
 
+def convert_number(value):
+    """Convert a number value with a possible suffix to an integer.
+
+    >>> convert_number("100k") == 100 * 1024
+    True
+    >>> convert_number("100M") == 100 * 1000 * 1000
+    True
+    >>> convert_number("100Gi") == 100 * 1024 * 1024 * 1024
+    True
+    >>> convert_number("55") == 55
+    True
+    """
+    if value is None:
+        return None
+    rate = str(value)
+    base = 1000
+    if rate[-1] == "i":
+        base = 1024
+        rate = rate[:-1]
+    suffix = "KMGTPEZY"
+    index = suffix.find(rate[-1])
+    if index == -1:
+        base = 1024
+        index = suffix.lower().find(rate[-1])
+    if index != -1:
+        rate = rate[:-1]
+    return int(rate) * base ** (index + 1)
+
+
+def get_tc_bits_value(user_value):
+    value = convert_number(user_value) / 1000
+    return f"{value:03f}kbit"
+
+
+def get_tc_bytes_value(user_value):
+    # Raw numbers are bytes in tc
+    return convert_number(user_value)
+
+
 def get_loopback_ips(c, nid):
     if "ip" in c and c["ip"]:
         if c["ip"] == "auto":
@@ -104,6 +143,10 @@ class L3Bridge(Bridge):
         self.cmd_raises(f"ip addr add {self.ip} dev {name}")
         self.logger.debug("%s: set network address to %s", self, self.ip)
 
+    def set_intf_tc(self, intf, config):
+        del intf
+        del config
+
 
 class L3Node(LinuxNamespace):
     next_ord = 1
@@ -124,6 +167,8 @@ class L3Node(LinuxNamespace):
         self.container_id = ""
         self.id = int(config["id"]) if "id" in config else self._get_next_ord()
         self.unet = unet
+
+        self.intf_tc_count = 0
 
         if not name:
             name = "r{}".format(self.id)
@@ -245,6 +290,102 @@ class L3Node(LinuxNamespace):
     #     """Called back when cmd finishes executing."""
     #     if self.cmd_p && self.cmd_p.pid == pid:
     #         self.container_id = None
+
+    def set_intf_tc(self, intf, config):
+        # old = self.tc[intf]
+
+        # # Cleanup old tc
+        # # I think we need "count" to actually be an ID per interface.
+        # count = 1
+        # self.cmd_raises(
+        #     f"tc qdisc del dev {intf} parent {count}:1 handle 10 || true", warn=False
+        # )
+        # self.cmd_raises(
+        #     f"tc qdisc del dev {intf} root handle {count} || true", warn=False
+        # )
+        netem_args = ""
+        tbf_args = ""
+
+        def get_number(c, v, d=None):
+            if v not in c or c[v] is None:
+                return d
+            return convert_number(c[v])
+
+        delay = get_number(config, "delay")
+        if delay is not None:
+            netem_args += f" delay {delay}usec"
+
+        jitter = get_number(config, "jitter")
+        if jitter is not None:
+            if not delay:
+                raise ValueError("jitter but no delay specified")
+            jitter_correlation = get_number(config, "jitter-correlation", 10)
+            netem_args += f" {jitter}usec {jitter_correlation}%"
+
+        loss = get_number(config, "loss")
+        if loss is not None:
+            if not delay:
+                raise ValueError("loss but no delay specified")
+            loss_correlation = get_number(config, "loss-correlation", 25)
+            netem_args += f" loss {loss}% {loss_correlation}%"
+
+        o_rate = config.get("rate")
+        if o_rate is not None:
+            #
+            # This comment is not correct, but is trying to talk through/learn the
+            # machinery.
+            #
+            # tokens arrive at `rate` into token buffer.
+            # limit - number of bytes that can be queued waiting for tokens
+            #   -or-
+            # latency - maximum amount of time a packet may sit in TBF queue
+            #
+            # So this just allows receiving faster than rate for latency amount of
+            # time, before dropping.
+            #
+            # latency = sizeofbucket(limit) / rate (peakrate?)
+            #
+            #   32kbit
+            # -------- = latency = 320ms
+            #  100kbps
+            #
+            #  -but then-
+            # burst ([token] buffer) the largest number of instantaneous
+            # tokens available (i.e, bucket size).
+
+            DEFLIMIT = 1518 * 1
+            DEFBURST = 1518 * 2
+            try:
+                tc_rate = o_rate["rate"]
+                tc_rate = convert_number(tc_rate)
+                limit = convert_number(o_rate.get("limit", DEFLIMIT))
+                burst = convert_number(o_rate.get("burst", DEFBURST))
+            except (KeyError, TypeError):
+                tc_rate = convert_number(o_rate)
+                limit = convert_number(DEFLIMIT)
+                burst = convert_number(DEFBURST)
+            tbf_args += f" rate {tc_rate/1000}kbit"
+
+            if delay:
+                # give an extra 1/10 of buffer space to handle delay
+                tbf_args += f" limit {limit} burst {burst}"
+            else:
+                tbf_args += f" limit {limit} burst {burst}"
+
+        # Add new TC
+        # count = self.intf_tc_count[intf]
+        # self.intf_tc_count[intf] += 1
+        count = 1
+        selector = f"root handle {count}:"
+        if netem_args:
+            self.cmd_raises(f"tc qdisc add dev {intf} {selector} netem {netem_args}")
+            count += 1
+            selector = f"parent {count-1}: handle {count}"
+        # Place rate limit after delay otherwise limit/burst too complex
+        if tbf_args:
+            self.cmd_raises(f"tc qdisc add dev {intf} {selector} tbf {tbf_args}")
+
+        self.cmd_raises(f"tc qdisc show dev {intf}")
 
     def set_lan_addr(self, cconf, switch):
         self.logger.debug(
@@ -696,6 +837,9 @@ class Munet(BaseMunet):
         else:
             node2.set_lan_addr(c2, node1)
 
+        node1.set_intf_tc(if1, c1)
+        node2.set_intf_tc(if2, c2)
+
     def add_l3_node(self, name, config, **kwargs):
         """Add a node to munet."""
 
@@ -757,7 +901,7 @@ async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
             random.randint(0, 255),
         )
         system_mac = node.config.get("system-mac", random_arista_mac)
-        with open(dest, "w") as f:
+        with open(dest, "w", encoding="ascii") as f:
             f.write(system_mac + "\n")
         node.cmd_raises_host(f"chmod 664 {dest}")
 

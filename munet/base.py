@@ -876,6 +876,17 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 cmd = "ip -n " + self.ifnetns[intf] + cmd[2:]
         self.cmd_raises_host(cmd)
 
+    def intf_tc_cmd(self, intf, cmd):
+        """Run a tc command, considering an interface's possible namespace."""
+        if intf in self.ifnetns:
+            if isinstance(cmd, list):
+                assert cmd[0].endswith("tc")
+                cmd[1:1] = ["-n", self.ifnetns[intf]]
+            else:
+                assert cmd.startswith("tc ")
+                cmd = "tc -n " + self.ifnetns[intf] + cmd[2:]
+        self.cmd_raises_host(cmd)
+
     def set_cwd(self, cwd):
         # Set pre-command based on our namespace proc
         if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
