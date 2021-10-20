@@ -172,7 +172,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
 
-    unet = Munet(logger=logger, rundir=rundir)
+    isolated = not args.host if args else True
+    unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
 
     if not config:
         config = get_config(basename="topology")

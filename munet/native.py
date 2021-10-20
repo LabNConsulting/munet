@@ -105,7 +105,10 @@ def get_loopback_ips(c, nid):
 
 def get_ip_network(c):
     if "ip" in c and c["ip"] != "auto":
-        return ipaddress.ip_network(c["ip"])
+        try:
+            return ipaddress.ip_interface(c["ip"])
+        except ValueError:
+            return ipaddress.ip_network(c["ip"])
     return None
 
 
@@ -138,14 +141,45 @@ class L3Bridge(Bridge):
         self.config = config if config else {}
         self.unet = unet
 
-        ip = get_ip_network(self.config)
-        self.ip = ip if ip else make_ip_network("10.0.0.0/24", self.id)
-        self.cmd_raises(f"ip addr add {self.ip} dev {name}")
-        self.logger.debug("%s: set network address to %s", self, self.ip)
+        ia = get_ip_network(self.config)
+        self.ip_interface = ia if ia else make_ip_network("10.0.0.0/24", self.id)
+        if hasattr(self.ip_interface, "network"):
+            self.ip_network = self.ip_interface.network
+            self.ip_address = self.ip_interface.ip
+        else:
+            self.ip_network = self.ip_interface
+            self.ip_address = self.ip_network.network_address
 
-    def set_intf_tc(self, intf, config):
+        self.cmd_raises(f"ip addr add {self.ip_interface} dev {name}")
+        self.logger.debug("%s: set network address to %s", self, self.ip_interface)
+
+        self.is_nat = self.config.get("nat", False)
+        if self.is_nat:
+            self.cmd_raises(
+                "iptables -t nat -A POSTROUTING "
+                f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
+            )
+
+    def set_intf_tc(self, intf, config):  # pylint: disable=R0201
         del intf
         del config
+
+    async def async_delete(self):
+        if type(self) == L3Bridge:  # pylint: disable=C0123
+            self.logger.info("%s: bridge async deleting", self.name)
+        else:
+            self.logger.debug("%s: bridge async_delete", self.name)
+
+        if self.config.get("nat", False):
+            self.cmd_status(
+                "iptables -t nat -D POSTROUTING "
+                f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
+            )
+
+        await super().async_delete()
+
+    def delete(self):
+        asyncio.run(L3Node.async_delete(self))
 
 
 class L3Node(LinuxNamespace):
@@ -389,17 +423,23 @@ class L3Node(LinuxNamespace):
 
     def set_lan_addr(self, cconf, switch):
         self.logger.debug(
-            "%s: prefixlen of switch %s is %s", self, switch.name, switch.ip.prefixlen
+            "%s: prefixlen of switch %s is %s",
+            self,
+            switch.name,
+            switch.ip_network.prefixlen,
         )
         if "ip" in cconf:
             ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" in cconf else None
         else:
-            n = switch.ip
+            n = switch.ip_network
             ipaddr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
         ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
         self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+
+        if hasattr(switch, "is_nat") and switch.is_nat:
+            self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
     def set_p2p_addr(self, cconf, other, occonf):
         if "ip" in cconf:

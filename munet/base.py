@@ -1064,7 +1064,7 @@ class BaseMunet(LinuxNamespace):
     Munet.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, isolated=True, **kwargs):
         """Create a Munet."""
 
         self.hosts = {}
@@ -1077,7 +1077,7 @@ class BaseMunet(LinuxNamespace):
         self.cli_sockpath = None
         self.cli_histfile = None
 
-        super().__init__(name="munet", mount=True, net=True, uts=True, **kwargs)
+        super().__init__(name="munet", mount=True, net=isolated, uts=isolated, **kwargs)
 
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:

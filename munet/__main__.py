@@ -151,6 +151,11 @@ def main(*args):
     ap.add_argument("--cli", action="store_true", help="Run the CLI")
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
     ap.add_argument("--kinds-config", help="kinds config file (yaml, toml, json, ...)")
+    ap.add_argument(
+        "--host",
+        action="store_true",
+        help="no isolation for top namespace, bridges exposed to default namespace",
+    )
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
         "--no-cleanup", action="store_true", help="Do not cleanup previous runs"
