@@ -694,6 +694,8 @@ class L3ContainerNode(L3Node):
 
         if self.config.get("privileged", False):
             cmds.append("--privileged")
+            # If we don't do this then the host file system is remounted read-only on exit!
+            cmds.append("--systemd=false")
         else:
             cmds.extend(
                 [

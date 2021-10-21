@@ -8,17 +8,13 @@ kinds:
   ceos:
     init: false
     shell: false
-    cap-add:
-      # cEOS requires these
-      - NET_ADMIN
-      - NET_RAW
-      - SYS_ADMIN
-      - SYS_RESOURCE            # Required for the CLI
+    # Should we cap-drop some of these in privileged mode?
     # ceos kind is special. munet will add args to /sbin/init for each
     # environment variable of the form `systemd.setenv=ENVNAME=VALUE` for each
     # environment varialbe named ENVNAME with a value of `VALUE`. If cmd: is
     # changed to anything but `/sbin/init` munet will not do this.
     cmd: /sbin/init
+    privileged: true
     env:
       EOS_PLATFORM: ceoslab
       container: docker
@@ -28,3 +24,50 @@ kinds:
       MAPETH0: 1
       MGMT_INTF: eth0
       CEOS: 1
+
+    # cap-add:
+    #   # cEOS requires these, except GNMI still doesn't work
+    #   # - NET_ADMIN
+    #   # - NET_RAW
+    #   # - SYS_ADMIN
+    #   # - SYS_RESOURCE            # Required for the CLI
+
+    # All Caps
+    #   - AUDIT_CONTROL
+    #   - AUDIT_READ
+    #   - AUDIT_WRITE
+    #   - BLOCK_SUSPEND
+    #   - CHOWN
+    #   - DAC_OVERRIDE
+    #   - DAC_READ_SEARCH
+    #   - FOWNER
+    #   - FSETID
+    #   - IPC_LOCK
+    #   - IPC_OWNER
+    #   - KILL
+    #   - LEASE
+    #   - LINUX_IMMUTABLE
+    #   - MKNOD
+    #   - NET_ADMIN
+    #   - NET_BIND_SERVICE
+    #   - NET_BROADCAST
+    #   - NET_RAW
+    #   - SETFCAP
+    #   - SETGID
+    #   - SETPCAP
+    #   - SETUID
+    #   - SYSLOG
+    #   - SYS_ADMIN
+    #   - SYS_BOOT
+    #   - SYS_CHROOT
+    #   - SYS_MODULE
+    #   - SYS_NICE
+    #   - SYS_PACCT
+    #   - SYS_PTRACE
+    #   - SYS_RAWIO
+    #   - SYS_RESOURCE
+    #   - SYS_TIME
+    #   - SYS_TTY_CONFIG
+    #   - WAKE_ALARM
+    #   - MAC_ADMIN  - Smack project?
+    #   - MAC_OVERRIDE - Smack project?
