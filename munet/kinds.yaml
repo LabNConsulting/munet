@@ -2,9 +2,10 @@ kinds:
   frr:
     cap-add:
       # Zebra requires these
-      - SYS_ADMIN
       - NET_ADMIN
       - NET_RAW
+      - SYS_ADMIN
+      - AUDIT_WRITE             # needed for ssh pty allocation
   ceos:
     init: false
     shell: false
