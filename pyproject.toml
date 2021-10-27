@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.1.9"
+version = "0.2.1"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -10,7 +10,6 @@ repository = "https://github.com/LabNConsulting/munet"
 include = ["logconf.yaml"]
 
 [tool.poetry.dependencies]
-aioconsole = "^0.3.2"
 python = "^3.8"
 toml = {version = "^0.10.2", optional = true}
 PyYAML = "^5.4.1"

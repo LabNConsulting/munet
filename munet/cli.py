@@ -36,18 +36,9 @@ import termios
 import tty
 
 
-try:
-    import aioconsole
-except ImportError:
-    aioconsole = None
-
-
 ENDMARKER = b"\x00END\x00"
 
 logger = logging.getLogger(__name__)
-
-if not aioconsole:
-    logger.warning("No asynchronous CLI available, multiple CLIs unsuported")
 
 
 def lineiter(sock):
@@ -119,7 +110,7 @@ def proc_readline(fd, prompt):
         readline.write_history_file(histfile)
     except Exception:
         return None
-    if not line:
+    if line is None:
         return None
     return str(line)
 
@@ -236,10 +227,6 @@ async def cli_client(sockpath, prompt="munet> "):
 
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
-        # if aioconsole:
-        #     line = await aioconsole.ainput(prompt)
-        # else:
-        # line = await async_input(prompt)
         line = input(prompt)
         if line is None:
             return
@@ -273,15 +260,9 @@ async def local_cli(unet, outf, prompt, background):
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
         try:
-            # if aioconsole:
-            #     line = await aioconsole.ainput(prompt)
-            # else:
-            #     line = input(prompt)
             line = await async_input(prompt)
-            logging.critical("XXX async_input returns line: %s", line)
             if line is None:
                 return
-
             if not await doline(unet, line, outf.write, background):
                 return
         except KeyboardInterrupt:

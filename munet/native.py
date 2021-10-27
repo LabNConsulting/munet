@@ -37,45 +37,6 @@ from .base import cmd_error
 from .base import get_exec_path_host
 
 
-def convert_number(value):
-    """Convert a number value with a possible suffix to an integer.
-
-    >>> convert_number("100k") == 100 * 1024
-    True
-    >>> convert_number("100M") == 100 * 1000 * 1000
-    True
-    >>> convert_number("100Gi") == 100 * 1024 * 1024 * 1024
-    True
-    >>> convert_number("55") == 55
-    True
-    """
-    if value is None:
-        return None
-    rate = str(value)
-    base = 1000
-    if rate[-1] == "i":
-        base = 1024
-        rate = rate[:-1]
-    suffix = "KMGTPEZY"
-    index = suffix.find(rate[-1])
-    if index == -1:
-        base = 1024
-        index = suffix.lower().find(rate[-1])
-    if index != -1:
-        rate = rate[:-1]
-    return int(rate) * base ** (index + 1)
-
-
-def get_tc_bits_value(user_value):
-    value = convert_number(user_value) / 1000
-    return f"{value:03f}kbit"
-
-
-def get_tc_bytes_value(user_value):
-    # Raw numbers are bytes in tc
-    return convert_number(user_value)
-
-
 def get_loopback_ips(c, nid):
     if "ip" in c and c["ip"]:
         if c["ip"] == "auto":
@@ -159,10 +120,6 @@ class L3Bridge(Bridge):
                 "iptables -t nat -A POSTROUTING "
                 f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
             )
-
-    def set_intf_tc(self, intf, config):  # pylint: disable=R0201
-        del intf
-        del config
 
     async def async_delete(self):
         if type(self) == L3Bridge:  # pylint: disable=C0123
@@ -325,103 +282,7 @@ class L3Node(LinuxNamespace):
     #     if self.cmd_p && self.cmd_p.pid == pid:
     #         self.container_id = None
 
-    def set_intf_tc(self, intf, config):
-        # old = self.tc[intf]
-
-        # # Cleanup old tc
-        # # I think we need "count" to actually be an ID per interface.
-        # count = 1
-        # self.cmd_raises(
-        #     f"tc qdisc del dev {intf} parent {count}:1 handle 10 || true", warn=False
-        # )
-        # self.cmd_raises(
-        #     f"tc qdisc del dev {intf} root handle {count} || true", warn=False
-        # )
-        netem_args = ""
-        tbf_args = ""
-
-        def get_number(c, v, d=None):
-            if v not in c or c[v] is None:
-                return d
-            return convert_number(c[v])
-
-        delay = get_number(config, "delay")
-        if delay is not None:
-            netem_args += f" delay {delay}usec"
-
-        jitter = get_number(config, "jitter")
-        if jitter is not None:
-            if not delay:
-                raise ValueError("jitter but no delay specified")
-            jitter_correlation = get_number(config, "jitter-correlation", 10)
-            netem_args += f" {jitter}usec {jitter_correlation}%"
-
-        loss = get_number(config, "loss")
-        if loss is not None:
-            if not delay:
-                raise ValueError("loss but no delay specified")
-            loss_correlation = get_number(config, "loss-correlation", 25)
-            netem_args += f" loss {loss}% {loss_correlation}%"
-
-        o_rate = config.get("rate")
-        if o_rate is not None:
-            #
-            # This comment is not correct, but is trying to talk through/learn the
-            # machinery.
-            #
-            # tokens arrive at `rate` into token buffer.
-            # limit - number of bytes that can be queued waiting for tokens
-            #   -or-
-            # latency - maximum amount of time a packet may sit in TBF queue
-            #
-            # So this just allows receiving faster than rate for latency amount of
-            # time, before dropping.
-            #
-            # latency = sizeofbucket(limit) / rate (peakrate?)
-            #
-            #   32kbit
-            # -------- = latency = 320ms
-            #  100kbps
-            #
-            #  -but then-
-            # burst ([token] buffer) the largest number of instantaneous
-            # tokens available (i.e, bucket size).
-
-            DEFLIMIT = 1518 * 1
-            DEFBURST = 1518 * 2
-            try:
-                tc_rate = o_rate["rate"]
-                tc_rate = convert_number(tc_rate)
-                limit = convert_number(o_rate.get("limit", DEFLIMIT))
-                burst = convert_number(o_rate.get("burst", DEFBURST))
-            except (KeyError, TypeError):
-                tc_rate = convert_number(o_rate)
-                limit = convert_number(DEFLIMIT)
-                burst = convert_number(DEFBURST)
-            tbf_args += f" rate {tc_rate/1000}kbit"
-
-            if delay:
-                # give an extra 1/10 of buffer space to handle delay
-                tbf_args += f" limit {limit} burst {burst}"
-            else:
-                tbf_args += f" limit {limit} burst {burst}"
-
-        # Add new TC
-        # count = self.intf_tc_count[intf]
-        # self.intf_tc_count[intf] += 1
-        count = 1
-        selector = f"root handle {count}:"
-        if netem_args:
-            self.cmd_raises(f"tc qdisc add dev {intf} {selector} netem {netem_args}")
-            count += 1
-            selector = f"parent {count-1}: handle {count}"
-        # Place rate limit after delay otherwise limit/burst too complex
-        if tbf_args:
-            self.cmd_raises(f"tc qdisc add dev {intf} {selector} tbf {tbf_args}")
-
-        self.cmd_raises(f"tc qdisc show dev {intf}")
-
-    def set_lan_addr(self, cconf, switch):
+    def set_lan_addr(self, switch, cconf):
         self.logger.debug(
             "%s: prefixlen of switch %s is %s",
             self,
@@ -441,7 +302,7 @@ class L3Node(LinuxNamespace):
         if hasattr(switch, "is_nat") and switch.is_nat:
             self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
-    def set_p2p_addr(self, cconf, other, occonf):
+    def set_p2p_addr(self, other, cconf, occonf):
         if "ip" in cconf:
             ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf["ip"] else None
             oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf["ip"] else None
@@ -694,7 +555,8 @@ class L3ContainerNode(L3Node):
 
         if self.config.get("privileged", False):
             cmds.append("--privileged")
-            # If we don't do this then the host file system is remounted read-only on exit!
+            # If we don't do this then the host file system is remounted read-only on
+            # exit!
             cmds.append("--systemd=false")
         else:
             cmds.extend(
@@ -848,9 +710,12 @@ class Munet(BaseMunet):
         self.rundir = rundir if rundir else tempfile.mkdtemp(prefix="unet")
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
 
-    def add_l3_link(self, node1, node2, c1, c2):
+    def add_l3_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
         isp2p = False
+
+        c1 = {} if c1 is None else c1
+        c2 = {} if c2 is None else c2
 
         if node1.name in self.switches:
             assert node2.name in self.hosts
@@ -875,23 +740,23 @@ class Munet(BaseMunet):
         super().add_link(node1, node2, if1, if2)
 
         if isp2p:
-            node1.set_p2p_addr(c1, node2, c2)
+            node1.set_p2p_addr(node2, c1, c2)
         else:
-            node2.set_lan_addr(c2, node1)
+            node2.set_lan_addr(node1, c2)
 
-        node1.set_intf_tc(if1, c1)
-        node2.set_intf_tc(if2, c2)
+        node1.set_intf_constraints(if1, **c1)
+        node2.set_intf_constraints(if2, **c2)
 
-    def add_l3_node(self, name, config, **kwargs):
+    def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
 
-        if "image" in config:
+        if config and "image" in config:
             cls = L3ContainerNode
         else:
             cls = L3Node
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
 
-    def add_l3_switch(self, name, config, **kwargs):
+    def add_l3_switch(self, name, config=None, **kwargs):
         """Add a switch to munet."""
 
         return super().add_switch(name, cls=L3Bridge, config=config, **kwargs)

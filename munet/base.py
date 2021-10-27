@@ -92,6 +92,45 @@ async def acomm_error(p):
     return proc_error(p, *p.saved_output)
 
 
+def convert_number(value):
+    """Convert a number value with a possible suffix to an integer.
+
+    >>> convert_number("100k") == 100 * 1024
+    True
+    >>> convert_number("100M") == 100 * 1000 * 1000
+    True
+    >>> convert_number("100Gi") == 100 * 1024 * 1024 * 1024
+    True
+    >>> convert_number("55") == 55
+    True
+    """
+    if value is None:
+        return None
+    rate = str(value)
+    base = 1000
+    if rate[-1] == "i":
+        base = 1024
+        rate = rate[:-1]
+    suffix = "KMGTPEZY"
+    index = suffix.find(rate[-1])
+    if index == -1:
+        base = 1024
+        index = suffix.lower().find(rate[-1])
+    if index != -1:
+        rate = rate[:-1]
+    return int(rate) * base ** (index + 1)
+
+
+def get_tc_bits_value(user_value):
+    value = convert_number(user_value) / 1000
+    return f"{value:03f}kbit"
+
+
+def get_tc_bytes_value(user_value):
+    # Raw numbers are bytes in tc
+    return convert_number(user_value)
+
+
 def get_tmp_dir(uniq):
     return os.path.join(tempfile.mkdtemp(), uniq)
 
@@ -216,7 +255,9 @@ class Commander:  # pylint: disable=R0904
         """Check if path exists."""
         return self.test("-e", path)
 
-    def get_cmd_container(self, cmd, sudo=False, tty=False):
+    def get_cmd_container(self, cmd, sudo=False, tty=False):  # pylint: disable=R0201
+        # The overrides of this function *do* use the self parameter
+        del tty  # lint
         if sudo:
             return "sudo " + cmd
         return cmd
@@ -347,7 +388,7 @@ class Commander:  # pylint: disable=R0904
 
     def _cmd_status(self, cmds, raises=False, warn=True, stdin=None, **kwargs):
         """Execute a command."""
-        pinput, stdin = self._cmd_status_input(stdin)
+        pinput, stdin = Commander._cmd_status_input(stdin)
         p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
         o, e = p.communicate(pinput)
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
@@ -419,9 +460,6 @@ class Commander:  # pylint: disable=R0904
 
     async def async_cmd_raises(self, cmd, **kwargs):
         """Execute a command. Raise an exception on errors"""
-        if cmd == "echo foobar":
-            pdb.set_trace()
-
         _, stdout, _ = await self.async_cmd_status(cmd, raises=True, **kwargs)
         return stdout
 
@@ -607,6 +645,132 @@ class InterfaceMixin:
     def register_interface(self, ifname):
         if ifname not in self.intf_addrs:
             self.intf_addrs[ifname] = None
+
+    def get_linux_tc_args(self, ifname, config):
+        """Get interface constraints (jitter, delay, rate) for linux TC
+
+        The keys and their values are as follows:
+
+        delay :: (int) number of microseconds
+        jitter :: (int) number of microseconds
+        jitter-correlation :: (float) % correlation to previous (default 10%)
+        loss :: (float) % of loss
+        loss-correlation :: (float) % correlation to previous (default 25%)
+        rate :: (int or str) bits per second, string allows for use of
+                {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
+        """
+        netem_args = ""
+
+        def get_number(c, v, d=None):
+            if v not in c or c[v] is None:
+                return d
+            return convert_number(c[v])
+
+        delay = get_number(config, "delay")
+        if delay is not None:
+            netem_args += f" delay {delay}usec"
+
+        jitter = get_number(config, "jitter")
+        if jitter is not None:
+            if not delay:
+                raise ValueError("jitter but no delay specified")
+            jitter_correlation = get_number(config, "jitter-correlation", 10)
+            netem_args += f" {jitter}usec {jitter_correlation}%"
+
+        loss = get_number(config, "loss")
+        if loss is not None:
+            if not delay:
+                raise ValueError("loss but no delay specified")
+            loss_correlation = get_number(config, "loss-correlation", 25)
+            netem_args += f" loss {loss}% {loss_correlation}%"
+
+        if (o_rate := config.get("rate")) is None:
+            return netem_args, ""
+
+        #
+        # This comment is not correct, but is trying to talk through/learn the
+        # machinery.
+        #
+        # tokens arrive at `rate` into token buffer.
+        # limit - number of bytes that can be queued waiting for tokens
+        #   -or-
+        # latency - maximum amount of time a packet may sit in TBF queue
+        #
+        # So this just allows receiving faster than rate for latency amount of
+        # time, before dropping.
+        #
+        # latency = sizeofbucket(limit) / rate (peakrate?)
+        #
+        #   32kbit
+        # -------- = latency = 320ms
+        #  100kbps
+        #
+        #  -but then-
+        # burst ([token] buffer) the largest number of instantaneous
+        # tokens available (i.e, bucket size).
+
+        tbf_args = ""
+        DEFLIMIT = 1518 * 1
+        DEFBURST = 1518 * 2
+        try:
+            tc_rate = o_rate["rate"]
+            tc_rate = convert_number(tc_rate)
+            limit = convert_number(o_rate.get("limit", DEFLIMIT))
+            burst = convert_number(o_rate.get("burst", DEFBURST))
+        except (KeyError, TypeError):
+            tc_rate = convert_number(o_rate)
+            limit = convert_number(DEFLIMIT)
+            burst = convert_number(DEFBURST)
+        tbf_args += f" rate {tc_rate/1000}kbit"
+        if delay:
+            # give an extra 1/10 of buffer space to handle delay
+            tbf_args += f" limit {limit} burst {burst}"
+        else:
+            tbf_args += f" limit {limit} burst {burst}"
+
+        count = 1
+        selector = f"root handle {count}:"
+        if netem_args:
+            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} netem {netem_args}")
+            count += 1
+            selector = f"parent {count-1}: handle {count}"
+        # Place rate limit after delay otherwise limit/burst too complex
+        if tbf_args:
+            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} tbf {tbf_args}")
+
+        self.cmd_raises(f"tc qdisc show dev {ifname}")
+
+        return netem_args, tbf_args
+
+    def set_intf_constraints(self, ifname, **constraints):
+        """Set interface outbound constraints.
+
+        Set outbound constraints (jitter, delay, rate) for an interface. All arguments
+        may also be passed as a string and will be converted to numerical format. All
+        arguments are also optional. If not specified then that existing constraint will
+        be cleared.
+
+        Args:
+            delay (int): number of microseconds.
+            jitter (int): number of microseconds.
+            jitter-correlation (float): Percent correlation to previous (default 10%).
+            loss (float): Percent of loss.
+            loss-correlation (float): Percent correlation to previous (default 25%).
+            rate (int): bits per second, string allows for use of
+                {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000.
+        """
+        netem_args, tbf_args = self.get_linux_tc_args(ifname, constraints)
+        count = 1
+        selector = f"root handle {count}:"
+        if netem_args:
+            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} netem {netem_args}")
+            count += 1
+            selector = f"parent {count-1}: handle {count}"
+        # Place rate limit after delay otherwise limit/burst too complex
+        if tbf_args:
+            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} tbf {tbf_args}")
+
+        self.cmd_raises(f"tc qdisc show dev {ifname}")
 
 
 class LinuxNamespace(Commander, InterfaceMixin):
@@ -1105,8 +1269,12 @@ class BaseMunet(LinuxNamespace):
 
         return self.hosts[name]
 
-    def add_link(self, node1, node2, if1, if2):
-        """Add a link between switch and node or 2 nodes."""
+    def add_link(self, node1, node2, if1, if2, **intf_constraints):
+        """Add a link between switch and node or 2 nodes.
+
+        If constraints are given they are applied to each endpoint. See
+        `InterfaceMixin::set_intf_constraints()` for more info.
+        """
         isp2p = False
 
         try:
@@ -1188,6 +1356,11 @@ class BaseMunet(LinuxNamespace):
         self.get_mac(name1, if1)
         self.get_mac(name2, if2)
 
+        # Setup interface constraints if provided
+        if intf_constraints:
+            node1.set_intf_constraints(if1, **intf_constraints)
+            node2.set_intf_constraints(if2, **intf_constraints)
+
     def add_switch(self, name, cls=Bridge, **kwargs):
         """Add a switch to munet."""
 
@@ -1260,7 +1433,7 @@ class BaseMunet(LinuxNamespace):
             await self.async_cmd_status("rm -rf " + os.path.dirname(self.cli_sockpath))
             self.cli_sockpath = None
         if self.cli_histfile:
-            readline.write_history_file(histfile)
+            readline.write_history_file(self.cli_histfile)
             self.cli_histfile = None
 
         self.logger.debug("%s: deleted", self)
