@@ -25,6 +25,7 @@ import pytest
 
 from munet import Munet
 
+
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
 
@@ -94,4 +95,4 @@ async def test_basic_ping(rundir):
 
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)
-    assert 25 < loss < 35
+    assert 20 < loss < 40
