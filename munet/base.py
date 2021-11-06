@@ -416,7 +416,7 @@ class Commander:  # pylint: disable=R0904
             e = e.decode(encoding) if e is not None else e
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
-    def cmd_get_cmd_list(self, cmd):
+    def cmd_get_cmd_list(self, cmd):  # pylint: disable=R0201
         if not isinstance(cmd, str):
             cmds = cmd
         else:
@@ -825,7 +825,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # cmd = [] if os.geteuid() == 0 else ["/usr/bin/sudo"]
         cmd = []
         cmd += ["/usr/bin/unshare"]
-        flags = "-"
+        flags = ""
+        self.a_flags = []
         self.ifnetns = {}
 
         if cgroup:
@@ -858,9 +859,14 @@ class LinuxNamespace(Commander, InterfaceMixin):
             cmd.append("--keep-caps")
         if uts:
             nslist.append("uts")
-            cmd.append("--uts")
+            flags += "u"
 
-        cmd.append(flags)
+        if flags:
+            if aflags := flags.replace("f", ""):
+                self.a_flags = ["-" + x for x in aflags]
+            cmd.extend(["-" + x for x in flags])
+            # cmd.append(f"-{flags}")
+
         if pid:
             cmd.append(get_exec_path_host("tini"))
             cmd.append("-vvv")
@@ -919,7 +925,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # assert not nslist, "unshare never unshared!"
 
         # Set pre-command based on our namespace proc
-        self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
+        self.base_pre_cmd = ["/usr/bin/nsenter", *self.a_flags, "-t", str(self.pid)]
         if not pid:
             self.base_pre_cmd.append("-F")
         self.set_pre_cmd(self.base_pre_cmd)
@@ -1129,7 +1135,7 @@ class SharedNamespace(Commander):
     An object that executes commands in an existing pid's linux namespace
     """
 
-    def __init__(self, name, pid, logger=None):
+    def __init__(self, name, pid, aflags=("-a",), logger=None):
         """
         Share a linux namespace.
 
@@ -1144,7 +1150,7 @@ class SharedNamespace(Commander):
         self.cwd = os.path.abspath(os.getcwd())
         self.pid = pid
 
-        self.base_pre_cmd = ["/usr/bin/nsenter", "-a", "-t", str(self.pid)]
+        self.base_pre_cmd = ["/usr/bin/nsenter", *aflags, "-t", str(self.pid)]
         self.set_pre_cmd(self.base_pre_cmd)
 
         self.ip_path = self.get_exec_path("ip")
@@ -1177,7 +1183,9 @@ class Bridge(SharedNamespace, InterfaceMixin):
         self.id = self._get_next_id()
         if not name:
             name = "br{}".format(self.id)
-        super().__init__(name=name, pid=unet.pid, logger=logger, **kwargs)
+        super().__init__(
+            name=name, pid=unet.pid, aflags=unet.a_flags, logger=logger, **kwargs
+        )
 
         self.set_intf_basename(self.name + "-eth")
 
