@@ -988,8 +988,15 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
     def bind_mount(self, outer, inner):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
-        # self.cmd_raises("mkdir -p " + inner)
-        self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
+        if self.unet.test("-f", outer):
+            self.cmd_raises(f"mkdir -p {os.path.dirname(inner)} && touch {inner}")
+        else:
+            self.cmd_raises(f"mkdir -p {inner}")
+        try:
+            self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
+        except Exception as error:
+            breakpoint()
+            print(error)
 
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)
