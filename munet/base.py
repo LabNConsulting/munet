@@ -1187,7 +1187,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
             name=name, pid=unet.pid, aflags=unet.a_flags, logger=logger, **kwargs
         )
 
-        self.set_intf_basename(self.name + "-eth")
+        self.set_intf_basename(self.name + "-e")
 
         self.unet = unet
 
@@ -1343,6 +1343,10 @@ class BaseMunet(LinuxNamespace):
             lifname = "i1{:x}".format(switch.pid)
             rifname = "i1{:x}".format(host.pid)
 
+            if len(if1) > 16:
+                logging.error('"%s" len %s > 16', if1, len(if1))
+            elif len(if2) > 16:
+                logging.error('"%s" len %s > 16', if2, len(if2))
             assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)

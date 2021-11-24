@@ -89,9 +89,9 @@ async def to_thread(func):
         return await asyncio.get_running_loop().run_in_executor(None, func)
 
 
-class L3Bridge(Bridge):
+class L2Bridge(Bridge):
     """
-    A linux bridge.
+    A linux bridge with no IP network address.
     """
 
     def __init__(self, name=None, unet=None, logger=None, config=None):
@@ -100,7 +100,19 @@ class L3Bridge(Bridge):
         super().__init__(name=name, unet=unet, logger=logger)
 
         self.config = config if config else {}
-        self.unet = unet
+
+
+class L3Bridge(Bridge):
+    """
+    A linux bridge with associated IP network address.
+    """
+
+    def __init__(self, name=None, unet=None, logger=None, config=None):
+        """Create a linux Bridge."""
+
+        super().__init__(name=name, unet=unet, logger=logger)
+
+        self.config = config if config else {}
 
         ia = get_ip_network(self.config)
         self.ip_interface = ia if ia else make_ip_network("10.0.0.0/24", self.id)
@@ -208,9 +220,7 @@ class L3Node(LinuxNamespace):
                     spath = s[0]
                     if spath[0] == ".":
                         spath = os.path.abspath(
-                            os.path.join(
-                                os.path.dirname(self.config["config_pathname"]), spath
-                            )
+                            os.path.join(self.unet.config_dirname, spath)
                         )
                     self.bind_mount(spath, s[1])
                 continue
@@ -283,15 +293,15 @@ class L3Node(LinuxNamespace):
     #         self.container_id = None
 
     def set_lan_addr(self, switch, cconf):
-        self.logger.debug(
-            "%s: prefixlen of switch %s is %s",
-            self,
-            switch.name,
-            switch.ip_network.prefixlen,
-        )
         if "ip" in cconf:
             ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" in cconf else None
         else:
+            self.logger.debug(
+                "%s: prefixlen of switch %s is %s",
+                self,
+                switch.name,
+                switch.ip_network.prefixlen,
+            )
             n = switch.ip_network
             ipaddr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
         ifname = cconf["name"]
@@ -758,6 +768,10 @@ class Munet(BaseMunet):
 
     def add_l3_switch(self, name, config=None, **kwargs):
         """Add a switch to munet."""
+
+        # If "ip" is explicitly empty/none/false just create a bridge.
+        if config and "ip" in config and not config["ip"]:
+            return super().add_switch(name, cls=L2Bridge, config=config, **kwargs)
 
         return super().add_switch(name, cls=L3Bridge, config=config, **kwargs)
 
