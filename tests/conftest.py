@@ -202,12 +202,11 @@ def pytest_runtest_setup(item):
     d = os.path.join(
         "/tmp/unet-test", get_test_logdir(nodeid=item.nodeid, module=False)
     )
-    logging.debug("conftest: test function setup: rundir %s", d)
-
     config = item.config
     logging_plugin = config.pluginmanager.get_plugin("logging-plugin")
-    filename = Path(d, "exec-hook.log")
+    filename = Path(d, "pytest-exec.log")
     logging_plugin.set_log_path(str(filename))
+    logging.debug("conftest: test function setup: rundir %s", d)
     yield
 
 

@@ -28,6 +28,7 @@ import shlex
 import subprocess
 import tempfile
 
+from . import cli
 from .base import BaseMunet
 from .base import Bridge
 from .base import LinuxNamespace
@@ -449,7 +450,9 @@ class L3ContainerNode(L3Node):
         """
         if not self.cmd_p:
             return super().popen(cmd, **kwargs)
+        # By default do not run inside container
         skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+        # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
         return self._popen("popen", cmds, async_exec=False, **kwargs)[0]
@@ -457,7 +460,9 @@ class L3ContainerNode(L3Node):
     async def async_popen(self, cmd, **kwargs):
         if not self.cmd_p:
             return await super().async_popen(cmd, **kwargs)
+        # By default do not run inside container
         skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+        # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
         p, _ = await self._popen("async_popen", cmds, async_exec=True, **kwargs)
@@ -467,10 +472,13 @@ class L3ContainerNode(L3Node):
         if not self.cmd_p:
             return super().cmd_status(cmd, **kwargs)
         if tty := kwargs.get("tty", False):
+            # tty always runs inside container (why?)
             skip_pre_cmd = False
             del kwargs["tty"]
         else:
+            # By default run inside container
             skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
         cmds = self.cmd_get_cmd_list(cmds)
@@ -480,10 +488,13 @@ class L3ContainerNode(L3Node):
         if not self.cmd_p:
             return await super().async_cmd_status(cmd, **kwargs)
         if tty := kwargs.get("tty", False):
+            # tty always runs inside container (why?)
             skip_pre_cmd = False
             del kwargs["tty"]
         else:
+            # By default run inside container
             skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
         cmds = self.cmd_get_cmd_list(cmds)
@@ -717,8 +728,50 @@ class Munet(BaseMunet):
 
     def __init__(self, rundir=None, **kwargs):
         super().__init__(**kwargs)
-        self.rundir = rundir if rundir else tempfile.mkdtemp(prefix="unet")
+        self.rundir = rundir if rundir else "/tmp/unet-" + self.instance
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
+
+        cli.add_cli_in_window_cmd(
+            self,
+            "hterm",
+            "hterm HOST [HOST ...]",
+            "open terminal[s] on HOST[S] (outside containers), * for all",
+            "bash",
+            on_host=True,
+        )
+        cli.add_cli_in_window_cmd(
+            self,
+            "term",
+            "term HOST [HOST ...]",
+            "open terminal[s] (TMUX or XTerm) on HOST[S], * for all",
+            "bash",
+        )
+        cli.add_cli_in_window_cmd(
+            self,
+            "xterm",
+            "xterm HOST [HOST ...]",
+            "open XTerm[s] on HOST[S], * for all",
+            "bash",
+            forcex=True,
+        )
+        cli.add_cli_run_cmd(
+            self,
+            "sh",
+            "sh [HOST ...] <SHELL-COMMAND>",
+            "execute <SHELL-COMMAND> on hosts",
+            "bash -c '{}'",
+            False,
+            False,
+        )
+        cli.add_cli_run_cmd(
+            self,
+            "shi",
+            "shi [HOST ...] <INTERACTIVE-COMMAND>",
+            "execute <INTERACTIVE-COMMAND> on HOST[s]",
+            "bash -c '{}'",
+            False,
+            True,
+        )
 
     def add_l3_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
@@ -781,7 +834,7 @@ class Munet(BaseMunet):
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
-            # utask.add_done_callback(node.cmd_completed)
+            task.add_done_callback(node.cmd_completed)
             tasks.append(task)
         return tasks
 

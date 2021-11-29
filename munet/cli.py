@@ -55,7 +55,7 @@ def lineiter(sock):
             s = s[i + 1 :]
 
 
-def spawn(unet, host, cmd):
+def spawn(unet, host, cmd, iow, on_host):
     if sys.stdin.isatty():
         old_tty = termios.tcgetattr(sys.stdin)
         tty.setraw(sys.stdin.fileno())
@@ -71,8 +71,10 @@ def spawn(unet, host, cmd):
             stdout=slave_fd,
             stderr=slave_fd,
             universal_newlines=True,
+            skip_pre_cmd=on_host,
         )
-        os.write(sys.stdout.fileno(), b"\r")
+        iow.write("\r")
+        iow.flush()
 
         while p.poll() is None:
             r, _, _ = select.select([sys.stdin, master_fd], [], [], 0.25)
@@ -82,7 +84,8 @@ def spawn(unet, host, cmd):
             elif master_fd in r:
                 o = os.read(master_fd, 10240)
                 if o:
-                    os.write(sys.stdout.fileno(), o)
+                    iow.write(o.decode("utf-8"))
+                    iow.flush()
     finally:
         # restore tty settings back
         if sys.stdin.isatty():
@@ -98,6 +101,7 @@ def host_cmd_split(unet, cmd):
     hosts = csplit[:i]
     if not hosts:
         hosts = sorted(unet.hosts.keys())
+    # Filter hosts based on cmd
     cmd = " ".join(csplit[i:])
     return hosts, cmd
 
@@ -123,7 +127,79 @@ async def async_input(prompt):
     return result
 
 
-async def doline(unet, line, writef, background):
+def make_help_str(unet):
+    s = """
+Basic Commands:
+  cli   :: open a secondary CLI window
+  help  :: this help
+  hosts :: list hosts
+  quit  :: quit the cli
+
+Commands:\n"""
+    keys = sorted(list(unet.cli_run_cmds) + list(unet.cli_in_window_cmds))
+    for cmd in keys:
+        v = (
+            unet.cli_run_cmds[cmd]
+            if cmd in unet.cli_run_cmds
+            else unet.cli_in_window_cmds[cmd]
+        )
+        s += f"  {v[0]}\t:: {v[1]}\n"
+    s += "\n"
+    return s
+
+
+async def run_command(
+    unet, outf, line, execfmt="bash -c '{}'", on_host=False, with_pty=False
+):
+    """Runs a command on a set of hosts.
+
+    Runs `execfmt` after calling `str.format` on it passing `uargs` as the lone
+    substitution value.  The output is sent to `outf`.  If `on_host` is True then the
+    `execfmt` is run using `Commander.cmd_status_host` otherwise it is run with
+    `Commander.cmd_status`.
+    """
+    hosts, ucmd = host_cmd_split(unet, line)
+
+    if unknowns := [x for x in hosts if x not in unet.hosts]:
+        outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
+        return
+
+    ucmd = execfmt.format(ucmd).replace("%INSTANCE%", unet.instance)
+
+    # if sys.stdin.isatty() and with_pty:
+    if with_pty:
+        for host in hosts:
+            shcmd = ucmd.replace("%NAME%", host)
+            if len(hosts) > 1:
+                outf.write(f"------ Host: {host} ------\n")
+            spawn(unet, host, shcmd, outf, on_host)
+            if len(hosts) > 1:
+                outf.write(f"------- End: {host} ------\n")
+        outf.write("\n")
+        return
+
+    aws = []
+    for host in hosts:
+        shcmd = ucmd.replace("%NAME%", host)
+        if on_host:
+            cmdf = unet.hosts[host].async_cmd_status_host
+        else:
+            cmdf = unet.hosts[host].async_cmd_status
+        aws.append(cmdf(shcmd, stderr=subprocess.STDOUT))
+
+    results = await asyncio.gather(*aws, return_exceptions=True)
+    for host, result in zip(hosts, results):
+        rc, o, _ = result
+        if len(hosts) > 1:
+            outf.write(f"------ Host: {host} ------\n")
+        if rc:
+            outf.write("*** non-zero exit status: %d\n" % rc)
+        outf.write(o)
+        if len(hosts) > 1:
+            outf.write(f"------- End: {host} ------\n")
+
+
+async def doline(unet, line, outf, background=False, notty=False):
 
     line = line.strip()
     m = re.match(r"^(\S+)(?:\s+(.*))?$", line)
@@ -131,56 +207,15 @@ async def doline(unet, line, writef, background):
         return True
 
     cmd = m.group(1)
-    oargs = m.group(2) if m.group(2) else ""
-
-    def run_command(on_host=False, with_pty=False):
-        if on_host:
-            hosts, cmd = host_cmd_split(unet, oargs)
-        else:
-            hosts, cmd = host_cmd_split(unet, line)
-        for host in hosts:
-            if len(hosts) > 1:
-                writef(
-                    "------ Host: %s type(%s) ------\n"
-                    % (host, str(type(unet.hosts[host])))
-                )
-            if sys.stdin.isatty() and on_host and with_pty:
-                spawn(unet, host, cmd)
-            else:
-                if on_host:
-                    cmdf = unet.hosts[host].cmd_status_host
-                else:
-                    cmdf = unet.hosts[host].cmd_status
-                rc, o, _ = cmdf(cmd, stderr=subprocess.STDOUT)
-                if rc:
-                    writef("*** non-zero exit status: %d\n" % rc)
-                writef(o)
-
-            if len(hosts) > 1:
-                writef("------- End: %s ------\n" % host)
-        writef("\n")
+    nline = m.group(2) if m.group(2) else ""
 
     if cmd in ("q", "quit"):
         return False
 
     if cmd == "help":
-        writef(
-            """
-If a host is a container then "pyt" "sh" and "shell" execute in the network
-namespace but outside the container. The other commands execute within the
-container.
-
-Commands:
-  help                       :: this help
-  hosts                      :: list hosts
-  pty [hosts] <shell-command>   :: execute <shell-command> in pty on hosts
-  sh [hosts] <shell-command>    :: execute <shell-command> on hosts
-  shell [hosts] <shell-command> :: open shell terminals on hosts (no container)
-  term [hosts]                  :: open shell terminals (poss. in container)
-  [hosts] <command>          :: execute command (possibly inside container)\n\n"""
-        )
+        outf.write(make_help_str(unet))
     elif cmd in ("h", "hosts"):
-        writef("%% hosts: %s\n" % " ".join(sorted(unet.hosts.keys())))
+        outf.write(f"% Hosts:\t{' '.join(sorted(unet.hosts.keys()))}\n")
     elif cmd == "cli":
         await remote_cli(
             unet,
@@ -188,32 +223,38 @@ Commands:
             "Secondary CLI",
             background,
         )
-    elif cmd in ("shell", "term", "xterm"):
-        args = oargs.split()
-        if not args or (len(args) == 1 and args[0] == "*"):
+    elif cmd in unet.cli_in_window_cmds:
+        args = nline.split()
+        if len(args) == 1 and args[0] == "*":
             args = sorted(unet.hosts.keys())
         unknowns = [x for x in args if x not in unet.hosts]
         if unknowns:
-            writef("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
+            outf.write(f"% Unknown host[s]: {' '.join(unknowns)}\n")
             return True
+
         hosts = [unet.hosts[x] for x in args]
         try:
+            riwargs = unet.cli_in_window_cmds[cmd][2]
             for host in hosts:
-                if cmd in ("s", "shell"):
-                    host.run_in_window("bash", on_host=True)
-                if cmd in ("t", "term"):
-                    host.run_in_window("bash")
-                elif cmd in ("x", "xterm"):
-                    host.run_in_window("bash", forcex=True)
+                host.run_in_window(riwargs[0], **riwargs[1])
         except Exception as error:
-            writef("%% Error: %s\n" % str(error))
+            outf.write(f"% Error: {error}\n")
             return True
-    elif cmd == "sh":
-        run_command(True)
-    elif cmd == "pty":
-        run_command(True, True)
+    elif cmd in unet.cli_run_cmds:
+        execfmt, on_host, with_pty = unet.cli_run_cmds[cmd][2]
+        if with_pty and notty:
+            outf.write("% Error: interactive command must be run from primary CLI\n")
+            return True
+        await run_command(unet, outf, nline, execfmt, on_host, with_pty)
+    elif None in unet.cli_run_cmds:
+        # If we have a default command use that
+        execfmt, on_host, with_pty = unet.cli_run_cmds[None][2]
+        if with_pty and notty:
+            outf.write("% Error: interactive command must be run from primary CLI\n")
+            return True
+        await run_command(unet, outf, line, execfmt, on_host, with_pty)
     else:
-        run_command(False)
+        outf.write(f"% Unknown command: {line}\n")
     return True
 
 
@@ -263,7 +304,7 @@ async def local_cli(unet, outf, prompt, background):
             line = await async_input(prompt)
             if line is None:
                 return
-            if not await doline(unet, line, outf.write, background):
+            if not await doline(unet, line, outf, background):
                 return
         except KeyboardInterrupt:
             outf.write("%% Caught KeyboardInterrupt\nUse ^D or 'quit' to exit")
@@ -283,9 +324,11 @@ def init_history(unet, histfile):
         return histfile
     except Exception:
         pass
+    return None
 
 
 async def cli_client_connected(unet, background, reader, writer):
+    """Handle CLI commands inside the munet process from a socket."""
     # # Go into full non-blocking mode now
     # client.settimeout(None)
     logging.debug("cli client connected")
@@ -296,10 +339,10 @@ async def cli_client_connected(unet, background, reader, writer):
             break
         line = line.decode("utf-8").strip()
 
-        def writef(x):
-            writer.write(x.encode("utf-8"))
+        # def writef(x):
+        #     writer.write(x.encode("utf-8"))
 
-        if not await doline(unet, line, writef, background):
+        if not await doline(unet, line, writer, background, notty=True):
             logging.debug("server closing cli connection")
             return
 
@@ -330,6 +373,45 @@ async def remote_cli(unet, prompt, title, background):
         unet.run_in_window(cmd, title=title, background=False)
     except Exception as error:
         logging.error("cli server: unexpected exception: %s", error)
+
+
+def add_cli_in_window_cmd(unet, cmd, cmdfmt, cmdhelp, shell, **kwargs):
+    """Adds a CLI command to the CLI.
+
+    The command `cmd` is added to the commands executable by the user from the CLI.  See
+    `base.Commander.run_in_window` for the arguments that can be passed in `args` and
+    `kwargs` to this function.
+
+    Args:
+        unet: unet object
+        cmd: command string (no spaces)
+        cmdfmt: format of command to display in help (left side)
+        cmdhelp: help string for command (right side)
+        shell: interpreter `cmd` to pass to `host.run_in_window()`
+        **kwargs: keyword args to pass to `host.run_in_window()`
+    """
+    unet.cli_in_window_cmds[cmd] = (cmdfmt, cmdhelp, (shell, kwargs))
+
+
+def add_cli_run_cmd(
+    unet, cmd, cmdfmt, cmdhelp, execfmt, on_host=False, interactive=False
+):
+    """Adds a CLI command to the CLI.
+
+    The command `cmd` is added to the commands executable by the user from the CLI.
+    See `run_command` above in the `doline` function and for the arguments that can
+    be passed in to this function.
+
+    Args:
+        unet: unet object
+        cmd: command string (no spaces)
+        cmdfmt: format of command to display in help (left side)
+        cmdhelp: help string for command (right side)
+        execfmt: format string to insert user cmds into for execution
+        on_host: Should execute the command on the host vs in the node namespace.
+        interactive: Should execute the command inside an allocated pty (interactive)
+    """
+    unet.cli_run_cmds[cmd] = (cmdfmt, cmdhelp, (execfmt, on_host, interactive))
 
 
 def cli(

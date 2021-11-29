@@ -1243,7 +1243,7 @@ class BaseMunet(LinuxNamespace):
     Munet.
     """
 
-    def __init__(self, isolated=True, **kwargs):
+    def __init__(self, isolated=True, instance="default", **kwargs):
         """Create a Munet."""
 
         self.hosts = {}
@@ -1251,10 +1251,13 @@ class BaseMunet(LinuxNamespace):
         self.links = {}
         self.macs = {}
         self.rmacs = {}
+        self.instance = instance
 
         self.cli_server = None
         self.cli_sockpath = None
         self.cli_histfile = None
+        self.cli_in_window_cmds = {}
+        self.cli_run_cmds = {}
 
         super().__init__(name="munet", mount=True, net=isolated, uts=isolated, **kwargs)
 

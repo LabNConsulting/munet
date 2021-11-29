@@ -211,6 +211,7 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kind = conf.get("kind")
             kconf = kinds.get(kind) if kind else {}
             if kconf:
+                kconf = kind_substitute(kconf, name)
                 conf = {**kconf, **conf}
                 config["switches"][name] = conf
             unet.add_l3_node(name, conf, logger=logger)
