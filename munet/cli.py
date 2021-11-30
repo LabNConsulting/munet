@@ -92,14 +92,21 @@ def spawn(unet, host, cmd, iow, on_host):
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
 
 
-def host_cmd_split(unet, cmd):
+def host_cmd_split(unet, cmd, defall):
     csplit = cmd.split()
     i = 0
     for i, e in enumerate(csplit):
         if e not in unet.hosts:
             break
-    hosts = csplit[:i]
-    if not hosts:
+    else:
+        i += 1
+
+    if i == 0 and csplit and csplit[0] == "*":
+        hosts = sorted(unet.hosts.keys())
+    else:
+        hosts = csplit[:i]
+
+    if not hosts and defall:
         hosts = sorted(unet.hosts.keys())
     # Filter hosts based on cmd
     cmd = " ".join(csplit[i:])
@@ -158,7 +165,10 @@ async def run_command(
     `execfmt` is run using `Commander.cmd_status_host` otherwise it is run with
     `Commander.cmd_status`.
     """
-    hosts, ucmd = host_cmd_split(unet, line)
+    hosts, ucmd = host_cmd_split(unet, line, True)
+
+    if not hosts:
+        return
 
     if unknowns := [x for x in hosts if x not in unet.hosts]:
         outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
@@ -224,31 +234,36 @@ async def doline(unet, line, outf, background=False, notty=False):
             background,
         )
     elif cmd in unet.cli_in_window_cmds:
-        args = nline.split()
-        if len(args) == 1 and args[0] == "*":
-            args = sorted(unet.hosts.keys())
-        unknowns = [x for x in args if x not in unet.hosts]
-        if unknowns:
-            outf.write(f"% Unknown host[s]: {' '.join(unknowns)}\n")
+        hosts, ucmd = host_cmd_split(unet, nline, False)
+        if not hosts:
             return True
 
-        hosts = [unet.hosts[x] for x in args]
+        execfmt, kwargs = unet.cli_in_window_cmds[cmd][2:]
+        if "{}" not in execfmt and ucmd:
+            # CLI command does not expect user command so treat as hosts of which some
+            # must be unknown
+            unknowns = [x for x in ucmd.split() if x not in unet.hosts]
+            outf.write(f"% Unknown host[s]: {' '.join(unknowns)}\n")
+            return True
+        if "{}" in execfmt:
+            execfmt = execfmt.format(ucmd)
+        execfmt = execfmt.replace("%INSTANCE%", unet.instance)
         try:
-            riwargs = unet.cli_in_window_cmds[cmd][2]
             for host in hosts:
-                host.run_in_window(riwargs[0], **riwargs[1])
+                shcmd = execfmt.replace("%NAME%", host)
+                unet.hosts[host].run_in_window(shcmd, **kwargs)
         except Exception as error:
             outf.write(f"% Error: {error}\n")
             return True
     elif cmd in unet.cli_run_cmds:
-        execfmt, on_host, with_pty = unet.cli_run_cmds[cmd][2]
+        execfmt, on_host, with_pty = unet.cli_run_cmds[cmd][2:]
         if with_pty and notty:
             outf.write("% Error: interactive command must be run from primary CLI\n")
             return True
         await run_command(unet, outf, nline, execfmt, on_host, with_pty)
     elif None in unet.cli_run_cmds:
         # If we have a default command use that
-        execfmt, on_host, with_pty = unet.cli_run_cmds[None][2]
+        execfmt, on_host, with_pty = unet.cli_run_cmds[None][2:]
         if with_pty and notty:
             outf.write("% Error: interactive command must be run from primary CLI\n")
             return True
@@ -375,7 +390,7 @@ async def remote_cli(unet, prompt, title, background):
         logging.error("cli server: unexpected exception: %s", error)
 
 
-def add_cli_in_window_cmd(unet, cmd, cmdfmt, cmdhelp, shell, **kwargs):
+def add_cli_in_window_cmd(unet, name, helpfmt, helptxt, execfmt, **kwargs):
     """Adds a CLI command to the CLI.
 
     The command `cmd` is added to the commands executable by the user from the CLI.  See
@@ -384,17 +399,18 @@ def add_cli_in_window_cmd(unet, cmd, cmdfmt, cmdhelp, shell, **kwargs):
 
     Args:
         unet: unet object
-        cmd: command string (no spaces)
-        cmdfmt: format of command to display in help (left side)
-        cmdhelp: help string for command (right side)
-        shell: interpreter `cmd` to pass to `host.run_in_window()`
+        name: command string (no spaces)
+        helpfmt: format of command to display in help (left side)
+        helptxt: help string for command (right side)
+        execfmt: interpreter `cmd` to pass to `host.run_in_window()`, if {} present then
+          allow for user commands to be entered and inserted.
         **kwargs: keyword args to pass to `host.run_in_window()`
     """
-    unet.cli_in_window_cmds[cmd] = (cmdfmt, cmdhelp, (shell, kwargs))
+    unet.cli_in_window_cmds[name] = (helpfmt, helptxt, execfmt, kwargs)
 
 
 def add_cli_run_cmd(
-    unet, cmd, cmdfmt, cmdhelp, execfmt, on_host=False, interactive=False
+    unet, name, helpfmt, helptxt, execfmt, on_host=False, interactive=False
 ):
     """Adds a CLI command to the CLI.
 
@@ -404,14 +420,61 @@ def add_cli_run_cmd(
 
     Args:
         unet: unet object
-        cmd: command string (no spaces)
-        cmdfmt: format of command to display in help (left side)
-        cmdhelp: help string for command (right side)
+        name: command string (no spaces)
+        helpfmt: format of command to display in help (left side)
+        helptxt: help string for command (right side)
         execfmt: format string to insert user cmds into for execution
         on_host: Should execute the command on the host vs in the node namespace.
         interactive: Should execute the command inside an allocated pty (interactive)
     """
-    unet.cli_run_cmds[cmd] = (cmdfmt, cmdhelp, (execfmt, on_host, interactive))
+    unet.cli_run_cmds[name] = (helpfmt, helptxt, execfmt, on_host, interactive)
+
+
+def add_cli_config(unet, config):
+    """Adds CLI commands based on config.
+
+    All strings will have %NAME% and %INSTANCE% replaced with the corresponding current
+    munet `instance` and node `name`.  The format of the config dictionary can be seen
+    in the following example.  The first list entry represents the default command
+    because it has no `name` key.
+
+      commands:
+        - help: "run the given FRR command using vtysh"
+          format: "[HOST ...] FRR-CLI-COMMAND"
+          exec: "vtysh -c {}"
+          on-host: false        # the default
+          interactive: false    # the default
+        - name: "vtysh"
+          help: "Open a FRR CLI inside new terminal[s] on the given HOST[s]"
+          format: "vtysh HOST [HOST ...]"
+          exec: "vtysh"
+          new-window: true
+
+    The `new_window` key can also be a dictionary which will be passed as keyward
+    arguments to the `Commander.run_in_window()` function.
+
+    Args:
+        unet: unet object
+        config: dictionary of cli config
+    """
+
+    for cli_cmd in config.get("commands", []):
+        name = cli_cmd.get("name", None)
+        helpfmt = cli_cmd.get("format", "")
+        helptxt = cli_cmd.get("help", "")
+        execfmt = cli_cmd.get("exec", "bash -c '{}'")
+        stdargs = (unet, name, helpfmt, helptxt, execfmt)
+        new_window = cli_cmd.get("new-window", None)
+        if new_window is True:
+            add_cli_in_window_cmd(*stdargs)
+        elif new_window is not None:
+            add_cli_in_window_cmd(*stdargs, **new_window)
+        else:
+            add_cli_run_cmd(
+                *stdargs,
+                cli_cmd.get("run-on-host", False),
+                cli_cmd.get("interactive", False),
+            )
 
 
 def cli(

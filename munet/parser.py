@@ -26,8 +26,10 @@ import subprocess
 import sys
 import tempfile
 
+from collections.abc import Iterable
 from copy import deepcopy
 
+from . import cli
 from .native import Munet
 
 
@@ -159,6 +161,18 @@ def load_kinds(args):
     return {}
 
 
+def config_subst(config, **kwargs):
+    if isinstance(config, str):
+        for name, value in kwargs:
+            config = config.replace(f"%{name.upper()}%", value)
+    elif isinstance(config, Iterable):
+        try:
+            return {k: config_subst(config[k]) for k in config}
+        except (KeyError, TypeError):
+            return [config_subst(x) for x in config]
+    return config
+
+
 def value_merge_deepcopy(s1, s2):
     "Create a deepcopy of the result of merging the values of keys from dicts d1 and d2"
     d = {}
@@ -189,9 +203,13 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
         return unet
 
     config = config["topology"]
+
     kinds = load_kinds(args)
     if "kinds" in config and config["kinds"]:
         kinds = {**kinds, **config["kinds"]}
+
+    if "cli" in config:
+        cli.add_cli_config(unet, config["cli"])
 
     if "switches" in config:
         for name, conf in config["switches"].items():
@@ -200,6 +218,7 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kind = conf.get("kind")
             kconf = kinds.get(kind) if kind else None
             if kconf:
+                kconf = config_subst(kconf, instance=unet.instance, name=name)
                 conf = {**kconf, **conf}
                 config["switches"][name] = conf
             unet.add_l3_switch(name, conf, logger=logger)
@@ -211,9 +230,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kind = conf.get("kind")
             kconf = kinds.get(kind) if kind else {}
             if kconf:
-                kconf = kind_substitute(kconf, name)
+                kconf = config_subst(kconf, instance=unet.instance, name=name)
                 conf = {**kconf, **conf}
-                config["switches"][name] = conf
+                config["nodes"][name] = conf
             unet.add_l3_node(name, conf, logger=logger)
 
     # Go through all connections and name them so they are sane to the user
