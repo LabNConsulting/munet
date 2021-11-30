@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.3.0"
+version = "0.3.1"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -26,6 +26,7 @@ pytest = "^6.2.5"
 pytest-asyncio = "^0.15.1"
 pytest-cov = "^3.0.0"
 black = {version = "^21.9b0", allow-prereleases = true}
+pytest-xdist = "^2.4.0"
 
 [tool.poetry.extras]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]

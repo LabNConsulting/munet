@@ -270,7 +270,7 @@ class L3Node(LinuxNamespace):
             stdin=subprocess.DEVNULL,
             stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
             stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
-            # start_new_session=True,  # allows us to signal all children to exit
+            start_new_session=True,  # allows us to signal all children to exit
         )
         self.logger.debug(
             "%s: async_popen %s => %s",
@@ -647,6 +647,8 @@ class L3ContainerNode(L3Node):
             stdin=subprocess.DEVNULL,
             stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
             stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
+            # We don't need this here b/c we are only ever running podman and that's all
+            # we need to kill for cleanup
             # start_new_session=True,  # allows us to signal all children to exit
             skip_pre_cmd=True,
         )

@@ -1103,6 +1103,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
             return None
 
         self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+
+        # XXX Are we calling this -p.pid on cmd_p which isn't setup right for that?
+
         os.kill(-p.pid, signal.SIGTERM)
         try:
             assert not isinstance(p, subprocess.Popen)
