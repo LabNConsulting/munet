@@ -1,10 +1,9 @@
 version: 1
 topology:
-  switches:
+  networks-autonumber: true
+  networks:
     net0:
-      type: bridge
     net1:
-      type: bridge
       ip: "192.168.10.0/24"
   nodes:
     r1:

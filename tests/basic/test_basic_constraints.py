@@ -41,7 +41,7 @@ async def ping_average_rtt(r, other, oifname):
 async def ping_with_loss(r, other, oifname):
     oip = other.intf_addrs[oifname].ip
     await r.async_cmd_status(f"ping -w1 -c1 {oip}")
-    r, o, e = await r.async_cmd_status(f"ping -i.01 -c300 {oip}")
+    r, o, _ = await r.async_cmd_status(f"ping -i.01 -c300 {oip}")
     ms = r"(\d+) packets transmitted, (\d+) received"
     m = re.search(ms, o)
     sent, recv = [float(x) for x in m.groups()]
@@ -50,14 +50,15 @@ async def ping_with_loss(r, other, oifname):
 
 async def test_basic_ping(rundir):
     unet = Munet(rundir)
+    unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
     r2 = unet.add_l3_node("r2")
     r3 = unet.add_l3_node("r3")
 
-    sw1 = unet.add_l3_switch("sw1")
-    unet.add_l3_link(sw1, r1)
-    unet.add_l3_link(sw1, r2)
+    sw1 = unet.add_network("sw1", {"ip": "auto"})
+    unet.add_native_link(sw1, r1)
+    unet.add_native_link(sw1, r2)
 
     #
     # L3 API w/ delay constraint
@@ -66,7 +67,7 @@ async def test_basic_ping(rundir):
     ci1 = {"name": ifname, "delay": 80000}
     ci2 = {"name": ifname, "delay": 40000}
     exp_avg = (ci1["delay"] + ci2["delay"]) / 1000
-    unet.add_l3_link(r2, r3, ci1, ci2)
+    unet.add_native_link(r2, r3, ci1, ci2)
 
     avg = await ping_average_rtt(r2, r3, ifname)
     logging.info("ping average RTT: %s", avg)
@@ -91,7 +92,7 @@ async def test_basic_ping(rundir):
     ifname = "p2p2"
     ci1 = {"name": ifname, "delay": 1, "loss": 30, "loss-correlation": 0}
     ci2 = {"name": ifname}
-    unet.add_l3_link(r2, r3, ci1, ci2)
+    unet.add_native_link(r2, r3, ci1, ci2)
 
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)

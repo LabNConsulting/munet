@@ -65,20 +65,21 @@ def get_loopback_ips(c, nid):
 #     return None
 
 
-def get_ip_network(c):
-    if "ip" in c and c["ip"] != "auto":
-        try:
-            return ipaddress.ip_interface(c["ip"])
-        except ValueError:
-            return ipaddress.ip_network(c["ip"])
-    return None
-
-
 def make_ip_network(net, inc):
     n = ipaddress.ip_network(net)
     return ipaddress.ip_network(
         (n.network_address + inc * n.num_addresses, n.prefixlen)
     )
+
+
+def get_ip_network(c, brid):
+    ip = c.get("ip")
+    if ip and ip != "auto":
+        try:
+            return ipaddress.ip_interface(ip)
+        except ValueError:
+            return ipaddress.ip_network(ip)
+    return make_ip_network("10.0.0.0/24", brid)
 
 
 async def to_thread(func):
@@ -115,8 +116,7 @@ class L3Bridge(Bridge):
 
         self.config = config if config else {}
 
-        ia = get_ip_network(self.config)
-        self.ip_interface = ia if ia else make_ip_network("10.0.0.0/24", self.id)
+        self.ip_interface = get_ip_network(self.config, self.id)
         if hasattr(self.ip_interface, "network"):
             self.ip_network = self.ip_interface.network
             self.ip_address = self.ip_interface.ip
@@ -209,7 +209,7 @@ class L3Node(LinuxNamespace):
             self.bind_mount(os.path.join(self.rundir, "hosts.txt"), "/etc/hosts")
 
     def mount_volumes(self):
-        if "volumes" not in self.config:
+        if not self.config.get("volumes"):
             return
 
         for m in self.config["volumes"]:
@@ -296,7 +296,7 @@ class L3Node(LinuxNamespace):
     def set_lan_addr(self, switch, cconf):
         if "ip" in cconf:
             ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" in cconf else None
-        else:
+        elif self.unet.autonumber:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
                 self,
@@ -305,6 +305,9 @@ class L3Node(LinuxNamespace):
             )
             n = switch.ip_network
             ipaddr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
+        else:
+            return
+
         ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
@@ -314,27 +317,28 @@ class L3Node(LinuxNamespace):
             self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
     def set_p2p_addr(self, other, cconf, occonf):
-        if "ip" in cconf:
-            ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf["ip"] else None
-            oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf["ip"] else None
-        else:
-            n = self.next_p2p_network
-            self.next_p2p_network = make_ip_network(n, 1)
+        ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf.get("ip") else None
+        oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf.get("ip") else None
 
-            ipaddr = ipaddress.ip_interface(n)
-            oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
+        if not ipaddr and not oipaddr:
+            if self.unet.autonumber:
+                n = self.next_p2p_network
+                self.next_p2p_network = make_ip_network(n, 1)
 
-        ifname = cconf["name"]
-        oifname = occonf["name"]
-
-        self.intf_addrs[ifname] = ipaddr
-        other.intf_addrs[oifname] = oipaddr
+                ipaddr = ipaddress.ip_interface(n)
+                oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
+            else:
+                return
 
         if ipaddr:
+            ifname = cconf["name"]
+            self.intf_addrs[ifname] = ipaddr
             self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
             self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
         if oipaddr:
+            oifname = occonf["name"]
+            other.intf_addrs[oifname] = oipaddr
             self.logger.debug(
                 "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
             )
@@ -732,6 +736,7 @@ class Munet(BaseMunet):
         super().__init__(**kwargs)
         self.rundir = rundir if rundir else "/tmp/unet-" + self.instance
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
+        self.config = {}
 
         cli.add_cli_in_window_cmd(
             self,
@@ -775,7 +780,17 @@ class Munet(BaseMunet):
             True,
         )
 
-    def add_l3_link(self, node1, node2, c1=None, c2=None):
+    @property
+    def autonumber(self):
+        return self.config.get("topology", {}).get("networks-autonumber")
+
+    @autonumber.setter
+    def autonumber(self, value):
+        if not self.config.get("topology"):
+            self.config["topology"] = {}
+        self.config["topology"]["networks-autonumber"] = bool(value)
+
+    def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
         isp2p = False
 
@@ -821,14 +836,13 @@ class Munet(BaseMunet):
             cls = L3Node
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
 
-    def add_l3_switch(self, name, config=None, **kwargs):
-        """Add a switch to munet."""
+    def add_network(self, name, config=None, **kwargs):
+        """Add a l2 or l3 switch to munet."""
+        if config is None:
+            config = {}
 
-        # If "ip" is explicitly empty/none/false just create a bridge.
-        if config and "ip" in config and not config["ip"]:
-            return super().add_switch(name, cls=L2Bridge, config=config, **kwargs)
-
-        return super().add_switch(name, cls=L3Bridge, config=config, **kwargs)
+        cls = L3Bridge if config.get("ip") else L2Bridge
+        return super().add_switch(name, cls=cls, config=config, **kwargs)
 
     async def run(self):
         tasks = []

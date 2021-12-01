@@ -163,13 +163,13 @@ def load_kinds(args):
 
 def config_subst(config, **kwargs):
     if isinstance(config, str):
-        for name, value in kwargs:
+        for name, value in kwargs.items():
             config = config.replace(f"%{name.upper()}%", value)
     elif isinstance(config, Iterable):
         try:
-            return {k: config_subst(config[k]) for k in config}
+            return {k: config_subst(config[k], **kwargs) for k in config}
         except (KeyError, TypeError):
-            return [config_subst(x) for x in config]
+            return [config_subst(x, **kwargs) for x in config]
     return config
 
 
@@ -179,6 +179,27 @@ def value_merge_deepcopy(s1, s2):
     for k, v in s1.items():
         if k not in s2:
             d[k] = deepcopy(v)
+
+
+def merge_kind_config(kconf, config):
+    mergekeys = kconf.get("merge", [])
+    new = {**kconf}
+    for k in new:
+        if k not in config:
+            continue
+
+        if k not in mergekeys:
+            new[k] = config[k]
+        elif isinstance(new[k], list):
+            new[k].extend(config[k])
+        elif isinstance(new[k], dict):
+            new[k] = {**new[k], **config[k]}
+        else:
+            new[k] = config[k]
+    for k in config:
+        if k not in new:
+            new[k] = config[k]
+    return new
 
 
 def build_topology(config=None, logger=None, rundir=None, args=None):
@@ -211,17 +232,22 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
     if "cli" in config:
         cli.add_cli_config(unet, config["cli"])
 
-    if "switches" in config:
-        for name, conf in config["switches"].items():
+    # Allow for all networks to be auto-numbered
+    autonumber = config.get("networks-autonumber")
+
+    if "networks" in config:
+        for name, conf in config["networks"].items():
             if conf is None:
                 conf = {}
             kind = conf.get("kind")
             kconf = kinds.get(kind) if kind else None
             if kconf:
-                kconf = config_subst(kconf, instance=unet.instance, name=name)
-                conf = {**kconf, **conf}
-                config["switches"][name] = conf
-            unet.add_l3_switch(name, conf, logger=logger)
+                conf = merge_kind_config(kconf, conf)
+            conf = config_subst(conf, instance=unet.instance, name=name)
+            if "ip" not in conf and autonumber:
+                conf["ip"] = "auto"
+            config["networks"][name] = conf
+            unet.add_network(name, conf, logger=logger)
 
     if "nodes" in config:
         for name, conf in config["nodes"].items():
@@ -230,9 +256,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kind = conf.get("kind")
             kconf = kinds.get(kind) if kind else {}
             if kconf:
-                kconf = config_subst(kconf, instance=unet.instance, name=name)
-                conf = {**kconf, **conf}
-                config["nodes"][name] = conf
+                conf = merge_kind_config(kconf, conf)
+            conf = config_subst(conf, instance=unet.instance, name=name)
+            config["nodes"][name] = conf
             unet.add_l3_node(name, conf, logger=logger)
 
     # Go through all connections and name them so they are sane to the user
@@ -267,12 +293,12 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             if to in unet.switches:
                 switch = unet.switches[to]
                 swconf = find_matching_net_config(name, cconf, switch.config)
-                unet.add_l3_link(switch, node, swconf, cconf)
+                unet.add_native_link(switch, node, swconf, cconf)
             elif cconf["name"] not in node.intfs:
                 # Only add the p2p interface if not already there.
                 other = unet.hosts[to]
                 oconf = find_matching_net_config(name, cconf, other.config)
-                unet.add_l3_link(node, other, cconf, oconf)
+                unet.add_native_link(node, other, cconf, oconf)
 
     if "dns" in config:
         write_hosts_files(unet, config["dns"])
