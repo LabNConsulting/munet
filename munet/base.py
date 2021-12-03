@@ -991,6 +991,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         if self.unet.test("-f", outer):
             self.cmd_raises(f"mkdir -p {os.path.dirname(inner)} && touch {inner}")
         else:
+            if not self.unet.test("-e", outer):
+                self.cmd_raises(f"mkdir -p {outer}")
             self.cmd_raises(f"mkdir -p {inner}")
         try:
             self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
