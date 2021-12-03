@@ -243,7 +243,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kconf = kinds.get(kind) if kind else None
             if kconf:
                 conf = merge_kind_config(kconf, conf)
-            conf = config_subst(conf, instance=unet.instance, name=name)
+            conf = config_subst(
+                conf, instance=unet.instance, name=name, rundir=unet.rundir
+            )
             if "ip" not in conf and autonumber:
                 conf["ip"] = "auto"
             config["networks"][name] = conf
@@ -257,7 +259,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             kconf = kinds.get(kind) if kind else {}
             if kconf:
                 conf = merge_kind_config(kconf, conf)
-            conf = config_subst(conf, instance=unet.instance, name=name)
+            conf = config_subst(
+                conf, instance=unet.instance, name=name, rundir=unet.rundir
+            )
             config["nodes"][name] = conf
             unet.add_l3_node(name, conf, logger=logger)
 

@@ -248,6 +248,7 @@ async def doline(unet, line, outf, background=False, notty=False):
         if "{}" in execfmt:
             execfmt = execfmt.format(ucmd)
         execfmt = execfmt.replace("%INSTANCE%", unet.instance)
+        execfmt = execfmt.replace("%RUNDIR%", unet.rundir)
         try:
             for host in hosts:
                 shcmd = execfmt.replace("%NAME%", host)
@@ -433,7 +434,7 @@ def add_cli_run_cmd(
 def add_cli_config(unet, config):
     """Adds CLI commands based on config.
 
-    All strings will have %NAME% and %INSTANCE% replaced with the corresponding current
+    All strings will have %NAME% %INSTANCE% %RUNDIR% replaced with the corresponding current
     munet `instance` and node `name`.  The format of the config dictionary can be seen
     in the following example.  The first list entry represents the default command
     because it has no `name` key.
