@@ -117,7 +117,7 @@ def setup_signals(tasklist):
             )
 
 
-async def async_main(args, unet):
+async def _async_main(args, unet):
 
     tasks = []
 
@@ -137,13 +137,35 @@ async def async_main(args, unet):
         else:
             # Wait on our tasks
             logger.info("Waiting for all node cmd to complete")
-            task = asyncio.gather(*tasks)
+            task = asyncio.gather(*tasks, return_exceptions=True)
         await task
     except asyncio.CancelledError as ex:
         logger.info("Exiting, task canceled: %s tasks: %s", ex, tasks)
         return 1
     logger.info("Exiting normally")
     return 0
+
+
+async def async_main(args, unet):
+    status = 3
+    try:
+        status = await _async_main(args, unet)
+    except KeyboardInterrupt:
+        logger.info("Exiting, received KeyboardInterrupt")
+    except ExitSignalError as error:
+        logger.info("Exiting, received ExitSignalError: %s", error)
+    except Exception as error:
+        logger.info("Exiting, unexpected exception %s", error, exc_info=True)
+
+    try:
+        if unet:
+            logger.debug("main: async deleting")
+            await unet.async_delete()
+    except Exception as error:
+        status = 2
+        logger.info("Deleting, unexpected exception %s", error, exc_info=True)
+
+    return status
 
 
 def main(*args):
@@ -196,7 +218,6 @@ def main(*args):
         unet = parser.build_topology(config, rundir=args.rundir, args=args)
         logger.info("Topology up: rundir: %s", unet.rundir)
 
-        status = 3
         # Executes the cmd for each node.
         status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
@@ -205,14 +226,6 @@ def main(*args):
         logger.info("Exiting, received ExitSignalError: %s", error)
     except Exception as error:
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
-
-    try:
-        logger.debug("main: async deleting")
-        if unet:
-            asyncio.run(unet.async_delete(), debug=True)
-    except Exception as error:
-        status = 2
-        logger.info("Deleting, unexpected exception %s", error, exc_info=True)
 
     return status
 
