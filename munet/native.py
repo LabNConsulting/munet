@@ -281,12 +281,13 @@ class L3Node(LinuxNamespace):
         return self.cmd_p
 
     def cmd_completed(self, future):
+        self.logger.debug("%s: cmd completed called", self)
         try:
             n = future.result()
-            self.logger.info("%s: cmd completed result: %s", self, n)
+            self.logger.debug("%s: node cmd completed result: %s", self, n)
         except asyncio.CancelledError:
             # Should we stop the container if we have one?
-            self.logger.debug("%s: cmd.wait() canceled", future)
+            self.logger.debug("%s: node cmd wait() canceled", future)
 
     # def child_exit(self, pid):
     #     """Called back when cmd finishes executing."""
@@ -346,7 +347,8 @@ class L3Node(LinuxNamespace):
 
     async def async_delete(self):
         if type(self) == L3Node:  # pylint: disable=C0123
-            self.logger.info("%s: node async deleting", self.name)
+            # Used to use info here as the top level delete but the user doesn't care, right?
+            self.logger.debug("%s: node async deleting", self.name)
         else:
             self.logger.debug("%s: node async_delete", self.name)
         await self.async_cleanup_proc(self.cmd_p)
@@ -686,17 +688,21 @@ class L3ContainerNode(L3Node):
         return self.cmd_p
 
     def cmd_completed(self, future):
+        self.logger.debug("%s: cmd completed called", self)
         try:
             n = future.result()
             self.container_id = None
-            self.logger.info("%s: contianer cmd completed result: %s", self, n)
-        except asyncio.CancelledError:
+            self.logger.debug("%s: node contianer cmd completed result: %s", self, n)
+        except asyncio.CancelledError as error:
             # Should we stop the container if we have one?
-            self.logger.debug("%s: container cmd.wait() canceled", future)
+            self.logger.debug(
+                "%s: node container cmd wait() canceled: %s", future, error
+            )
 
     async def async_delete(self):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
-            self.logger.info("%s: container async deleting", self.name)
+            # Used to use info here as the top level delete but the user doesn't care, right?
+            self.logger.debug("%s: container async deleting", self.name)
         else:
             self.logger.debug("%s: container async delete", self.name)
 
@@ -846,7 +852,10 @@ class Munet(BaseMunet):
 
     async def run(self):
         tasks = []
+
         run_nodes = [x for x in self.hosts.values() if hasattr(x, "run_cmd")]
+        run_nodes = [x for x in run_nodes if x.config.get("cmd")]
+
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")

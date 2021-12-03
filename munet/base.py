@@ -297,6 +297,7 @@ class Commander:  # pylint: disable=R0904
 
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         if async_exec:
+            # XXX we really don't want to be canceled here.
             p = asyncio.create_subprocess_exec(*actual_cmd, **defaults)
         else:
             p = subprocess.Popen(actual_cmd, **defaults)
@@ -1095,9 +1096,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 self.logger.warning("%s: kill timeout", self)
                 return p
             except Exception as error:
-                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+                self.logger.warning(
+                    "%s: kill unexpected exception: %s", self, error, exc_info=True
+                )
         except Exception as error:
-            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
+            self.logger.warning(
+                "%s: terminate unexpected exception: %s", self, error, exc_info=True
+            )
         return None
 
     async def async_cleanup_proc(self, p):
@@ -1124,9 +1129,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 self.logger.warning("%s: kill timeout", self)
                 return p
             except Exception as error:
-                self.logger.warning("%s: kill unexpected exception: %s", self, error)
+                self.logger.warning(
+                    "%s: kill unexpected exception: %s", self, error, exc_info=True
+                )
         except Exception as error:
-            self.logger.warning("%s: terminate unexpected exception: %s", self, error)
+            self.logger.warning(
+                "%s: terminate unexpected exception: %s", self, error, exc_info=True
+            )
         return None
 
     def delete(self):
@@ -1436,14 +1445,18 @@ class BaseMunet(LinuxNamespace):
     async def async_delete(self):
         """Delete the munet topology."""
         self.logger.debug("%s: deleting.", self)
-
-        ltask = self._delete_links()
-        htask = asyncio.gather(*[x.async_delete() for x in self.hosts.values()])
-        stask = asyncio.gather(*[x.async_delete() for x in self.switches.values()])
         try:
-            # First delete links, then hosts and switches
-            await ltask
-            await asyncio.gather(htask, stask)
+            await self._delete_links()
+        except Exception as error:
+            self.logger.error(
+                "%s: error deleting links: %s", self, error, exc_info=True
+            )
+        try:
+            # Delete hosts and switches, wait for them all to complete
+            # even if there is an exception.
+            htask = [x.async_delete() for x in self.hosts.values()]
+            stask = [x.async_delete() for x in self.switches.values()]
+            await asyncio.gather(*htask, *stask, return_exceptions=True)
         except Exception as error:
             self.logger.error(
                 "%s: error deleting hosts and switches: %s", self, error, exc_info=True
