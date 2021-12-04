@@ -20,10 +20,8 @@
 #
 import argparse
 import asyncio
-import functools
 import logging
 import logging.config
-import signal
 import subprocess
 import sys
 import tempfile
@@ -31,48 +29,6 @@ import tempfile
 from . import cli
 from . import parser
 from .cleanup import cleanup_previous
-from .native import L3Node
-from .native import to_thread
-
-
-# logger = logging.getLogger("main")
-
-ign_signals = {
-    signal.SIGCONT,
-    signal.SIGIO,
-    signal.SIGPIPE,  # right to ignore?
-    # signal.SIGTTIN,
-    # signal.SIGTTOU,
-    signal.SIGURG,
-    signal.SIGUSR1,
-    signal.SIGUSR2,
-    signal.SIGWINCH,
-}
-exit_signals = {
-    signal.SIGHUP,
-    # signal.SIGINT,
-    signal.SIGQUIT,
-    signal.SIGTERM,
-}
-fail_signals = {
-    signal.SIGABRT,
-    signal.SIGBUS,
-    signal.SIGFPE,
-    signal.SIGILL,
-    signal.SIGPWR,
-    signal.SIGSEGV,
-    signal.SIGSYS,
-    signal.SIGXCPU,
-    signal.SIGXFSZ,
-}
-
-
-class ExitSignalError(BaseException):
-    pass
-
-
-class FailSignalError(BaseException):
-    pass
 
 
 async def forever():
@@ -80,82 +36,39 @@ async def forever():
         await asyncio.sleep(3600)
 
 
-def setup_signals(tasklist):
-    loop = asyncio.get_running_loop()
-
-    def raise_signal(signum, fail):
-        logger.critical(
-            "Caught SIGNAL %s: %s", signum, signal.strsignal(signum), stack_info=fail
-        )
-        for task in tasklist:
-            task.cancel()
-
-    for sn in signal.valid_signals():
-        h = signal.getsignal(sn)
-        is_handled = h and h not in {signal.SIG_IGN, signal.SIG_DFL}
-        if is_handled:
-            if sn != signal.SIGINT:
-                logger.warning(
-                    "skipping python handled signum %s %s", sn, signal.strsignal(sn)
-                )
-        elif sn in ign_signals and is_handled != signal.SIG_IGN:
-            try:
-                signal.signal(sn, signal.SIG_IGN)
-            except Exception as e:
-                logger.debug("exception trying to ignore signal %s: %s", sn, e)
-        elif sn in exit_signals or sn in fail_signals:
-            loop.add_signal_handler(
-                sn, functools.partial(raise_signal, sn, sn in fail_signals)
-            )
-        elif not (
-            hasattr(signal, "SIGRTMIN")
-            and hasattr(signal, "SIGRTMAX")
-            and signal.SIGRTMIN <= sn <= signal.SIGRTMAX
-        ):
-            logger.debug(
-                "doing nothing for signum %s %s (%s)", sn, signal.strsignal(sn), h
-            )
-
-
-async def _async_main(args, unet):
-
+async def run_and_wait(args, unet):
     tasks = []
 
-    setup_signals(tasks)
-    try:
-        if not args.topology_only:
-            tasks.extend(await unet.run())
+    if not args.topology_only:
+        # add the cmd.wait()s returned from unet.run()
+        tasks += await unet.run()
 
-        if sys.stdin.isatty() and not args.no_cli:
-            # Run an interactive CLI
-            task = asyncio.create_task(cli.async_cli(unet))
-            tasks.append(task)
-        elif not args.no_wait:
+    if sys.stdin.isatty() and not args.no_cli:
+        # Run an interactive CLI
+        task = asyncio.create_task(cli.async_cli(unet))
+    else:
+        if args.no_wait:
+            logger.info("Waiting for all node cmd to complete")
+        else:
             logger.info("Waiting on signal to exit")
             task = asyncio.create_task(forever())
-            tasks.append(task)
-        else:
-            # Wait on our tasks
-            logger.info("Waiting for all node cmd to complete")
-            task = asyncio.gather(*tasks, return_exceptions=True)
-        await task
-    except asyncio.CancelledError as ex:
-        logger.info("Exiting, task canceled: %s tasks: %s", ex, tasks)
-        return 1
-    logger.info("Exiting normally")
-    return 0
+        task = asyncio.gather(task, *tasks, return_exceptions=True)
+
+    await task
 
 
 async def async_main(args, unet):
     status = 3
     try:
-        status = await _async_main(args, unet)
+        status = await run_and_wait(args, unet)
     except KeyboardInterrupt:
-        logger.info("Exiting, received KeyboardInterrupt")
-    except ExitSignalError as error:
-        logger.info("Exiting, received ExitSignalError: %s", error)
+        logger.info("Exiting, received KeyboardInterrupt in async_main")
+    except asyncio.CancelledError as ex:
+        logger.info("task canceled error: %s cleaning up", ex)
     except Exception as error:
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
+    else:
+        logger.info("Exiting normally")
 
     try:
         if unet:
@@ -221,9 +134,7 @@ def main(*args):
         # Executes the cmd for each node.
         status = asyncio.run(async_main(args, unet))
     except KeyboardInterrupt:
-        logger.info("Exiting, received KeyboardInterrupt")
-    except ExitSignalError as error:
-        logger.info("Exiting, received ExitSignalError: %s", error)
+        logger.info("Exiting, received KeyboardInterrupt in main")
     except Exception as error:
         logger.info("Exiting, unexpected exception %s", error, exc_info=True)
 

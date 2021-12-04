@@ -297,7 +297,6 @@ class Commander:  # pylint: disable=R0904
 
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         if async_exec:
-            # XXX we really don't want to be canceled here.
             p = asyncio.create_subprocess_exec(*actual_cmd, **defaults)
         else:
             p = subprocess.Popen(actual_cmd, **defaults)
