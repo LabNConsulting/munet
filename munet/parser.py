@@ -223,14 +223,14 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
     if not config or "topology" not in config:
         return unet
 
+    if "cli" in config:
+        cli.add_cli_config(unet, config["cli"])
+
     config = config["topology"]
 
     kinds = load_kinds(args)
     if "kinds" in config and config["kinds"]:
         kinds = {**kinds, **config["kinds"]}
-
-    if "cli" in config:
-        cli.add_cli_config(unet, config["cli"])
 
     # Allow for all networks to be auto-numbered
     autonumber = config.get("networks-autonumber")
@@ -304,8 +304,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
                 oconf = find_matching_net_config(name, cconf, other.config)
                 unet.add_native_link(node, other, cconf, oconf)
 
-    if "dns" in config:
-        write_hosts_files(unet, config["dns"])
+    # if "dns" in config:
+    write_hosts_files(unet, config.get("dns"))
 
     # Write our current config to the run directory
     with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:

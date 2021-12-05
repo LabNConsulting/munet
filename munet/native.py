@@ -577,6 +577,7 @@ class L3ContainerNode(L3Node):
             f"--name={self.container_id}",
             f"--net=ns:/proc/{self.pid}/ns/net",
             f"--hostname={self.name}",
+            f"--add-host={self.name}:127.0.0.1",
             # We can't use --rm here b/c podman fails on "stop".
             # u"--rm",
         ]

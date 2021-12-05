@@ -19,10 +19,10 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 
-import os
 import argparse
 import json
-import subprocess
+import os
+import sys
 
 
 def main(*args):
@@ -49,21 +49,31 @@ def main(*args):
     nodes = []
     config = json.load(open(os.path.join(rundir, "config.json"), encoding="utf-8"))
     nodes = list(config.get("topology", {}).get("nodes", []))
+    envcfg = config.get("mucmd", {}).get("environment", {})
 
     # If args.node is not a node it's part of shellcmd
     if args.node and args.node not in nodes:
         args.shellcmd[0:0] = [args.node]
         args.node = None
 
-    if not args.node:
-        pidpath = os.path.join(rundir, "nspid")
-    else:
+    if args.node:
+        name = args.node
         pidpath = os.path.join(rundir, f"{args.node}/nspid")
+    else:
+        name = "munet"
+        pidpath = os.path.join(rundir, "nspid")
     pid = open(pidpath, encoding="ascii").read().strip()
 
-    return os.execvp(
-        "/usr/bin/nsenter", ["/usr/bin/nsenter", "-aF", "-t", pid] + args.shellcmd
-    )
+    for k in envcfg:
+        envcfg[k] = envcfg[k].replace("%INSTANCE%", args.instance)
+        envcfg[k] = envcfg[k].replace("%NAME%", name)
+        envcfg[k] = envcfg[k].replace("%RUNDIR%", rundir)
+
+    ecmd = "/usr/bin/nsenter"
+    eargs = [ecmd, "-aF", "-t", pid] + args.shellcmd
+    if envcfg:
+        return os.execvpe(ecmd, eargs, {**os.environ, **envcfg})
+    return os.execvp(ecmd, eargs)
 
 
 if __name__ == "__main__":
