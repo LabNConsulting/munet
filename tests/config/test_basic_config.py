@@ -65,15 +65,15 @@ def test_load_default(stdargs):
 
 
 def test_load_yaml_config(stdargs):
-    p = commander.popen(stdargs + ["-c", "topology.yaml"])
+    p = commander.popen(stdargs + ["-c", "munet.yaml"])
     check(p)
 
 
 def test_load_toml_config(stdargs):
-    p = commander.popen(stdargs + ["-c", "topology.toml"])
+    p = commander.popen(stdargs + ["-c", "munet.toml"])
     check(p)
 
 
 def test_load_json_config(stdargs):
-    p = commander.popen(stdargs + ["-c", "topology.json"])
+    p = commander.popen(stdargs + ["-c", "munet.json"])
     check(p)

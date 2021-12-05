@@ -98,6 +98,9 @@ def main(*args):
         "--no-cli", action="store_true", help="Do not run the interactive CLI"
     )
     ap.add_argument("--no-wait", action="store_true", help="Exit after commands")
+    ap.add_argument(
+        "-i", "--instance", default="0", help="instance (allows for parallel runs)"
+    )
     ap.add_argument("-d", "--rundir", help="runtime directory for tempfiles, logs, etc")
     ap.add_argument(
         "--topology-only",
@@ -107,7 +110,7 @@ def main(*args):
     ap.add_argument("-v", "--verbose", action="store_true", help="be verbose")
     args = ap.parse_args()
 
-    rundir = args.rundir if args.rundir else tempfile.mkdtemp(prefix="unet")
+    rundir = args.rundir if args.rundir else f"/tmp/unet-{args.instance}"
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
     args.rundir = rundir
 

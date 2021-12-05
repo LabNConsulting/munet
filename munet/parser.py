@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 import importlib.resources
+import json
 import logging
 import logging.config
 import os
@@ -51,7 +52,7 @@ def find_matching_net_config(name, cconf, oconf):
     return None
 
 
-def get_config(pathname=None, basename="topology", search=None, logf=logging.debug):
+def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
     if not pathname:
         if not search:
             search = [os.getcwd()]
@@ -74,8 +75,6 @@ def get_config(pathname=None, basename="topology", search=None, logf=logging.deb
             raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
     _, ext = pathname.rsplit(".", 1)
     if ext == "json":
-        import json  # pylint: disable=C0415
-
         config = json.load(open(pathname, encoding="utf-8"))
     elif ext == "toml":
         import toml  # pylint: disable=C0415
@@ -121,14 +120,15 @@ def setup_logging(args):
 
 def write_hosts_files(unet, netname):
     entries = []
-    for name, node in unet.hosts.items():
-        ifname = node.get_ifname(netname)
-        if ifname in node.intf_addrs:
-            entries.append((name, node.intf_addrs[ifname].ip))
+    if netname:
+        for name, node in unet.hosts.items():
+            ifname = node.get_ifname(netname)
+            if ifname in node.intf_addrs:
+                entries.append((name, node.intf_addrs[ifname].ip))
     for name, node in unet.hosts.items():
         with open(os.path.join(node.rundir, "hosts.txt"), "w", encoding="ascii") as hf:
             hf.write(
-                """127.0.0.1\tlocalhost
+                f"""127.0.0.1\tlocalhost {name}
 ::1\tip6-localhost ip6-loopback
 fe00::0\tip6-localnet
 ff00::0\tip6-mcastprefix
@@ -211,7 +211,7 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
     unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
 
     if not config:
-        config = get_config(basename="topology")
+        config = get_config(basename="munet")
 
     if config:
         unet.config = config
@@ -306,5 +306,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     if "dns" in config:
         write_hosts_files(unet, config["dns"])
+
+    # Write our current config to the run directory
+    with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
 
     return unet

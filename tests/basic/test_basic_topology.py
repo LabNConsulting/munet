@@ -31,7 +31,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize(
-    "unet_param", ["topology", "noinit", "noinit-noshell"], indirect=["unet_param"]
+    "unet_param", ["munet", "noinit", "noinit-noshell"], indirect=["unet_param"]
 )
 async def test_basic_ping(unet_param):
     unet = unet_param

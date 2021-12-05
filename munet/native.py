@@ -204,6 +204,10 @@ class L3Node(LinuxNamespace):
         # Not host path based, but we assume same
         self.set_cwd(self.rundir)
 
+        # Save the namespace pid
+        with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
+            f.write(f"{self.pid}\n")
+
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         if os.path.exists(hosts_file):
             self.bind_mount(os.path.join(self.rundir, "hosts.txt"), "/etc/hosts")
@@ -743,6 +747,10 @@ class Munet(BaseMunet):
         self.rundir = rundir if rundir else "/tmp/unet-" + self.instance
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.config = {}
+
+        # Save the namespace pid
+        with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
+            f.write(f"{self.pid}\n")
 
         cli.add_cli_in_window_cmd(
             self,
