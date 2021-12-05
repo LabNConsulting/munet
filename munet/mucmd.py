@@ -46,7 +46,14 @@ def main(*args):
         print(f'rundir "{rundir}" doesn\'t exist')
         return 1
 
+    nodes = []
     config = json.load(open(os.path.join(rundir, "config.json"), encoding="utf-8"))
+    nodes = list(config.get("topology", {}).get("nodes", []))
+
+    # If args.node is not a node it's part of shellcmd
+    if args.node and args.node not in nodes:
+        args.shellcmd[0:0] = [args.node]
+        args.node = None
 
     if not args.node:
         pidpath = os.path.join(rundir, "nspid")
@@ -54,8 +61,9 @@ def main(*args):
         pidpath = os.path.join(rundir, f"{args.node}/nspid")
     pid = open(pidpath, encoding="ascii").read().strip()
 
-    return os.execvp("sudo", ["sudo", "nsenter", "-aF", "-t", pid] + args.shellcmd)
-    return 0
+    return os.execvp(
+        "/usr/bin/nsenter", ["/usr/bin/nsenter", "-aF", "-t", pid] + args.shellcmd
+    )
 
 
 if __name__ == "__main__":

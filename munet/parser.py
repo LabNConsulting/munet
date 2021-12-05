@@ -309,6 +309,6 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     # Write our current config to the run directory
     with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+        json.dump(unet.config, f, indent=2)
 
     return unet
