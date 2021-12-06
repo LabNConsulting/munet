@@ -251,6 +251,12 @@ class Commander:  # pylint: disable=R0904
         rc, _, _ = self.cmd_status([test_path, flags, arg], warn=False)
         return not rc
 
+    def test_host(self, flags, arg):
+        """Run test binary, with flags and arg"""
+        test_path = self.get_exec_path(["test"])
+        rc, _, _ = self.cmd_status_host([test_path, flags, arg], warn=False)
+        return not rc
+
     def path_exists(self, path):
         """Check if path exists."""
         return self.test("-e", path)
@@ -988,17 +994,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
     def bind_mount(self, outer, inner):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
-        if self.unet.test("-f", outer):
+        if self.test_host("-f", outer):
             self.cmd_raises(f"mkdir -p {os.path.dirname(inner)} && touch {inner}")
         else:
-            if not self.unet.test("-e", outer):
+            if not self.test_host("-e", outer):
                 self.cmd_raises(f"mkdir -p {outer}")
             self.cmd_raises(f"mkdir -p {inner}")
-        try:
-            self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
-        except Exception as error:
-            breakpoint()
-            print(error)
+        self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
 
     def add_netns(self, ns):
         self.logger.debug("Adding network namespace %s", ns)

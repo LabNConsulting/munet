@@ -26,7 +26,6 @@ import random
 import re
 import shlex
 import subprocess
-import tempfile
 
 from . import cli
 from .base import BaseMunet
@@ -351,7 +350,8 @@ class L3Node(LinuxNamespace):
 
     async def async_delete(self):
         if type(self) == L3Node:  # pylint: disable=C0123
-            # Used to use info here as the top level delete but the user doesn't care, right?
+            # Used to use info here as the top level delete but the user doesn't care,
+            # right?
             self.logger.debug("%s: node async deleting", self.name)
         else:
             self.logger.debug("%s: node async_delete", self.name)
@@ -706,7 +706,8 @@ class L3ContainerNode(L3Node):
 
     async def async_delete(self):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
-            # Used to use info here as the top level delete but the user doesn't care, right?
+            # Used to use info here as the top level delete but the user doesn't care,
+            # right?
             self.logger.debug("%s: container async deleting", self.name)
         else:
             self.logger.debug("%s: container async delete", self.name)
@@ -759,6 +760,7 @@ class Munet(BaseMunet):
             "hterm HOST [HOST ...]",
             "open terminal[s] on HOST[S] (outside containers), * for all",
             "bash",
+            [],
             on_host=True,
         )
         cli.add_cli_in_window_cmd(
@@ -767,6 +769,7 @@ class Munet(BaseMunet):
             "term HOST [HOST ...]",
             "open terminal[s] (TMUX or XTerm) on HOST[S], * for all",
             "bash",
+            [],
         )
         cli.add_cli_in_window_cmd(
             self,
@@ -774,6 +777,7 @@ class Munet(BaseMunet):
             "xterm HOST [HOST ...]",
             "open XTerm[s] on HOST[S], * for all",
             "bash",
+            [],
             forcex=True,
         )
         cli.add_cli_run_cmd(
@@ -782,6 +786,7 @@ class Munet(BaseMunet):
             "sh [HOST ...] <SHELL-COMMAND>",
             "execute <SHELL-COMMAND> on hosts",
             "bash -c '{}'",
+            [],
             False,
             False,
         )
@@ -791,6 +796,7 @@ class Munet(BaseMunet):
             "shi [HOST ...] <INTERACTIVE-COMMAND>",
             "execute <INTERACTIVE-COMMAND> on HOST[s]",
             "bash -c '{}'",
+            [],
             False,
             True,
         )

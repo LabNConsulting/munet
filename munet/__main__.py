@@ -24,11 +24,13 @@ import logging
 import logging.config
 import subprocess
 import sys
-import tempfile
 
 from . import cli
 from . import parser
 from .cleanup import cleanup_previous
+
+
+logger = None
 
 
 async def forever():
@@ -115,7 +117,7 @@ def main(*args):
     args.rundir = rundir
 
     parser.setup_logging(args)
-    global logger
+    global logger  # pylint: disable=W0603
     logger = logging.getLogger("main")
 
     config = parser.get_config(args.config)

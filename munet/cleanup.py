@@ -55,11 +55,9 @@ def _kill_piddict(pids_by_upid, sig):
         for pid in pids:
             try:
                 if pid != ourpid:
-                    logging.info(
-                        "killing proc %s (%s)",
-                        pid,
-                        open(f"/proc/{pid}/cmdline", "r").read().replace("\x00", " "),
-                    )
+                    cmdline = open(f"/proc/{pid}/cmdline", "r", encoding="ascii").read()
+                    cmdline = cmdline.replace("\x00", " ")
+                    logging.info("killing proc %s (%s)", pid, cmdline)
                     os.kill(int(pid), sig)
             except Exception:
                 pass
