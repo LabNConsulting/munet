@@ -137,5 +137,5 @@ async def test_ls_cmd(unet):
     assert match.strip() == stdout.getvalue().strip()
 
 
-async def _test_async_cli(unet):
-    await cli.async_cli(unet)
+async def _test_async_cli(unet, rundir):
+    await cli.async_cli(unet, histfile=f"{rundir}/cli-histfile.txt")

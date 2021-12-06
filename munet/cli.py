@@ -121,8 +121,8 @@ def host_cmd_split(unet, cmd, kinds, defall):
     return hosts, cmd
 
 
-def proc_readline(fd, prompt):
-    histfile = init_history(None, None)
+def proc_readline(fd, prompt, histfile):
+    histfile = init_history(None, histfile)
     try:
         sys.stdin = os.fdopen(fd)
         line = input(prompt)
@@ -134,10 +134,10 @@ def proc_readline(fd, prompt):
     return str(line)
 
 
-async def async_input(prompt):
+async def async_input(prompt, histfile):
     loop = asyncio.get_running_loop()
     input_pool = concurrent.futures.ProcessPoolExecutor()
-    partial = functools.partial(proc_readline, sys.stdin.fileno(), prompt)
+    partial = functools.partial(proc_readline, sys.stdin.fileno(), prompt, histfile)
     result = await loop.run_in_executor(input_pool, partial)
     return result
 
@@ -282,6 +282,7 @@ async def doline(unet, line, outf, background=False, notty=False):
 
 
 async def cli_client(sockpath, prompt="munet> "):
+    """Implement the user-facing CLI for a remote munet reached by a socket"""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(10)
     sock.connect(sockpath)
@@ -320,11 +321,13 @@ async def cli_client(sockpath, prompt="munet> "):
         sys.stdout.write(rb.decode("utf-8"))
 
 
-async def local_cli(unet, outf, prompt, background):
+async def local_cli(unet, outf, prompt, histfile, background):
+    """Implement the user-side CLI for local munet"""
+
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
         try:
-            line = await async_input(prompt)
+            line = await async_input(prompt, histfile)
             if line is None:
                 return
             if not await doline(unet, line, outf, background):
@@ -341,12 +344,12 @@ def init_history(unet, histfile):
                 if unet:
                     unet.cmd("touch " + histfile)
                 else:
-                    subprocess.run("touch " + histfile, check=True)
+                    subprocess.run("touch " + histfile, shell=True, check=True)
         if histfile:
             readline.read_history_file(histfile)
         return histfile
-    except Exception:
-        pass
+    except Exception as error:
+        logging.warning("init_history failed: %s", error)
     return None
 
 
@@ -511,7 +514,7 @@ def cli(
         if sockpath:
             asyncio.run(cli_client(sockpath, prompt))
         else:
-            asyncio.run(local_cli(unet, sys.stdout, prompt, background))
+            asyncio.run(local_cli(unet, sys.stdout, prompt, histfile, background))
     except EOFError:
         pass
     except Exception as ex:
@@ -544,7 +547,7 @@ async def async_cli(
         if sockpath:
             await cli_client(sockpath, prompt)
         else:
-            await local_cli(unet, sys.stdout, prompt, background)
+            await local_cli(unet, sys.stdout, prompt, histfile, background)
     except EOFError:
         pass
     except Exception as ex:
