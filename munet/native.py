@@ -520,6 +520,8 @@ class L3ContainerNode(L3Node):
         # eventually would be nice to support live mounting
         assert not self.container_id
         self.logger.debug("Bind mounting %s on %s", outer, inner)
+        if not self.test_host("-e", outer):
+            self.cmd_raises(f"mkdir -p {outer}")
         self.extra_mounts.append(f"--mount=type=bind,src={outer},dst={inner}")
 
     def mount_volumes(self):
@@ -539,6 +541,8 @@ class L3ContainerNode(L3Node):
                             os.path.dirname(self.unet.config["config_pathname"]), spath
                         )
                     )
+                    if not self.test_host("-e", spath):
+                        self.cmd_raises(f"mkdir -p {spath}")
                     args.append(f"--mount=type=bind,src={spath},dst={s[1]}")
                 continue
             margs = ["type=" + m["type"]]
@@ -552,6 +556,8 @@ class L3ContainerNode(L3Node):
                                 os.path.dirname(self.unet.config["config_pathname"]), v
                             )
                         )
+                        if not self.test_host("-e", v):
+                            self.cmd_raises(f"mkdir -p {v}")
                     margs.append(f"{k}={v}")
                 else:
                     margs.append(f"{k}")
@@ -696,7 +702,6 @@ class L3ContainerNode(L3Node):
         self.logger.debug("%s: cmd completed called", self)
         try:
             n = future.result()
-            self.container_id = None
             self.logger.debug("%s: node contianer cmd completed result: %s", self, n)
         except asyncio.CancelledError as error:
             # Should we stop the container if we have one?
@@ -712,10 +717,10 @@ class L3ContainerNode(L3Node):
         else:
             self.logger.debug("%s: container async delete", self.name)
 
-        if self.container_id:
+        if contid := self.container_id:
             if self.cmd_p and (rc := self.cmd_p.returncode) is None:
                 rc, o, e = await self.async_cmd_status_host(
-                    [get_exec_path_host("podman"), "stop", self.container_id]
+                    [get_exec_path_host("podman"), "stop", contid]
                 )
             if rc and rc < 128:
                 self.logger.warning(
@@ -723,7 +728,7 @@ class L3ContainerNode(L3Node):
                 )
             # now remove the container
             rc, o, e = await self.async_cmd_status_host(
-                [get_exec_path_host("podman"), "rm", self.container_id]
+                [get_exec_path_host("podman"), "rm", contid]
             )
             if rc:
                 self.logger.warning(
