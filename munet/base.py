@@ -282,7 +282,14 @@ class Commander:  # pylint: disable=R0904
             defaults["shell"] = False
             pre_cmd = self.pre_cmd
             cmd = [str(x) for x in cmd]
+
+        env = {**(kwargs[env] if "env" in kwargs else os.environ)}
+        if "MUNET_NODENAME" not in env:
+            env["MUNET_NODENAME"] = self.name
+        kwargs["env"] = env
+
         defaults.update(kwargs)
+
         return pre_cmd, cmd, defaults
 
     def _popen(self, method, cmd, skip_pre_cmd=False, async_exec=False, **kwargs):
@@ -527,6 +534,7 @@ class Commander:  # pylint: disable=R0904
 
         sudo_path = get_exec_path_host(["sudo"])
 
+        cmd = f"/usr/bin/env MUNET_NODENAME={self.name} {cmd}"
         if not self.is_container or on_host:
             # This is the command to execute to be inside the namespace.
             nscmd = sudo_path + " " + self.pre_cmd_str + cmd
@@ -556,7 +564,7 @@ class Commander:  # pylint: disable=R0904
                 cmd.append("-t")
                 cmd.append(tmux_target)
             if title:
-                nscmd = "printf '\033]2;{}\033\\'; {}".format(title, nscmd)
+                nscmd = f"printf '\033]2;{title}\033\\'; {nscmd}"
             if channel:
                 nscmd = 'trap "tmux wait -S {}; exit 0" EXIT; {}'.format(channel, nscmd)
             cmd.append(nscmd)

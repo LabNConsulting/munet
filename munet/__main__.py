@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import logging
 import logging.config
+import os
 import subprocess
 import sys
 
@@ -115,6 +116,9 @@ def main(*args):
     rundir = args.rundir if args.rundir else f"/tmp/unet-{args.instance}"
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
     args.rundir = rundir
+
+    os.environ["MUNET_INSTANCE"] = args.instance
+    os.environ["MUNET_RUNDIR"] = rundir
 
     parser.setup_logging(args)
     global logger  # pylint: disable=W0603
