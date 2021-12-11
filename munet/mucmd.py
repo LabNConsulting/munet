@@ -64,6 +64,11 @@ def main(*args):
         pidpath = os.path.join(rundir, "nspid")
     pid = open(pidpath, encoding="ascii").read().strip()
 
+    env = {**os.environ}
+    env["MUNET_INSTANCE"] = args.instance
+    env["MUNET_NODENAME"] = name
+    env["MUNET_RUNDIR"] = rundir
+
     for k in envcfg:
         envcfg[k] = envcfg[k].replace("%INSTANCE%", args.instance)
         envcfg[k] = envcfg[k].replace("%NAME%", name)
@@ -71,9 +76,7 @@ def main(*args):
 
     ecmd = "/usr/bin/nsenter"
     eargs = [ecmd, "-aF", "-t", pid] + args.shellcmd
-    if envcfg:
-        return os.execvpe(ecmd, eargs, {**os.environ, **envcfg})
-    return os.execvp(ecmd, eargs)
+    return os.execvpe(ecmd, eargs, {**env, **envcfg})
 
 
 if __name__ == "__main__":
