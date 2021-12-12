@@ -87,7 +87,7 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
     else:
         raise ValueError("Filename does not end with (.json|.toml|.yaml)")
 
-    config["config_pathname"] = pathname
+    config["config_pathname"] = os.path.realpath(pathname)
     return config
 
 
@@ -215,10 +215,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     if config:
         unet.config = config
-        unet.config_pathname = config["config_pathname"]
-        unet.config_dirname = os.path.abspath(
-            os.path.dirname(config["config_pathname"])
-        )
+        unet.config_pathname = os.path.realpath(config["config_pathname"])
+        unet.config_dirname = os.path.dirname(unet.config_pathname)
 
     if not config or "topology" not in config:
         return unet
