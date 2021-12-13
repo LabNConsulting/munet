@@ -794,7 +794,7 @@ class Munet(BaseMunet):
         cli.add_cli_run_cmd(
             self,
             "sh",
-            "sh [HOST ...] <SHELL-COMMAND>",
+            "[HOST ...] sh <SHELL-COMMAND>",
             "execute <SHELL-COMMAND> on hosts",
             "bash -c '{}'",
             [],
@@ -804,7 +804,7 @@ class Munet(BaseMunet):
         cli.add_cli_run_cmd(
             self,
             "shi",
-            "shi [HOST ...] <INTERACTIVE-COMMAND>",
+            "[HOST ...] shi <INTERACTIVE-COMMAND>",
             "execute <INTERACTIVE-COMMAND> on HOST[s]",
             "bash -c '{}'",
             [],

@@ -67,12 +67,12 @@ ls: cannot access 'cmd.err': No such file or directory
 
     match = r"cmd.err"
     stdout = io.StringIO()
-    assert await cli.doline(unet, "sh r1 ls cmd.err\n", stdout)
+    assert await cli.doline(unet, "r1 sh ls cmd.err\n", stdout)
     assert match.strip() == stdout.getvalue().strip()
 
     match = "Filesystem\noverlay"
     stdout = io.StringIO()
-    assert await cli.doline(unet, "sh r2 df --output=source /\n", stdout)
+    assert await cli.doline(unet, "r2 sh df --output=source /\n", stdout)
     assert match == stdout.getvalue().strip()
 
 
@@ -90,13 +90,13 @@ ls: cannot access 'cmd.err': No such file or directory
 
     match = r"cmd.err"
     stdout = io.StringIO()
-    assert await cli.doline(unet, "shi r1 ls cmd.err\n", stdout)
+    assert await cli.doline(unet, "r1 shi ls cmd.err\n", stdout)
     value = stdout.getvalue().strip().replace("\r", "")
     assert match.strip() == value
 
     match = "Filesystem\noverlay"
     stdout = io.StringIO()
-    assert await cli.doline(unet, "shi r2 df --output=source /\n", stdout)
+    assert await cli.doline(unet, "r2 shi df --output=source /\n", stdout)
     value = stdout.getvalue().strip().replace("\r", "")
     assert match.strip() == value
 
@@ -126,13 +126,13 @@ instance:0 name:r2 echo:testing echoback
 async def test_ls_cmd(unet):
     match = r"cmd.err"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"ls r1 cmd.err\n", stdout)
+    assert await cli.doline(unet, f"r1 ls cmd.err\n", stdout)
     assert match.strip() == stdout.getvalue().strip()
     # assert re.match(match, stdout.getvalue().strip())
 
     match = r"/bin/bash"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"ls r2 /bin/bash\n", stdout)
+    assert await cli.doline(unet, f"r2 ls /bin/bash\n", stdout)
     # assert re.match(match, stdout.getvalue().strip())
     assert match.strip() == stdout.getvalue().strip()
 
