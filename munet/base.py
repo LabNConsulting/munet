@@ -534,9 +534,10 @@ class Commander:  # pylint: disable=R0904
 
         sudo_path = get_exec_path_host(["sudo"])
 
-        cmd = f"/usr/bin/env MUNET_NODENAME={self.name} {cmd}"
         if not self.is_container or on_host:
             # This is the command to execute to be inside the namespace.
+            # We are getting into trouble with quoting.
+            cmd = f"/usr/bin/env MUNET_NODENAME={self.name} {cmd}"
             nscmd = sudo_path + " " + self.pre_cmd_str + cmd
         else:
             nscmd = self.get_cmd_container(cmd, sudo=True, tty=True)
