@@ -1,9 +1,9 @@
 version: 1
 topology:
   nodes:
-    r1:
+    - name: r1
       cmd: |
         ip addr
-    r2:
+    - name: r2
       cmd: |
         ip addr

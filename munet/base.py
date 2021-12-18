@@ -283,7 +283,7 @@ class Commander:  # pylint: disable=R0904
             pre_cmd = self.pre_cmd
             cmd = [str(x) for x in cmd]
 
-        env = {**(kwargs[env] if "env" in kwargs else os.environ)}
+        env = {**(kwargs["env"] if "env" in kwargs else os.environ)}
         if "MUNET_NODENAME" not in env:
             env["MUNET_NODENAME"] = self.name
         kwargs["env"] = env

@@ -18,17 +18,17 @@ cli:
 
 topology:
   networks:
-    net0:
+    - name: net0
       ip: auto
   nodes:
-    r1:
+    - name: r1
       connections: ["net0", "r2"]
       cmd: |
         ip addr show
         # Adding the line below causes downstream failures, looks due to failed
         # cleanup. Need to debug why cleanup fails in this case.
         tail -f /dev/null
-    r2:
+    - name: r2
       image: docker.io/labn/docker-ci-test:20.04
       connections: ["net0", "r1"]
       cmd: |

@@ -34,22 +34,58 @@ from . import cli
 from .native import Munet
 
 
+def find_with_kv(l, k, v):
+    if l:
+        for e in l:
+            if k in e and e[k] == v:
+                return e
+    return {}
+
+
+def find_all_with_kv(l, k, v):
+    rv = []
+    if l:
+        for e in l:
+            if k in e and e[k] == v:
+                rv.append(e)
+    return rv
+
+
 def find_matching_net_config(name, cconf, oconf):
-    oconnections = oconf.get("connections", None)
-    if not oconnections:
+    p = find_all_with_kv(oconf.get("connections", {}), "to", name)
+    if not p:
         return {}
+
     rname = cconf.get("remote-name", None)
-    for oconn in oconnections:
-        if isinstance(oconn, str):
-            if oconn == name:
-                return {}
-            continue
-        if oconn["to"] == name:
-            if not rname:
-                return oconn
-            if rname == oconn.get("name", None):
-                return oconn
-    return None
+    if not rname:
+        return p[0]
+
+    return find_with_kv(p, "name", rname)
+
+
+def merge_using_key(a, b, k):
+    # First get a dict of indexes in `a` for the key value of `k` in objects of `a`
+    m = list(a)
+    mi = {o[k]: i for i, o in enumerate(m)}
+    for o in b:
+        bkv = o[k]
+        if bkv in mi:
+            m[mi[bkv]] = o
+        else:
+            mi[bkv] = len(m)
+            m.append(o)
+    return m
+
+
+def list_to_dict_with_key(l, k):
+    "Convert list of objects to dict using the object key `k`"
+    return {x[k]: x for x in (l if l else [])}
+
+
+def config_to_dict_with_key(c, ck, k):
+    "Convert the config item at `ck` from a list objects to dict using the key `k`"
+    c[ck] = {x[k]: x for x in c.get(ck, [])}
+    return c[ck]
 
 
 def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
@@ -100,7 +136,7 @@ def setup_logging(args):
     try:
         search = [old]
         with importlib.resources.path("munet", "logconf.yaml") as datapath:
-            search.append(datapath.parent)
+            search.append(str(datapath.parent))
 
         def logf(msg, *p, **k):
             if args.verbose:
@@ -112,7 +148,7 @@ def setup_logging(args):
 
         if args.verbose:
             config["handlers"]["console"]["level"] = "DEBUG"
-        logging.config.dictConfig(config)
+        logging.config.dictConfig(dict(config))
         logging.info("Loaded logging config %s", pathname)
     finally:
         os.chdir(old)
@@ -149,16 +185,16 @@ def load_kinds(args):
     try:
         search = [old]
         with importlib.resources.path("munet", "kinds.yaml") as datapath:
-            search.append(datapath.parent)
+            search.append(str(datapath.parent))
 
         args_config = args.kinds_config if args else None
         config = get_config(args_config, "kinds", search)
-        del config["config_pathname"]
-        return config["kinds"] if "kinds" in config else {}
+        return config_to_dict_with_key(config, "kinds", "name")
+    except FileNotFoundError:
+        return {}
     finally:
         if args:
             os.chdir(old)
-    return {}
 
 
 def config_subst(config, **kwargs):
@@ -209,59 +245,49 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     isolated = not args.host if args else True
     unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
-
-    if not config:
-        config = get_config(basename="munet")
-
-    if config:
-        unet.config = config
-        unet.config_pathname = os.path.realpath(config["config_pathname"])
-        unet.config_dirname = os.path.dirname(unet.config_pathname)
-
-    if not config or "topology" not in config:
-        return unet
+    config = get_config(basename="munet")
+    unet.config = config
+    unet.config_pathname = os.path.realpath(config["config_pathname"])
+    unet.config_dirname = os.path.dirname(unet.config_pathname)
 
     if "cli" in config:
         cli.add_cli_config(unet, config["cli"])
 
-    config = config["topology"]
-
     kinds = load_kinds(args)
-    if "kinds" in config and config["kinds"]:
-        kinds = {**kinds, **config["kinds"]}
+    kinds = {**kinds, **config_to_dict_with_key(config, "kinds", "name")}
+
+    config["kinds"] = kinds
+    config_to_dict_with_key(kinds, "env", "name")  # convert list of env objects to dict
+
+    topoconf = config.get("topology")
+    if not topoconf:
+        return unet
 
     # Allow for all networks to be auto-numbered
-    autonumber = config.get("networks-autonumber")
+    autonumber = topoconf.get("networks-autonumber")
 
-    if "networks" in config:
-        for name, conf in config["networks"].items():
-            if conf is None:
-                conf = {}
-            kind = conf.get("kind")
-            kconf = kinds.get(kind) if kind else None
-            if kconf:
+    for name, conf in config_to_dict_with_key(topoconf, "networks", "name").items():
+        if kind := conf.get("kind"):
+            if kconf := kinds[kind]:
                 conf = merge_kind_config(kconf, conf)
-            conf = config_subst(
-                conf, instance=unet.instance, name=name, rundir=unet.rundir
-            )
-            if "ip" not in conf and autonumber:
-                conf["ip"] = "auto"
-            config["networks"][name] = conf
-            unet.add_network(name, conf, logger=logger)
+        conf = config_subst(conf, instance=unet.instance, name=name, rundir=unet.rundir)
+        if "ip" not in conf and autonumber:
+            conf["ip"] = "auto"
+        topoconf["networks"] = conf
+        unet.add_network(name, conf, logger=logger)
 
-    if "nodes" in config:
-        for name, conf in config["nodes"].items():
-            if conf is None:
-                conf = {}
-            kind = conf.get("kind")
-            kconf = kinds.get(kind) if kind else {}
-            if kconf:
+    for name, conf in config_to_dict_with_key(topoconf, "nodes", "name").items():
+        config_to_dict_with_key(
+            conf, "env", "name"
+        )  # convert list of env objects to dict
+
+        if kind := conf.get("kind"):
+            if kconf := kinds[kind]:
                 conf = merge_kind_config(kconf, conf)
-            conf = config_subst(
-                conf, instance=unet.instance, name=name, rundir=unet.rundir
-            )
-            config["nodes"][name] = conf
-            unet.add_l3_node(name, conf, logger=logger)
+
+        conf = config_subst(conf, instance=unet.instance, name=name, rundir=unet.rundir)
+        topoconf["nodes"] = conf
+        unet.add_l3_node(name, conf, logger=logger)
 
     # Go through all connections and name them so they are sane to the user
     # otherwise when we do p2p links the names/ords skip around based oddly
@@ -302,8 +328,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
                 oconf = find_matching_net_config(name, cconf, other.config)
                 unet.add_native_link(node, other, cconf, oconf)
 
-    # if "dns" in config:
-    write_hosts_files(unet, config.get("dns"))
+    # if "dns" in topoconf:
+    write_hosts_files(unet, topoconf.get("dns"))
 
     # Write our current config to the run directory
     with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:

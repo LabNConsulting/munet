@@ -1,4 +1,6 @@
 unexport VIRTUAL_ENV
+SCHEMA := test-schema.json
+JDATA := test-data.json
 LOG_CLI := # --log-cli
 
 lint:
@@ -13,3 +15,13 @@ run:
 
 install:
 	poetry install
+
+$(SCHEMA): test-schema.yaml
+	remarshal --if yaml --of json $< $@
+
+$(JDATA): munet/kinds.yaml
+	remarshal --if yaml --of json $< $@
+
+validate: $(SCHEMA) $(JDATA)
+	ajv --spec=draft2020 -d $(JDATA) -s $(SCHEMA)
+	# jsonschema --instance $(JDATA) $(SCHEMA)

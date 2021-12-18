@@ -329,10 +329,8 @@ async def doline(unet, line, outf, background=False, notty=False):
     logging.debug("hosts: %s cmd: %s nline: %s", hosts, cmd, nline)
 
     if cmd in unet.cli_run_cmds:
-        logging.debug("found command")
         pass
     elif "" in unet.cli_run_cmds:
-        logging.debug("default command")
         nline = f"{cmd} {nline}"
         cmd = ""
     else:

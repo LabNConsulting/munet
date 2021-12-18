@@ -2,18 +2,18 @@ version: 1
 topology:
   networks-autonumber: true
   networks:
-    net0:
-    net1:
+    - name: net0
+    - name: net1
       ip: "192.168.10.0/24"
   nodes:
-    r1:
+    - name: r1
       # Simple config
       connections: ["net0:xyz0", "net1", "r2"]
       cmd: |
         ip addr show
         which ping
         tail -f /dev/null
-    r2:
+    - name: r2
       # More detailed connection config
       connections:
         - to: "net0"
@@ -30,7 +30,7 @@ topology:
         ip addr show
         which ping
         tail -f /dev/null
-    r3:
+    - name: r3
       connections:
         - to: "net1"
         - to: "r2"

@@ -2,20 +2,20 @@ version: 1
 topology:
   networks-autonumber: true
   networks:
-    net0:
+    - name: net0
   nodes:
-    r1:
+    - name: r1
       connections: ["net0", "r2"]
       cmd: |
         ip addr show
-    r2:
+    - name: r2
       # image: ubuntu
       image: docker.io/labn/docker-ci-test:20.04
       connections: ["net0", "r1"]
       cmd: |
         ip addr show
         tail -f /dev/null
-      volumes:
+      mounts:
         - type: tmpfs
           tmpfs-size: 512M
           destination: /mytmp

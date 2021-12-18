@@ -1,11 +1,13 @@
 version = 1
 
-[topology.nodes.r1]
+[[topology.nodes]]
+name = "r1"
 cmd = '''
 ip link
 '''
 
-[topology.nodes.r2]
+[[topology.nodes]]
+name = "r2"
 cmd = '''
 ip link
 '''

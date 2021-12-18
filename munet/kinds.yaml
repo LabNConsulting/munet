@@ -1,14 +1,16 @@
+version: 1
 kinds:
-  frr:
+  - name: frr
     cap-add:
       # Zebra requires these
       - NET_ADMIN
       - NET_RAW
       - SYS_ADMIN
       - AUDIT_WRITE             # needed for ssh pty allocation
-  ceos:
+  - name: ceos
     init: false
     shell: false
+    merge: ["env"]
     # Should we cap-drop some of these in privileged mode?
     # ceos kind is special. munet will add args to /sbin/init for each
     # environment variable of the form `systemd.setenv=ENVNAME=VALUE` for each
@@ -17,14 +19,22 @@ kinds:
     cmd: /sbin/init
     privileged: true
     env:
-      EOS_PLATFORM: ceoslab
-      container: docker
-      ETBA: 4
-      SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT: 1
-      INTFTYPE: eth
-      MAPETH0: 1
-      MGMT_INTF: eth0
-      CEOS: 1
+      - name: "EOS_PLATFORM"
+        value: "ceoslab"
+      - name: "container"
+        value: "docker"
+      - name: "ETBA"
+        value: "4"
+      - name: "SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT"
+        value: "1"
+      - name: "INTFTYPE"
+        value: "eth"
+      - name: "MAPETH0"
+        value: "1"
+      - name: "MGMT_INTF"
+        value: "eth0"
+      - name: "CEOS"
+        value: "1"
 
     # cap-add:
     #   # cEOS requires these, except GNMI still doesn't work

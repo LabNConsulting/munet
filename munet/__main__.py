@@ -106,6 +106,11 @@ def main(*args):
     )
     ap.add_argument("-d", "--rundir", help="runtime directory for tempfiles, logs, etc")
     ap.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate the config against the schema definition",
+    )
+    ap.add_argument(
         "--topology-only",
         action="store_true",
         help="Do not run any node commands",
@@ -136,6 +141,9 @@ def main(*args):
     status = 4
     unet = None
     try:
+        if args.validate_only:
+            return parser.validate_config(config, logger, args)
+
         # Setup the namespaces and network addressing.
         unet = parser.build_topology(config, rundir=args.rundir, args=args)
         logger.info("Topology up: rundir: %s", unet.rundir)

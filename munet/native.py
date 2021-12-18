@@ -212,10 +212,7 @@ class L3Node(LinuxNamespace):
             self.bind_mount(os.path.join(self.rundir, "hosts.txt"), "/etc/hosts")
 
     def mount_volumes(self):
-        if not self.config.get("volumes"):
-            return
-
-        for m in self.config["volumes"]:
+        for m in self.config.get("volumes", []):
             if isinstance(m, str):
                 s = m.split(":", 1)
                 if len(s) == 1:
@@ -531,11 +528,8 @@ class L3ContainerNode(L3Node):
         self.extra_mounts.append(f"--mount=type=bind,src={outer},dst={inner}")
 
     def mount_volumes(self):
-        if "volumes" not in self.config:
-            return
-
         args = []
-        for m in self.config["volumes"]:
+        for m in self.config.get("volumes", []):
             if isinstance(m, str):
                 s = m.split(":", 1)
                 if len(s) == 1:
@@ -551,6 +545,8 @@ class L3ContainerNode(L3Node):
                         self.cmd_raises(f"mkdir -p {spath}")
                     args.append(f"--mount=type=bind,src={spath},dst={s[1]}")
                 continue
+
+        for m in self.config.get("mounts", []):
             margs = ["type=" + m["type"]]
             for k, v in m.items():
                 if k == "type":
@@ -569,8 +565,9 @@ class L3ContainerNode(L3Node):
                     margs.append(f"{k}")
             args.append("--mount=" + ",".join(margs))
 
-        # Need to work on a way to mount into live container too
-        self.extra_mounts += args
+        if args:
+            # Need to work on a way to mount into live container too
+            self.extra_mounts += args
 
     async def run_cmd(self):
         """Run the configured commands for this node"""
@@ -760,6 +757,8 @@ class Munet(BaseMunet):
         self.rundir = rundir if rundir else "/tmp/unet-" + self.instance
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.config = {}
+        self.config_pathname = ""
+        self.config_dirname = ""
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:

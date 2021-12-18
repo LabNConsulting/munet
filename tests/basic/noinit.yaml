@@ -2,9 +2,9 @@ version: 1
 topology:
   networks-autonumber: true
   networks:
-    net0:
+    - name: net0
   nodes:
-    r1:
+    - name: r1
       connections: ["net0"]
       init: false
       shell: /sbin/tini
@@ -12,7 +12,7 @@ topology:
         ip addr
         ls -l /
         tail -f /dev/null
-    r2:
+    - name: r2
       connections: ["net0"]
       cmd: |
         tail -f /dev/null

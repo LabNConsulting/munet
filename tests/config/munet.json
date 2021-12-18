@@ -1,13 +1,15 @@
 {
   "version": 1,
   "topology": {
-    "nodes": {
-      "r1": {
+    "nodes": [
+      {
+        "name": "r1",
         "cmd": "ip link"
       },
-      "r2": {
+      {
+        "name": "r2",
         "cmd": "ip addr"
       }
-    }
+    ]
   }
 }

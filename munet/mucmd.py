@@ -49,7 +49,7 @@ def main(*args):
     nodes = []
     config = json.load(open(os.path.join(rundir, "config.json"), encoding="utf-8"))
     nodes = list(config.get("topology", {}).get("nodes", []))
-    envcfg = config.get("mucmd", {}).get("environment", {})
+    envcfg = config.get("mucmd", {}).get("env", {})
 
     # If args.node is not a node it's part of shellcmd
     if args.node and args.node not in nodes:
