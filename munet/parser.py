@@ -176,6 +176,39 @@ ff02::2\tip6-allrouters
                 hf.write(f"{e[1]}\t{e[0]}\n")
 
 
+def validate_config(config, logger, args):
+    import jsonschema  # pylint: disable=C0415
+
+    from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
+
+    if not config:
+        config = get_config(basename="munet")
+        del config["config_pathname"]
+
+    old = os.getcwd()
+    if args:
+        os.chdir(args.rundir)
+
+    try:
+        search = [old]
+        with importlib.resources.path("munet", "munet-schema.yaml") as datapath:
+            search.append(str(datapath.parent))
+
+        schema = get_config(basename="munet-schema", search=search)
+        jsonschema.validate(instance=config, schema=schema)
+        logger.info("Validated")
+        return True
+    except FileNotFoundError as error:
+        logger.info("No schema found: %s", error)
+        return False
+    except ValidationError as error:
+        logger.info("Validation failed: %s", error)
+        return False
+    finally:
+        if args:
+            os.chdir(old)
+
+
 def load_kinds(args):
     # Change CWD to the rundir prior to parsing config
     old = os.getcwd()
@@ -245,7 +278,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     isolated = not args.host if args else True
     unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
-    config = get_config(basename="munet")
+    if not config:
+        config = get_config(basename="munet")
     unet.config = config
     unet.config_pathname = os.path.realpath(config["config_pathname"])
     unet.config_dirname = os.path.dirname(unet.config_pathname)

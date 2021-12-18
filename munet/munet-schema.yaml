@@ -153,13 +153,12 @@ properties:
         #   maxLength: 11
         items:
           type: object
-          allOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  description: "pull in indicated kinds properties"
-          unevaluatedProperties: false
+          required: ["name"]
+          properties:
+            name:
+              type: string
+            ip:
+              type: string
 
       nodes:
         type: array

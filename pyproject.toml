@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "munet"
-version = "0.8.0"
+version = "0.8.1"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
 readme = "README.md"
 repository = "https://github.com/LabNConsulting/munet"
 
-include = ["munet-schema.yaml"]
+include = ["logconf.yaml", "munet-schema.yaml"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -31,6 +31,7 @@ pytest-xdist = "^2.4.0"
 
 [tool.poetry.extras]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
+validate = ["jsonschema"]
 
 [tool.poetry.scripts]
 munet = "munet.__main__:main"

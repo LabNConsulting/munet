@@ -493,11 +493,12 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytes
 
 [extras]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
+validate = ["jsonschema"]
 
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "c1e692d685aeef78c7d8b8791261bdeb40d23f3dcd4c8517a514f7e86c997d1c"
+content-hash = "01a26710ba9fbd32694ea88f05c44684dccff2f34e1fad0d1efcb9b44681b756"
 
 [metadata.files]
 astroid = [
