@@ -245,7 +245,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     isolated = not args.host if args else True
     unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
-    config = get_config(basename="munet")
+    if not config:
+        config = get_config(basename="munet")
     unet.config = config
     unet.config_pathname = os.path.realpath(config["config_pathname"])
     unet.config_dirname = os.path.dirname(unet.config_pathname)
