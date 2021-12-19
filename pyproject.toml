@@ -4,7 +4,7 @@ version = "0.8.2"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
-readme = "README.md"
+readme = "README.org"
 repository = "https://github.com/LabNConsulting/munet"
 
 include = ["logconf.yaml", "munet-schema.yaml"]
