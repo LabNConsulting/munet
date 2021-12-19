@@ -1,0 +1,409 @@
+* μNET (munet)
+
+A package for creating network topologies and running programs and containers
+within them using linux namepsaces.
+
+Munet can be run in a standalone mode with a configuration file for launching
+linux shell and container based topologies, as well as be used as a library from
+within another application to provide the same functionality.
+
+* Standalone Config
+
+The standalone config can be provided in a number of formats, limited by the
+available encode/decode libraries withing the python environment. As JSON is
+built in to python that format is always supported. Additionally YAML and TOML
+are supported if the corresponding packages are available (i.e., ~PyYAML~ and
+~toml~).
+
+The config itself is defined with a YANG model which is defined in the following
+sections.
+
+** Config Tree
+
+#+NAME: Munet standalone config YANG tree diagram
+#+CALL: generate-tree(module=labn-munet-config)
+
+#+begin_example
+module: labn-munet-config
+  +--rw cli
+  |  +--rw commands* [name]
+  |     +--rw exec?         string
+  |     +--rw exec-kind* [kind]
+  |     |  +--rw kind    string
+  |     |  +--rw exec?   string
+  |     +--rw format?       string
+  |     +--rw help?         string
+  |     +--rw kinds*        -> ../../../kinds/name
+  |     +--rw name          string
+  |     +--rw new-window?   boolean
+  +--rw kinds* [name]
+  |  +--rw cap-add*       string
+  |  +--rw cap-remove*    string
+  |  +--rw cmd?           string
+  |  +--rw connections* [to]
+  |  |  +--rw ip?            string
+  |  |  +--rw name?          string
+  |  |  +--rw to             string
+  |  |  +--rw remote-name?   string
+  |  +--rw env* [name]
+  |  |  +--rw name     string
+  |  |  +--rw value?   string
+  |  +--rw image?         string
+  |  +--rw init?          union
+  |  +--rw name           string
+  |  +--rw privileged?    boolean
+  |  +--rw shell?         union
+  |  +--rw mounts* [destination]
+  |  |  +--rw destination    string
+  |  |  +--rw source?        string
+  |  |  +--rw tmpfs-size?    string
+  |  |  +--rw type?          string
+  |  +--rw volumes*       string
+  |  +--rw merge*         string
+  +--rw topology
+  |  +--rw networks-autonumber?   boolean
+  |  +--rw networks* [name]
+  |  |  +--rw name    string
+  |  |  +--rw ip?     string
+  |  +--rw nodes* [name]
+  |     +--rw cap-add*       string
+  |     +--rw cap-remove*    string
+  |     +--rw cmd?           string
+  |     +--rw connections* [to]
+  |     |  +--rw ip?            string
+  |     |  +--rw name?          string
+  |     |  +--rw to             string
+  |     |  +--rw remote-name?   string
+  |     +--rw env* [name]
+  |     |  +--rw name     string
+  |     |  +--rw value?   string
+  |     +--rw image?         string
+  |     +--rw init?          union
+  |     +--rw name           string
+  |     +--rw privileged?    boolean
+  |     +--rw shell?         union
+  |     +--rw mounts* [destination]
+  |     |  +--rw destination    string
+  |     |  +--rw source?        string
+  |     |  +--rw tmpfs-size?    string
+  |     |  +--rw type?          string
+  |     +--rw volumes*       string
+  |     +--rw kind?          -> ../../../kinds/name
+  +--rw version?    uint32
+#+end_example
+
+** Config Model
+
+#+NAME: test-validate-module
+#+CALL: validate-module(module=labn-munet-config)
+
+#+NAME: labn-munet-config
+#+HEADER: :var dep1=dep-babel :var dep2=fetch-yang-files
+#+HEADER: :file labn-munet-config.yang :results output file silent :cache yes
+#+begin_src yang :exports code
+  module labn-munet-config {
+    yang-version 1.1;
+    namespace "urn:labn:yang:labn-munet-config";
+    prefix c;
+
+    organization
+      "LabN Consulting, L.L.C.";
+
+    contact
+       "Author: Christian Hopps
+               <mailto:chopps@labn.net>";
+
+    description
+      "This module defines the configuration state for munet.";
+
+    revision 2021-12-18 {
+      description "Initial Revision";
+      reference "https://github.com/LabNConsulting/munet/blob/main/README.md";
+    }
+
+    grouping common-node {
+      description "Common node properties";
+      leaf-list cap-add {
+        type string;
+        description "Capabilities to add to a container.";
+        reference "https://man7.org/linux/man-pages/man7/capabilities.7.html";
+      }
+      leaf-list cap-remove {
+        type string;
+        description "Capabilities to remove from a container.";
+        reference "https://man7.org/linux/man-pages/man7/capabilities.7.html";
+      }
+      leaf cmd {
+        type string;
+        description "Shell command[s] to execute when creating the node.";
+      }
+      list connections {
+        key to;
+        description "Connections to other networks or nodes from this node";
+
+        leaf ip {
+          type string;
+          description "IP address for the connection (interface).";
+        }
+        leaf name {
+          type string;
+          description "Name for the connection (interface name).";
+        }
+        leaf to {
+          type string;
+          description "The target of this connection.";
+        }
+        leaf remote-name {
+          type string;
+          description
+            "The remote name of a p2p connection. This is used for disambiguation
+             when there are multiple point-to-point connections to the same
+             remote node.";
+        }
+      }
+      list env {
+        key name;
+        description
+          "List of environment variable to add to the `cmd` execution
+           environment";
+        leaf name {
+          type string;
+          description "Environment variable name.";
+        }
+        leaf value {
+          type string;
+          description "Environment variable value.";
+        }
+      }
+      leaf image {
+        type string;
+        description "Container image specification.";
+      }
+      leaf init {
+        type union {
+          type boolean;
+          type string;
+        }
+        description "Controls use of an init process.";
+      }
+      leaf name {
+        type string;
+        description "Name of this node or kind.";
+      }
+      leaf privileged {
+        type boolean;
+        description "Controls running the container in privileged mode.";
+      }
+      leaf shell {
+        type union {
+          type boolean;
+          type string;
+        }
+        description
+          "Controls use of an shell process for `cmd` execution. If 'false' then
+           `cmd` will be run directly with exec(1), otherwise a shell will be
+           used. If this value is `true` then the default shell will be used,
+           otherwise it is a string which specifies the path to the shell to
+           use.";
+      }
+      list mounts {
+        key destination;
+        description
+          "Mounts to be made inside the namespace. Currently only supported for
+           container based nodes.";
+
+        leaf destination {
+          type string;
+          description
+            "The inner mount point. If no source is given this will be a tmpfs
+             mount, otherwise the it is a bind mount from the `source`.";
+        }
+        leaf source {
+          type string;
+          description "The source of the bind mount.";
+        }
+        leaf tmpfs-size {
+          type string;
+          description "The size of the tmpfs.";
+        }
+        leaf type {
+          type string;
+          description "The type of the mount (currently bind or tmpfs).";
+        }
+      }
+      leaf-list volumes {
+        type string;
+        description
+          "Bind or tmpfs mounts. For bind mounts the format of the string is
+           <outer>:<inner>, for tmpfs it's simply the inner mount path.";
+      }
+    }
+
+    container cli {
+      description "CLI additions.";
+      list commands {
+        key name;
+        description "A command to add to the CLI.";
+
+        leaf exec {
+          type string;
+          description
+            "Command to execute when the CLI command is given. The string will
+             have the user input that follows the command name substituted in for
+             the characters `{}`.";
+        }
+        list exec-kind {
+          key kind;
+          description "A kind specific execution formats.";
+
+          leaf kind {
+            type string;
+            description "Kind for which this command format should be used.";
+          }
+          leaf exec {
+            type string;
+            description
+              "Command to execute when the CLI command is given. The string will
+               have the user input that follows the command name substituted in
+               for the characters `{}`.";
+          }
+        }
+        leaf format {
+          type string;
+          description
+            "The format of the command. Used to print help string for user.";
+        }
+        leaf help {
+          type string;
+          description
+            "The description of the command. Used to print help string for
+             user.";
+        }
+        leaf-list kinds {
+          type leafref {
+            path "../../../kinds/name";
+          }
+          description
+            "List of kinds for which this command should be restricted to running
+             on.";
+        }
+        leaf name {
+          type string;
+          description "CLI command name.";
+        }
+        leaf new-window {
+          type boolean;
+          description
+            "Controls if the command runs in the CLI window or opens a new
+             terminal window to run the command in.";
+        }
+      }
+    }
+
+    list kinds {
+      key name;
+      description
+        "List of kinds used to group and share common node properities.";
+
+      uses common-node;
+      leaf-list merge {
+        type string;
+        description
+          "List of properties which should be merged with their node specific
+           values, rather than being replaced by the node specific version.";
+      }
+    }
+
+    container topology {
+      description "The topology munet should create.";
+
+      leaf networks-autonumber {
+        type boolean;
+        description
+          "Controls if networks and node connections are given IP addresses if
+           not explicitly configured.";
+      }
+
+      list networks {
+        key name;
+        description "List of networks to create.";
+
+        leaf name {
+          type string {
+            length "1..11";
+            pattern "[-a-zA-Z0-9_]+";
+          }
+          description "Name of the network";
+        }
+        leaf ip {
+          type string;
+          description
+            "IP prefix for the network. If host bit's are set then the linux
+             bridge will be assigned that IP.";
+        }
+      }
+
+      list nodes {
+        key name;
+        description "Nodes in the topology.";
+
+        uses common-node;
+        leaf kind {
+          type leafref {
+            path "../../../kinds/name";
+          }
+          description
+            "Indicate the kind of this node, which pulls in the properies of that
+             `kind` for this node.";
+        }
+      }
+    }
+    leaf version {
+      type uint32;
+      description "version of this config";
+    }
+  }
+#+end_src
+
+#+name: dep-babel
+#+begin_src emacs-lisp :results none :exports none
+    (org-babel-do-load-languages 'org-babel-load-languages '((shell . t)))
+    (setq fill-column 69)
+    (setq org-confirm-babel-evaluate nil)
+#+end_src
+
+#+name: fetch-yang-files
+#+begin_src shell :results none silent :exports none
+      curl -O https://raw.githubusercontent.com/YangModels/yang/master/standard/ietf/RFC/ietf-routing-types@2017-12-04.yang
+      curl -O https://raw.githubusercontent.com/YangModels/yang/master/standard/ietf/RFC/ietf-routing@2018-03-13.yang
+#+end_src
+
+#+NAME: generate-tree
+#+HEADER: :var dep1=dep-babel
+#+begin_src shell :results output verbatim replace :wrap example :exports none
+  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
+  $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
+#+end_src
+
+#+NAME: validate-module
+#+HEADER: :var dep1=dep-babel
+#+begin_src bash :results output verbatim replace :wrap comment :exports none
+  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
+  if ! $DOCKER pyang --lax-quote-checks -Werror --ietf $module 2>&1; then echo FAIL; fi
+#+end_src
+
+#+NAME: validate-config
+#+HEADER: :var dep1=dep-babel
+#+begin_src bash :results output verbatim replace :wrap comment :exports none
+  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
+  LINT="$DOCKER yanglint -p /yang-drafts -p /yang --strict -t config"
+  $LINT $extra $module ${file} 2>&1 || echo FAIL
+#+end_src
+
+#+NAME: validate-data
+#+HEADER: :var dep1=dep-babel
+#+begin_src bash :results output verbatim replace :wrap comment :exports none
+  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
+  LINT="$DOCKER yanglint -p /yang-drafts -p /yang --strict -t data"
+  $LINT $extra $module ${file} 2>&1 || echo FAIL
+#+end_src
