@@ -38,30 +38,13 @@ from .base import get_exec_path_host
 
 
 def get_loopback_ips(c, nid):
-    if "ip" in c and c["ip"]:
-        if c["ip"] == "auto":
+    if ip := c.get("ip"):
+        if ip == "auto":
             return [ipaddress.ip_interface("10.255.0.0/32") + nid]
-        if isinstance(c["ip"], str):
-            return [ipaddress.ip_interface(c["ip"])]
-        return [ipaddress.ip_interface(x) for x in c["ip"]]
+        if isinstance(ip, str):
+            return [ipaddress.ip_interface(ip)]
+        return [ipaddress.ip_interface(x) for x in ip]
     return []
-
-
-# Uneeded
-# def get_ip_config(cconfig, cname, remote_name=None):
-#     "Get custom IP config for a given connection"
-#     for c in cconfig:
-#         if isinstance(x, str):
-#             if c == cname:
-#                 return None
-#             continue
-#         if "to" not in c or c["to"] != cname:
-#             continue
-#         if remote_name and ("remote_name" not in c or
-#             c["remote_name"] != remote_name):
-#             continue
-#         return c["ip"] if "ip" in c else None
-#     return None
 
 
 def make_ip_network(net, inc):
@@ -207,9 +190,11 @@ class L3Node(LinuxNamespace):
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
 
+        # if name == "DDG-5":
+        #     breakpoint()
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         if os.path.exists(hosts_file):
-            self.bind_mount(os.path.join(self.rundir, "hosts.txt"), "/etc/hosts")
+            self.bind_mount(hosts_file, "/etc/hosts")
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
@@ -295,9 +280,9 @@ class L3Node(LinuxNamespace):
     #         self.container_id = None
 
     def set_lan_addr(self, switch, cconf):
-        if "ip" in cconf:
-            ipaddr = ipaddress.ip_interface(cconf["ip"]) if "ip" in cconf else None
-        elif self.unet.autonumber:
+        if ip := cconf.get("ip"):
+            ipaddr = ipaddress.ip_interface(ip)
+        elif self.unet.autonumber and "ip" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
                 self,
@@ -861,7 +846,7 @@ class Munet(BaseMunet):
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
 
-        if config and "image" in config:
+        if config and config.get("image"):
             cls = L3ContainerNode
         else:
             cls = L3Node
