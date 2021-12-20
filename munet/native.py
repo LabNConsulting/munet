@@ -139,11 +139,12 @@ class L3Node(LinuxNamespace):
 
     @classmethod
     def _get_next_ord(cls):
-        n = cls.next_ord
-        cls.next_ord = n + 1
+        # Do not use `cls` here b/c that makes the variable class specific
+        n = L3Node.next_ord
+        L3Node.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, unet=None, config=None, **kwargs):
+    def __init__(self, name, config=None, unet=None, **kwargs):
         """Create a linux Bridge."""
 
         self.config = config if config else {}
@@ -347,15 +348,11 @@ class L3Node(LinuxNamespace):
 class L3ContainerNode(L3Node):
     "A node that runs a container image using podman"
 
-    def __init__(self, name=None, config=None, **kwargs):
-        """Create a linux Bridge."""
-
-        if not config:
-            config = {}
-
+    def __init__(self, name, config=None, **kwargs):
+        """Create a Container Node."""
         self.cont_exec_paths = {}
         self.container_id = None
-        self.container_image = config.get("image", "")
+        self.container_image = config["image"]
         self.extra_mounts = []
         assert self.container_image
 

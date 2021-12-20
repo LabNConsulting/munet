@@ -1204,8 +1204,9 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
     @classmethod
     def _get_next_id(cls):
-        n = cls.next_ord
-        cls.next_ord = n + 1
+        # Do not use `cls` here b/c that makes the variable class specific
+        n = Bridge.next_ord
+        Bridge.next_ord = n + 1
         return n
 
     def __init__(self, name=None, unet=None, logger=None, **kwargs):

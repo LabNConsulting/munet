@@ -28,52 +28,13 @@ from pathlib import Path
 import pytest
 
 from munet.base import BaseMunet
+from munet.base import Bridge
 from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
 from munet.cli import cli
+from munet.native import L3Node
 from munet.parser import build_topology
 from munet.parser import get_config
-
-
-# def pytest_runtest_logstart(nodeid, location):
-#     # location is (filename, lineno, testname)
-#     # topolog.logstart(nodeid, location, topotest_extra_config["rundir"])
-
-#     mode = os.getenv("PYTEST_XDIST_MODE", "no")
-#     worker = os.getenv("PYTEST_TOPOTEST_WORKER", "")
-
-#     # We only per-test log in the workers (or non-dist)
-#     if not worker and mode != "no":
-#         return
-
-#     handler_id = nodeid + worker
-#     assert handler_id not in handlers
-
-#     rel_log_dir = get_test_logdir(nodeid)
-#     exec_log_dir = os.path.join(rundir, rel_log_dir)
-#     subprocess.check_call(
-#         "mkdir -p {0} && chmod 1777 {0}".format(exec_log_dir), shell=True
-#     )
-
-#     exec_log_path = os.path.join(exec_log_dir, "exec-pytest.log")
-
-#     logging_plugin=config.pluginmanager.get_plugin("logging-plugin")
-#     filename=Path('pytest-logs', item._request.node.name+".log")
-#     logging_plugin.set_log_path(str(filename))
-
-#     set log path
-
-#     if worker:
-#         logger.info(
-#             "Logging on worker %s for %s into %s", worker, handler_id, exec_log_path
-#         )
-#     else:
-#         logger.info("Logging for %s into %s", handler_id, exec_log_path)
-
-
-# def pytest_runtest_logfinish(nodeid, location):
-#     # location is (filename, lineno, testname)
-#     topolog.logfinish(nodeid, location)
 
 
 # =================
@@ -172,6 +133,7 @@ def module_autouse(request):
 
 @pytest.fixture(scope="module")
 async def unet(rundir_module):  # pylint: disable=W0621
+    # Reset the class variables so auto number is predictable
     _unet = build_topology(rundir=rundir_module)
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
@@ -183,6 +145,11 @@ async def unet(rundir_module):  # pylint: disable=W0621
     for task in tasks:
         task.cancel()
     await _unet.async_delete()
+
+    # Reset the class variables so auto number is predictable
+    logging.debug("conftest: resetting ords to 1")
+    L3Node.next_ord = 1
+    Bridge.next_ord = 1
 
 
 # =================
@@ -225,6 +192,11 @@ async def unet_param(request, rundir):  # pylint: disable=W0621
     for task in tasks:
         task.cancel()
     await _unet.async_delete()
+
+    # Reset the class variables so auto number is predictable
+    logging.debug("conftest: resetting ords to 1")
+    L3Node.next_ord = 1
+    Bridge.next_ord = 1
 
 
 # @pytest.hookimpl(hookwrapper=True)
