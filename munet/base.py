@@ -1267,7 +1267,7 @@ class BaseMunet(LinuxNamespace):
     Munet.
     """
 
-    def __init__(self, isolated=True, instance="0", **kwargs):
+    def __init__(self, isolated=True, **kwargs):
         """Create a Munet."""
 
         self.hosts = {}
@@ -1275,7 +1275,6 @@ class BaseMunet(LinuxNamespace):
         self.links = {}
         self.macs = {}
         self.rmacs = {}
-        self.instance = instance
 
         self.cli_server = None
         self.cli_sockpath = None

@@ -103,21 +103,21 @@ ls: cannot access 'cmd.err': No such file or directory
 
 async def test_default_cmd(unet):
     match = r"""------ Host: r1 ------
-instance:0 name:r1 echo:testing echoback
+name:r1 echo:testing echoback
 ------- End: r1 ------
 ------ Host: r2 ------
-instance:0 name:r2 echo:testing echoback
+name:r2 echo:testing echoback
 ------- End: r2 ------"""
     stdout = io.StringIO()
     assert await cli.doline(unet, "testing echoback\n", stdout)
     assert match.strip() == stdout.getvalue().strip()
 
-    match = r"instance:0 name:r1 echo:foo"
+    match = r"name:r1 echo:foo"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r1 foo\n", stdout)
     assert match.strip() == stdout.getvalue().strip()
 
-    match = r"instance:0 name:r2 echo:bar"
+    match = r"name:r2 echo:bar"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r2 bar\n", stdout)
     assert match.strip() == stdout.getvalue().strip()

@@ -3,7 +3,7 @@ version: 1
 cli:
   commands:
     - name: ""
-      exec: "bash -c 'echo instance:%INSTANCE% name:%NAME% echo:{}'"
+      exec: "bash -c 'echo name:%NAME% echo:{}'"
       help-format: "[HOST ...] ECHO-BACK"
       help: "echo ECHO-BACK"
     - name: "ls"

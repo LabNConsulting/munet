@@ -403,7 +403,6 @@ class L3ContainerNode(L3Node):
         cmds.append(get_exec_path_host("podman"))
         if self.container_id:
             cmds.append("exec")
-            cmds.append(f"-eMUNET_INSTANCE={self.unet.instance}")
             cmds.append(f"-eMUNET_RUNDIR={self.unet.rundir}")
             cmds.append(f"-eMUNET_NODENAME={self.name}")
             if tty:
@@ -414,7 +413,6 @@ class L3ContainerNode(L3Node):
                 "run",
                 "--rm",
                 "--init",
-                f"-eMUNET_INSTANCE={self.unet.instance}",
                 f"-eMUNET_RUNDIR={self.unet.rundir}",
                 f"-eMUNET_NODENAME={self.name}",
                 f"--net=ns:/proc/{self.pid}/ns/net",
@@ -739,7 +737,7 @@ class Munet(BaseMunet):
 
     def __init__(self, rundir=None, **kwargs):
         super().__init__(**kwargs)
-        self.rundir = rundir if rundir else "/tmp/unet-" + self.instance
+        self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.config = {}
         self.config_pathname = ""

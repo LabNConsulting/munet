@@ -84,7 +84,7 @@ def list_to_dict_with_key(l, k):
 
 def config_to_dict_with_key(c, ck, k):
     "Convert the config item at `ck` from a list objects to dict using the key `k`"
-    c[ck] = {x[k]: x for x in c.get(ck, [])}
+    c[ck] = list_to_dict_with_key(c.get(ck, []), k)
     return c[ck]
 
 
@@ -289,9 +289,9 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
 
     kinds = load_kinds(args)
     kinds = {**kinds, **config_to_dict_with_key(config, "kinds", "name")}
+    config_to_dict_with_key(kinds, "env", "name")  # convert list of env objects to dict
 
     config["kinds"] = kinds
-    config_to_dict_with_key(kinds, "env", "name")  # convert list of env objects to dict
 
     topoconf = config.get("topology")
     if not topoconf:
@@ -304,10 +304,10 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
         if kind := conf.get("kind"):
             if kconf := kinds[kind]:
                 conf = merge_kind_config(kconf, conf)
-        conf = config_subst(conf, instance=unet.instance, name=name, rundir=unet.rundir)
+        conf = config_subst(conf, name=name, rundir=unet.rundir)
         if "ip" not in conf and autonumber:
             conf["ip"] = "auto"
-        topoconf["networks"] = conf
+        topoconf["networks"][name] = conf
         unet.add_network(name, conf, logger=logger)
 
     for name, conf in config_to_dict_with_key(topoconf, "nodes", "name").items():
@@ -319,8 +319,8 @@ def build_topology(config=None, logger=None, rundir=None, args=None):
             if kconf := kinds[kind]:
                 conf = merge_kind_config(kconf, conf)
 
-        conf = config_subst(conf, instance=unet.instance, name=name, rundir=unet.rundir)
-        topoconf["nodes"] = conf
+        conf = config_subst(conf, name=name, rundir=unet.rundir)
+        topoconf["nodes"][name] = conf
         unet.add_l3_node(name, conf, logger=logger)
 
     # Go through all connections and name them so they are sane to the user

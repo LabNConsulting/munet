@@ -100,6 +100,7 @@ def session_autouse():
         is_worker = True
 
     if not is_worker:
+        # This is unfriendly to multi-instance
         cleanup_previous()
 
     yield

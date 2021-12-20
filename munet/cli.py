@@ -204,7 +204,6 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
     if not execfmt:
         return ""
     ucmd = execfmt.format(ucmd)
-    ucmd = ucmd.replace("%INSTANCE%", unet.instance)
     ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
     return ucmd.replace("%NAME%", host)
 
@@ -510,8 +509,8 @@ def add_cli_run_cmd(
 def add_cli_config(unet, config):
     """Adds CLI commands based on config.
 
-    All strings will have %NAME% %INSTANCE% %RUNDIR% replaced with the corresponding
-    current munet `instance` and node `name`.  The format of the config dictionary can
+    All strings will have %NAME% and %RUNDIR% replaced with the corresponding
+    current node `name` and `rundir`.  The format of the config dictionary can
     be seen in the following example.  The first list entry represents the default
     command because it has no `name` key.
 
