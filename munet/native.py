@@ -605,7 +605,7 @@ class L3ContainerNode(L3Node):
 
         # Add extra flags from user:
         if "podman" in self.config:
-            for x in self.config["podman"].get("extra_args", []):
+            for x in self.config["podman"].get("extra-args", []):
                 cmds.append(x.strip())
 
         shell_cmd = self.config.get("shell", "/bin/bash")

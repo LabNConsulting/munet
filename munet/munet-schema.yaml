@@ -79,6 +79,13 @@ $defs:
               type: string
             destination:
               type: string
+      podman:
+        type: object
+        properties:
+          extra-args:
+            type: "array"
+            items:
+              type: string
       volumes:
         type: "array"
         items:
@@ -170,6 +177,9 @@ properties:
           allOf:
             - type: object
               properties:
+                id:
+                  type: number
+                  description: "override auto-assigned ID"
                 kind:
                   type: string
                   description: "add kind's properties to node"
