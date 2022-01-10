@@ -252,7 +252,8 @@ def value_merge_deepcopy(s1, s2):
 
 def merge_kind_config(kconf, config):
     mergekeys = kconf.get("merge", [])
-    new = {**kconf}
+    config = deepcopy(config)
+    new = deepcopy(kconf)
     for k in new:
         if k not in config:
             continue
