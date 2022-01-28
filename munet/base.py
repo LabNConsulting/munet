@@ -306,7 +306,7 @@ class Commander:  # pylint: disable=R0904
             }
         pre_cmd, cmd, defaults = self._get_sub_args(cmd, defaults, **kwargs)
 
-        self.logger.debug('%s: %s("%s", kwargs: %s)', self, method, cmd, defaults)
+        self.logger.debug('%s: %s("%s", kwargs: %.80s)', self, method, cmd, defaults)
 
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         if async_exec:

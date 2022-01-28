@@ -859,7 +859,9 @@ class Munet(BaseMunet):
         tasks = []
 
         run_nodes = [x for x in self.hosts.values() if hasattr(x, "run_cmd")]
-        run_nodes = [x for x in run_nodes if x.config.get("cmd")]
+        run_nodes = [
+            x for x in run_nodes if x.config.get("cmd") or x.config.get("image")
+        ]
 
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
         for node in run_nodes:
