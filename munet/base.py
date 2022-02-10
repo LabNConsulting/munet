@@ -315,6 +315,186 @@ class Commander:  # pylint: disable=R0904
             p = subprocess.Popen(actual_cmd, **defaults)
         return p, actual_cmd
 
+    def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, **kwargs):
+        import pexpect
+
+        from pexpect.popen_spawn import PopenSpawn
+
+        pre_cmd, cmd, defaults = self._get_sub_args(cmd, {}, **kwargs)
+        actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
+        if "shell" in defaults:
+            del defaults["shell"]
+        if "encoding" not in defaults:
+            defaults["encoding"] = "utf-8"
+            if "codec_errors" not in defaults:
+                defaults["codec_errors"] = "ignore"
+
+        self.logger.debug(
+            '%s: _spawn("%s", skip_pre_cmd %s use_pty %s kwargs: %.80s)',
+            self,
+            cmd,
+            skip_pre_cmd,
+            use_pty,
+            defaults,
+        )
+
+        # We don't specify a timeout it defaults to 30s is that OK?
+        if not use_pty:
+            p = PopenSpawn(actual_cmd, **defaults)
+        else:
+            p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], **defaults)
+        return p, actual_cmd
+
+    def spawn(
+        self,
+        cmd,
+        spawned_re,
+        expects=(),
+        sends=(),
+        use_pty=False,
+        logfile_read=None,
+        logfile_send=None,
+        trace=None,
+        **kwargs,
+    ):
+        """
+        Create a spawned send/expect process.
+
+        Args:
+            cmd - list of args to exec/popen with
+            spawned_re - what to look for to know when done, `spawn` returns when seen
+            expects - a list of regex other than `spawned_re` to look for. Commonly,
+                "ogin:" or "[Pp]assword:"r.
+            sends - what to send when an element of `expects` matches. So e.g., the
+                username or password if thats what corresponding expect matched. Can
+                be the empty string to send nothing.
+            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+            trace - if true then log send/expects
+            **kwargs - kwargs passed on the _spawn.
+        Returns:
+            A pexpect process.
+        Raises:
+            pexpect.TIMEOUT, pexpect.EOF as documented in `pexpect`
+            subprocess.CalledProcessError if EOF is seen and `cmd` exited then
+                raises a CalledProcessError to indicate the failure.
+        """
+        import pexpect
+
+        p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
+        p.logfile_read = logfile_read
+        p.logfile_send = logfile_send
+
+        # for spawned shells (i.e., a direct command an not a console)
+        # this is wrong and will cause 2 prompts
+        if not use_pty:
+            p.echo = False
+            p.isalive = lambda: p.proc.poll() is None
+            p.close = lambda: p.wait()
+
+        # Do a quick check to see if we got the prompt right away, otherwise we may be
+        # at a console so we send a \n to re-issue the prompt
+        self.logger.debug("%s: quick check for spawned_re: %s", self, spawned_re)
+        index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
+        if index == 0:
+            self.logger.debug(
+                "%s: got spawned_re quick: '%s' matching '%s'",
+                self,
+                p.match.group(0),
+                spawned_re,
+            )
+            return p
+
+        # Now send a CRLF to cause the prompt (or whatever else) to re-issue
+        p.send("\n")
+        try:
+            patterns = [spawned_re, *expects]
+
+            self.logger.debug("%s: expecting: %s", self, patterns)
+
+            while index := p.expect(patterns):
+                if trace:
+                    self.logger.debug(
+                        "%s: got expect: '%s' matching %d '%s', sending '%s'",
+                        self,
+                        p.match.group(0),
+                        index,
+                        spawned_re,
+                        sends[index - 1],
+                    )
+                if sends[index - 1]:
+                    p.send(sends[index - 1])
+            self.logger.debug(
+                "%s: got spawned_re: '%s' matching '%s'",
+                self,
+                p.match.group(0),
+                spawned_re,
+            )
+            return p
+        except pexpect.TIMEOUT:
+            self.logger.warning(
+                "%s: TIMEOUT looking for spawned_re '%s' buffer: '%s'",
+                self,
+                spawned_re,
+                p.buffer,
+            )
+            raise
+        except pexpect.EOF:
+            if p.isalive():
+                raise
+            p.close()
+            rc = p.status
+            error = subprocess.CalledProcessError(rc, ac)
+            p.expect(pexpect.EOF)
+            error.stdout = p.before
+            raise error
+
+    async def shell_spawn(
+        self,
+        cmd,
+        prompt,
+        expects=(),
+        sends=(),
+        use_pty=False,
+        logfile_read=None,
+        logfile_send=None,
+        **kwargs,
+    ):
+        """
+        Create a shell REPL (read-eval-print-loop).
+
+        Args:
+            cmd - shell and list of args to popen with
+            prompt - the REPL prompt to look for, the function returns when seen
+            expects - a list of regex other than `spawned_re` to look for. Commonly,
+                "ogin:" or "[Pp]assword:"r.
+            sends - what to send when an element of `expects` matches. So e.g., the
+                username or password if thats what corresponding expect matched. Can
+                be the empty string to send nothing.
+            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+            **kwargs - kwargs passed on the _spawn.
+        """
+        import pexpect
+
+        from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
+        from pexpect.replwrap import PEXPECT_PROMPT
+        from pexpect.replwrap import REPLWrapper
+
+        prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
+        p = self.spawn(
+            cmd, prompt, expects, sends, use_pty, logfile_read, logfile_send, **kwargs
+        )
+
+        ps1 = PEXPECT_PROMPT
+        ps2 = PEXPECT_CONTINUATION_PROMPT
+
+        # Avoid problems when =/usr/bin/env= prints the values
+        ps1p = ps1[:5] + "${UNSET_V}" + ps1[5:]
+        ps2p = ps2[:5] + "${UNSET_V}" + ps2[5:]
+
+        pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
+        p.send(pchg)
+        return REPLWrapper(p, ps1, None, extra_init_cmd="export PAGER=cat")
+
     def popen(self, cmd, **kwargs):
         """
         Creates a pipe with the given `command`.
@@ -494,6 +674,17 @@ class Commander:  # pylint: disable=R0904
         defaults.update(kwargs)
         _, stdout, _ = self.cmd_status(cmd, raises=False, **defaults)
         return stdout
+
+    def run_expect_cmd(self, cmd, login_cmd="", prompt="", user="root", password=""):
+        import pexpect
+
+        p = None
+        try:
+            p = self.popen(login_cmd)
+        finally:
+            if p:
+                p.terminate()
+                p.wait()
 
     # Run a command in a new window (gnome-terminal, screen, tmux, xterm)
     def run_in_window(

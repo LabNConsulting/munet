@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.8.7"
+version = "0.8.8"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -20,6 +20,7 @@ importmagic = {version = "^0.1.7", optional = true}
 jedi = {version = "^0.18.0", optional = true}
 json-rpc = {version = "^1.13.0", optional = true}
 jsonschema = {version = "^4.3.1", optional = true}
+pexpect = {version = "^4.8.0", optional = true}
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.11.1"
@@ -30,6 +31,7 @@ black = {version = "^21.9b0", allow-prereleases = true}
 pytest-xdist = "^2.4.0"
 
 [tool.poetry.extras]
+dev = ["jsonschema", "pexpect"]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
 validate = ["jsonschema"]
 

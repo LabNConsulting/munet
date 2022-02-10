@@ -1,2 +1,3 @@
 [virtualenvs]
+# create and use virtual env in <projectroot>/.venv
 in-project = true

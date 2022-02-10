@@ -1,0 +1,14 @@
+topology:
+  networks-autonumber: false
+  dns: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 10.0.1.254/24
+      nat: true
+  nodes:
+    - name: r1
+      # cmd: |
+      #   tail -f /dev/null
+      connections:
+        - to: mgmt0
+          ip: 10.0.1.1/24

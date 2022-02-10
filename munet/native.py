@@ -191,11 +191,50 @@ class L3Node(LinuxNamespace):
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
 
-        # if name == "DDG-5":
-        #     breakpoint()
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         if os.path.exists(hosts_file):
             self.bind_mount(hosts_file, "/etc/hosts")
+
+    async def console(
+        self,
+        concmd,
+        prompt=r"(^|\r\n)[^#\$]*[#\$] ",
+        user=None,
+        password=None,
+        use_pty=False,
+        trace=True,
+    ):
+        lfname = os.path.join(self.rundir, "console-log.txt")
+        logfile = open(lfname, "a+", encoding="utf-8")
+        logfile.write("-- start logging for: '{}' --\n".format(concmd))
+
+        lfname = os.path.join(self.rundir, "console-read-log.txt")
+        logfile_read = open(lfname, "a+", encoding="utf-8")
+        logfile_read.write("-- start read logging for: '{}' --\n".format(concmd))
+
+        lfname = os.path.join(self.rundir, "console-send-log.txt")
+        logfile_send = open(lfname, "a+", encoding="utf-8")
+        logfile_send.write("-- start send logging for: '{}' --\n".format(concmd))
+
+        expects = []
+        sends = []
+        if user:
+            expects.append("ogin:")
+            sends.append(user + "\n")
+        if password:
+            expects.append("assword:")
+            sends.append(password + "\n")
+        repl = await self.shell_spawn(
+            concmd,
+            prompt,
+            expects,
+            sends,
+            logfile=logfile,
+            use_pty=use_pty,
+            logfile_read=logfile_read,
+            logfile_send=logfile_send,
+        )
+        return repl
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
