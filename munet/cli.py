@@ -499,9 +499,9 @@ def add_cli_run_cmd(
         helpfmt: format of command to display in help (left side)
         helptxt: help string for command (right side)
         execfmt: format string to insert user cmds into for execution
+        kinds: limit CLI command to nodes which match list of kinds.
         on_host: Should execute the command on the host vs in the node namespace.
         interactive: Should execute the command inside an allocated pty (interactive)
-        kinds: limit CLI command to nodes which match list of kinds.
     """
     unet.cli_run_cmds[name] = (helpfmt, helptxt, execfmt, kinds, on_host, interactive)
 

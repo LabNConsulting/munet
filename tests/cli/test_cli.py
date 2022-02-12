@@ -22,6 +22,7 @@ import asyncio
 import io
 import logging
 import re
+import sys
 
 import pytest
 
@@ -63,20 +64,37 @@ ls: cannot access 'cmd.err': No such file or directory
 ------- End: r2 ------"""
     stdout = io.StringIO()
     assert await cli.doline(unet, "sh ls cmd.err\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
     match = r"cmd.err"
     stdout = io.StringIO()
     assert await cli.doline(unet, "r1 sh ls cmd.err\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
     match = "Filesystem\noverlay"
     stdout = io.StringIO()
     assert await cli.doline(unet, "r2 sh df --output=source /\n", stdout)
-    assert match == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match
 
 
 async def test_shi_cmd(unet):
+
+    if not sys.stdin.isatty():
+        pytest.skip("Can't test shell-interactive commands without TTY")
+
+    match = r"cmd.err"
+    stdout = io.StringIO()
+
+    assert await cli.doline(unet, "r1 shi ls cmd.err\n", stdout)
+    value = stdout.getvalue().strip().replace("\r", "")
+    assert value == match.strip()
+
+    match = "Filesystem\noverlay"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "r2 shi df --output=source /\n", stdout)
+    value = stdout.getvalue().strip().replace("\r", "")
+    assert value == match.strip()
+
     match = r"""------ Host: r1 ------
 cmd.err
 ------- End: r1 ------
@@ -86,19 +104,7 @@ ls: cannot access 'cmd.err': No such file or directory
     stdout = io.StringIO()
     assert await cli.doline(unet, "shi ls cmd.err\n", stdout)
     value = stdout.getvalue().strip().replace("\r", "")
-    assert match.strip() == value
-
-    match = r"cmd.err"
-    stdout = io.StringIO()
-    assert await cli.doline(unet, "r1 shi ls cmd.err\n", stdout)
-    value = stdout.getvalue().strip().replace("\r", "")
-    assert match.strip() == value
-
-    match = "Filesystem\noverlay"
-    stdout = io.StringIO()
-    assert await cli.doline(unet, "r2 shi df --output=source /\n", stdout)
-    value = stdout.getvalue().strip().replace("\r", "")
-    assert match.strip() == value
+    assert value == match.strip()
 
 
 async def test_default_cmd(unet):
@@ -110,31 +116,31 @@ name:r2 echo:testing echoback
 ------- End: r2 ------"""
     stdout = io.StringIO()
     assert await cli.doline(unet, "testing echoback\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
     match = r"name:r1 echo:foo"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r1 foo\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
     match = r"name:r2 echo:bar"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r2 bar\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
 
 async def test_ls_cmd(unet):
     match = r"cmd.err"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r1 ls cmd.err\n", stdout)
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
     # assert re.match(match, stdout.getvalue().strip())
 
     match = r"/bin/bash"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"r2 ls /bin/bash\n", stdout)
     # assert re.match(match, stdout.getvalue().strip())
-    assert match.strip() == stdout.getvalue().strip()
+    assert stdout.getvalue().strip() == match.strip()
 
 
 async def _test_async_cli(unet, rundir):
