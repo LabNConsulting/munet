@@ -15,6 +15,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
+      - name: Make sure podman image is present
+        run: sudo podman pull docker.io/labn/docker-ci-test:20.04
+
       - name: Setup python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
@@ -41,10 +44,11 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run tests
-        run: sudo env PATH=$PATH poetry run pytest --cov=munet --cov-report=xml tests/config tests/basic
+        run: sudo env PATH=$PATH poetry run pytest -s -v --cov=munet --cov-report=xml tests/cli
 
-      # - name: Upload coverage report
-      #   uses: codecov/codecov-action@v1
-      #   with:
-      #     file: ./coverage.xml
-      #     fail_ci_if_error: false
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v2
+        with:
+          verbose: true
+          files: ./coverage.xml
+          # fail_ci_if_error: false
