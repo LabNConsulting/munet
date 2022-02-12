@@ -329,8 +329,12 @@ class Commander:  # pylint: disable=R0904
             if "codec_errors" not in defaults:
                 defaults["codec_errors"] = "ignore"
 
+        # this is required to avoid receiving a STOPPED signal on expect!
+        if not use_pty:
+            defaults["preexec_fn"] = os.setsid
+
         self.logger.debug(
-            '%s: _spawn("%s", skip_pre_cmd %s use_pty %s kwargs: %.80s)',
+            '%s: _spawn("%s", skip_pre_cmd %s use_pty %s kwargs: %s)',
             self,
             cmd,
             skip_pre_cmd,
@@ -393,6 +397,10 @@ class Commander:  # pylint: disable=R0904
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
+        self.logger.debug("%s: debug timeout STOPPED", self)
+        index = p.expect([pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
+        self.logger.debug("%s: got deubg quick index: '%s'", self, index)
+
         self.logger.debug("%s: quick check for spawned_re: %s", self, spawned_re)
         index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
         if index == 0:
