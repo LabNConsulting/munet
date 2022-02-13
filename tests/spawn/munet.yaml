@@ -11,7 +11,7 @@ topology:
         - to: mgmt0
           ip: 10.0.1.1/24
     - name: r2
-      image: ubuntu:20.04
+      image: docker.io/labn/docker-ci-test:20.04
       connections:
         - to: mgmt0
           ip: 10.0.1.2/24

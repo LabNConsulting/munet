@@ -710,11 +710,20 @@ class L3ContainerNode(L3Node):
             else:
                 self.logger.info("%s: run_cmd taking more than %ss", self, elapsed)
                 await asyncio.sleep(1)
-        if self.cmd_p.returncode:
-            self.logger.error(
-                "%s: run_cmd failed: %s", self, await acomm_error(self.cmd_p)
+        if self.cmd_p.returncode is not None:
+            self.logger.warning(
+                "%s: run_cmd exited quickly (%ss) rc: %s",
+                self,
+                timeout.elapsed(),
+                self.cmd_p.returncode,
             )
-        assert self.cmd_p.returncode is None
+        elif timeout.is_expired():
+            self.logger.critical(
+                "%s: timeout (%ss) waiting for container to start",
+                self.name,
+                timeout.elapsed(),
+            )
+            assert not timeout.is_expired()
 
         self.logger.info("%s: started container", self.name)
 
