@@ -44,7 +44,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Run tests
-        run: sudo env PATH=$PATH poetry run pytest -s -v --cov=munet --cov-report=xml tests
+        run: sudo env PATH=$PATH poetry run pytest -s -v --cov=munet --cov-report=xml tests/spawn
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v2
