@@ -22,7 +22,9 @@ sections.
 
 ** Config Tree
 #+NAME: Munet standalone config YANG tree diagram
-#+CALL: generate-tree(module=labn-munet-config)
+#+begin_src emacs-lisp
+  (org-sbe "generate-tree" (module labn-munet-config))
+#+end_src
 
 #+RESULTS: Munet standalone config YANG tree diagram
 #+begin_example
@@ -120,7 +122,11 @@ module: labn-munet-config
 ** Config Model
 
 #+NAME: test-validate-module
-#+CALL: validate-module(module=labn-munet-config)
+#+begin_src emacs-lisp :exports none
+  (org-sbe "validate-module" (module labn-munet-config))
+#+end_src
+
+#+RESULTS: test-validate-module
 
 #+NAME: labn-munet-config
 #+HEADER: :var dep1=dep-babel :var dep2=fetch-yang-files
@@ -496,7 +502,7 @@ module: labn-munet-config
 #+HEADER: :var dep1=dep-babel
 #+begin_src bash :results output verbatim replace :wrap comment :exports none
   [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
-  if ! $DOCKER pyang --lax-quote-checks -Werror --ietf $module 2>&1; then echo FAIL; fi
+  if ! $DOCKER pyang --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
 #+end_src
 
 #+NAME: validate-config
