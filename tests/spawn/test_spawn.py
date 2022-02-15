@@ -18,15 +18,13 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-# import asyncio
+"Testing use of pexect/REPL in munet."
 import logging
 import os
 import time
 
 import pytest
 
-
-# from munet.parser import build_topology
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
@@ -44,7 +42,7 @@ async def _test_repl(unet, hostname, cmd, use_pty):
 @pytest.mark.parametrize("shellcmd", ["/bin/bash", "/bin/dash", "/bin/ksh"])
 async def test_spawn(unet, host, mode, shellcmd):
     if not os.path.exists(shellcmd):
-        pytest.skip("{} not installed skipping".format(shellcmd))
+        pytest.skip(f"{shellcmd} not installed skipping")
 
     if mode == "pty":
         repl = await _test_repl(unet, host, [shellcmd], use_pty=True)

@@ -18,12 +18,10 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-import asyncio
+"Testing use of containers in munet."
 import logging
 
 import pytest
-
-from munet.base import get_exec_path_host
 
 
 # All tests are coroutines

@@ -18,6 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+"Fixtures and other utilities for munet testing."
 import asyncio
 import logging
 import os
@@ -106,26 +107,10 @@ def rundir_module():
 
 @pytest.fixture(autouse=True, scope="module")
 def module_autouse(request):
-    # is_xdist = os.environ.get("PYTEST_XDIST_MODE", "no") != "no"
-    # if "PYTEST_TOPOTEST_WORKER" not in os.environ:
-    #     is_worker = False
-    # elif not os.environ["PYTEST_TOPOTEST_WORKER"]:
-    #     is_worker = False
-    # else:
-    #     is_worker = True
-
     cwd = os.getcwd()
     sdir = os.path.dirname(os.path.realpath(request.fspath))
     logging.debug("conftest: changing cwd from %s to %s", cwd, sdir)
     os.chdir(sdir)
-
-    # if not is_xdist or is_worker:
-    #     subprocess.check_call(
-    #         "mkdir -p {0} && chmod 1777 {0}".format(rundir_module), shell=True
-    #     )
-    #     # XXX get verbose from somewhere
-    #     # args = SimpleNamespace(rundir=rundir_module, log_config=None, verbose=False)
-    #     # setup_logging(args)
 
     yield
 

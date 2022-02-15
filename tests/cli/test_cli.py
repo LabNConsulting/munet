@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-import asyncio
+"Testing CLI configuration and use."
 import io
 import logging
 import re
@@ -26,10 +26,8 @@ import sys
 
 import pytest
 
-from munet import Commander
 from munet import cli
 from munet import cmd_error
-from munet.__main__ import main
 
 
 # All tests are coroutines
@@ -120,25 +118,25 @@ name:r2 echo:testing echoback
 
     match = r"name:r1 echo:foo"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"r1 foo\n", stdout)
+    assert await cli.doline(unet, "r1 foo\n", stdout)
     assert stdout.getvalue().strip() == match.strip()
 
     match = r"name:r2 echo:bar"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"r2 bar\n", stdout)
+    assert await cli.doline(unet, "r2 bar\n", stdout)
     assert stdout.getvalue().strip() == match.strip()
 
 
 async def test_ls_cmd(unet):
     match = r"cmd.err"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"r1 ls cmd.err\n", stdout)
+    assert await cli.doline(unet, "r1 ls cmd.err\n", stdout)
     assert stdout.getvalue().strip() == match.strip()
     # assert re.match(match, stdout.getvalue().strip())
 
     match = r"/bin/bash"
     stdout = io.StringIO()
-    assert await cli.doline(unet, f"r2 ls /bin/bash\n", stdout)
+    assert await cli.doline(unet, "r2 ls /bin/bash\n", stdout)
     # assert re.match(match, stdout.getvalue().strip())
     assert stdout.getvalue().strip() == match.strip()
 

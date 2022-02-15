@@ -18,12 +18,10 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-import asyncio
+"Testing of basic topology configuration."
 import logging
 
 import pytest
-
-from munet.parser import build_topology
 
 
 # All tests are coroutines
@@ -48,17 +46,17 @@ async def test_autonumber_ping(unet_param):
 
     for i in range(1, 4):
         logging.info(
-            f"r{i} addrs: %s", await unet.hosts[f"r{i}"].async_cmd_raises("ip -o addr")
+            "r%s addrs: %s", i, await unet.hosts[f"r{i}"].async_cmd_raises("ip -o addr")
         )
 
-    o = await r1.async_cmd_raises(f"ping -w1 -c1 10.0.1.2")
+    o = await r1.async_cmd_raises("ping -w1 -c1 10.0.1.2")
     logging.info("r1 ping r2 (10.0.1.2) output: %s", o)
 
-    o = await r1.async_cmd_raises(f"ping -w1 -c1 192.168.10.3")
+    o = await r1.async_cmd_raises("ping -w1 -c1 192.168.10.3")
     logging.info("r1 ping r3 (192.168.10.3) output: %s", o)
 
-    o = await r2.async_cmd_raises(f"ping -w1 -c1 10.254.1.0")
+    o = await r2.async_cmd_raises("ping -w1 -c1 10.254.1.0")
     logging.info("r2 ping r1 p2p (10.254.1.0) output: %s", o)
 
-    o = await r2.async_cmd_raises(f"ping -w1 -c1 10.254.2.1")
+    o = await r2.async_cmd_raises("ping -w1 -c1 10.254.2.1")
     logging.info("r2 ping r3 p2p (10.254.2.1) output: %s", o)

@@ -18,6 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+"A module that implements a CLI."
 import argparse
 import asyncio
 import concurrent.futures
@@ -214,9 +215,9 @@ async def run_command(
     """Runs a command on a set of hosts.
 
     Runs `execfmt` after calling `str.format` on it passing `uargs` as the lone
-        substitution value.  The output is sent to `outf`.  If `on_host` is True then the
-        `execfmt` is run using `Commander.cmd_status_host` otherwise it is run with
-        `Commander.cmd_status`.
+        substitution value.  The output is sent to `outf`.  If `on_host` is True then
+        the `execfmt` is run using `Commander.cmd_status_host` otherwise it is run
+        with `Commander.cmd_status`.
     """
     if kinds:
         logging.info("Filtering hosts to kinds: %s", kinds)

@@ -18,17 +18,13 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+"Testing configuration file format variations."
 import logging
-import subprocess
-import sys
-
-from subprocess import DEVNULL
 
 import pytest
 
 from munet import Commander
 from munet import cmd_error
-from munet.__main__ import main
 
 
 commander = Commander("base")
@@ -45,8 +41,8 @@ def check(p):
     logging.info("Success: %s", s)
 
 
-@pytest.fixture
-def stdargs(rundir):
+@pytest.fixture(name="stdargs")
+def fixture_stdargs(rundir):
     a = [
         "poetry",
         "run",

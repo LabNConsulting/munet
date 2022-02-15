@@ -18,6 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+"""A module that implements core functionality for library or standalone use."""
 import asyncio
 import datetime
 import logging
@@ -50,6 +51,8 @@ os.environ["MUNET_PID"] = str(os.getpid())
 
 
 class Timeout:
+    """An object to passively monitor for timeouts."""
+
     def __init__(self, delta):
         self.started_on = datetime.datetime.now()
         self.expires_on = self.started_on + datetime.timedelta(seconds=delta)
@@ -826,6 +829,8 @@ class Commander:  # pylint: disable=R0904
 
 
 class InterfaceMixin:
+    """A mixin class to support interface functionality."""
+
     def __init__(self, **kwargs):
         del kwargs  # get rid of lint
         self.intf_addrs = {}
@@ -1314,7 +1319,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
 
         # XXX Are we calling this -p.pid on cmd_p which isn't setup right for that?
-
         os.kill(-p.pid, signal.SIGTERM)
         try:
             assert not isinstance(p, subprocess.Popen)
