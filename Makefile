@@ -11,7 +11,7 @@ lint:
 	pylint ./munet $(shell find ./tests/*/* -name '*.py')
 
 ci-lint:
-	pylint --disable="fixme" ./munet ./tests
+	env PATH="$(PATH)" poetry run pylint --disable="fixme" ./munet ./tests
 
 test:
 	sudo env PATH="$(PATH)" poetry run pytest -s -v --cov=munet --cov-report=xml tests

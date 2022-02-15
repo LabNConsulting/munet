@@ -31,8 +31,8 @@ black = {version = "^21.9b0", allow-prereleases = true}
 pytest-xdist = "^2.4.0"
 
 [tool.poetry.extras]
-ci = ["jsonschema", "pexpect"]
-dev = ["jsonschema", "pexpect"]
+ci = ["jsonschema", "pexpect", "pylint"]
+dev = ["jsonschema", "pexpect", "pylint"]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
 validate = ["jsonschema"]
 
