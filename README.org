@@ -44,10 +44,19 @@ module: labn-munet-config
   |  +--rw cap-remove*    string
   |  +--rw cmd?           string
   |  +--rw connections* [to]
-  |  |  +--rw ip?            string
-  |  |  +--rw name?          string
-  |  |  +--rw to             string
-  |  |  +--rw remote-name?   string
+  |  |  +--rw to                    string
+  |  |  +--rw ip?                   string
+  |  |  +--rw name?                 string
+  |  |  +--rw remote-name?          string
+  |  |  +--rw delay?                uint64
+  |  |  +--rw jitter?               uint64
+  |  |  +--rw jitter-correlation?   decimal64
+  |  |  +--rw loss?                 uint64
+  |  |  +--rw loss-correlation?     decimal64
+  |  |  +--rw rate
+  |  |     +--rw rate?    number64
+  |  |     +--rw limit?   number64
+  |  |     +--rw burst?   number64
   |  +--rw env* [name]
   |  |  +--rw name     string
   |  |  +--rw value?   string
@@ -76,10 +85,19 @@ module: labn-munet-config
   |     +--rw cap-remove*    string
   |     +--rw cmd?           string
   |     +--rw connections* [to]
-  |     |  +--rw ip?            string
-  |     |  +--rw name?          string
-  |     |  +--rw to             string
-  |     |  +--rw remote-name?   string
+  |     |  +--rw to                    string
+  |     |  +--rw ip?                   string
+  |     |  +--rw name?                 string
+  |     |  +--rw remote-name?          string
+  |     |  +--rw delay?                uint64
+  |     |  +--rw jitter?               uint64
+  |     |  +--rw jitter-correlation?   decimal64
+  |     |  +--rw loss?                 uint64
+  |     |  +--rw loss-correlation?     decimal64
+  |     |  +--rw rate
+  |     |     +--rw rate?    number64
+  |     |     +--rw limit?   number64
+  |     |     +--rw burst?   number64
   |     +--rw env* [name]
   |     |  +--rw name     string
   |     |  +--rw value?   string
@@ -128,6 +146,74 @@ module: labn-munet-config
       reference "https://github.com/LabNConsulting/munet/blob/main/README.md";
     }
 
+    typedef number64 {
+      type union {
+        type uint64;
+        type string {
+          pattern '[0-9]+([KMGTPE]i?)?';
+        }
+      }
+      description
+        "A number with optional suffix, where suffix means:
+           K -> value*10^3, Ki -> value*2^10,
+           M -> value*10^6, Mi -> value*2^20,
+           G -> value*10^9, Gi -> value*2^30,
+           T -> value*10^12, Gi -> value*2^40,
+           P -> value*10^15, Gi -> value*2^50,
+           E -> value*10^18, Gi -> value*2^60";
+    }
+
+    grouping intf-constraints {
+      description "traffic control based interface constraints";
+      leaf delay {
+        type uint64;
+        description "number of microseconds of delay";
+      }
+      leaf jitter {
+        type uint64;
+        must "../delay";
+        description "number of microseconds of possible jitter";
+      }
+      leaf jitter-correlation {
+        type decimal64 {
+          fraction-digits 16;
+          range "0..100";
+        }
+        must "../jitter";
+        description "percent correlation between consecutive jitter values";
+      }
+      leaf loss {
+        type uint64;
+        must "../delay";
+        description "number of microseconds of possible jitter";
+      }
+      leaf loss-correlation {
+        type decimal64 {
+          fraction-digits 16;
+          range "0..100";
+        }
+        must "../loss";
+        description "percent correlation between consecutive loss values";
+      }
+      container rate {
+        description "bits per second maximum rate with possible limit and burst";
+        leaf rate {
+          type number64;
+          description "bits per second maximum rate";
+        }
+        leaf limit {
+          type number64;
+          must "../rate";
+          description "bits per second maximum rate";
+        }
+        leaf burst {
+          type number64;
+          must "../rate";
+          description "bits per second maximum rate";
+        }
+      }
+    }
+
     grouping common-node {
       description "Common node properties";
       leaf-list cap-add {
@@ -148,6 +234,10 @@ module: labn-munet-config
         key to;
         description "Connections to other networks or nodes from this node";
 
+        leaf to {
+          type string;
+          description "The target of this connection.";
+        }
         leaf ip {
           type string;
           description "IP address for the connection (interface).";
@@ -156,10 +246,6 @@ module: labn-munet-config
           type string;
           description "Name for the connection (interface name).";
         }
-        leaf to {
-          type string;
-          description "The target of this connection.";
-        }
         leaf remote-name {
           type string;
           description
@@ -167,6 +253,7 @@ module: labn-munet-config
              when there are multiple point-to-point connections to the same
              remote node.";
         }
+        uses intf-constraints;
       }
       list env {
         key name;
