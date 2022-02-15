@@ -15,9 +15,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Make sure podman image is present
-        run: sudo podman pull docker.io/labn/docker-ci-test:20.04
-
       - name: Setup python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
@@ -45,8 +42,14 @@ jobs:
       - name: Install munet project
         run: poetry install -E ci --no-interaction
 
+      - name: Lint the project
+        run: make ci-lint
+
+      - name: Make sure podman image is present
+        run: sudo podman pull docker.io/labn/docker-ci-test:20.04
+
       - name: Run tests
-        run: sudo env PATH=$PATH poetry run pytest -s -v --cov=munet --cov-report=xml tests
+        run: make test
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v2
