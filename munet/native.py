@@ -32,7 +32,6 @@ from .base import BaseMunet
 from .base import Bridge
 from .base import LinuxNamespace
 from .base import Timeout
-from .base import acomm_error
 from .base import cmd_error
 from .base import get_exec_path_host
 
@@ -131,10 +130,14 @@ class L3Bridge(Bridge):
         await super().async_delete()
 
     def delete(self):
-        asyncio.run(L3Node.async_delete(self))
+        asyncio.run(super().async_delete())
 
 
 class L3Node(LinuxNamespace):
+    """
+    A linux namespace with IP attributes.
+    """
+
     next_ord = 1
 
     @classmethod
@@ -153,6 +156,7 @@ class L3Node(LinuxNamespace):
         self.cmd_p = None
         self.container_id = ""
         self.id = int(config["id"]) if "id" in config else self._get_next_ord()
+        assert unet is not None
         self.unet = unet
 
         self.intf_tc_count = 0
@@ -233,6 +237,7 @@ class L3Node(LinuxNamespace):
             use_pty=use_pty,
             logfile_read=logfile_read,
             logfile_send=logfile_send,
+            trace=trace,
         )
         return repl
 
@@ -273,7 +278,7 @@ class L3Node(LinuxNamespace):
         # See if we have a custom update for this `kind`
         if kind := self.config.get("kind", None):
             if kind in kind_run_cmd_update:
-                kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
+                await kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
 
         if shell_cmd:
             if not isinstance(shell_cmd, str):
@@ -385,9 +390,11 @@ class L3Node(LinuxNamespace):
 
 
 class L3ContainerNode(L3Node):
-    "A node that runs a container image using podman"
+    """
+    An container (podman) based L3Node.
+    """
 
-    def __init__(self, name, config=None, **kwargs):
+    def __init__(self, name, config, **kwargs):
         """Create a Container Node."""
         self.cont_exec_paths = {}
         self.container_id = None
@@ -487,7 +494,8 @@ class L3ContainerNode(L3Node):
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
-        return self._popen("popen", cmds, async_exec=False, **kwargs)[0]
+        p, _ = self._popen("popen", cmds, **kwargs)
+        return p
 
     async def async_popen(self, cmd, **kwargs):
         if not self.cmd_p:
@@ -497,7 +505,7 @@ class L3ContainerNode(L3Node):
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
-        p, _ = await self._popen("async_popen", cmds, async_exec=True, **kwargs)
+        p, _ = await self._async_popen("async_popen", cmds, **kwargs)
         return p
 
     def cmd_status(self, cmd, **kwargs):
@@ -658,7 +666,10 @@ class L3ContainerNode(L3Node):
         if shell_cmd and cmd:
             if not isinstance(shell_cmd, str):
                 shell_cmd = "/bin/bash"
-            if cmd.find("\n") == -1:
+            assert isinstance(cmd, str)
+            # make cmd \n terminated for script
+            cmd = cmd.rstrip()
+            if cmd[-1] != "\n":
                 cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
@@ -749,14 +760,19 @@ class L3ContainerNode(L3Node):
             self.logger.debug("%s: container async delete", self.name)
 
         if contid := self.container_id:
-            if self.cmd_p and (rc := self.cmd_p.returncode) is None:
-                rc, o, e = await self.async_cmd_status_host(
-                    [get_exec_path_host("podman"), "stop", contid]
-                )
-            if rc and rc < 128:
-                self.logger.warning(
-                    "%s: podman stop on cmd failed: %s", self, cmd_error(rc, o, e)
-                )
+            o = ""
+            e = ""
+            if self.cmd_p:
+                if (rc := self.cmd_p.returncode) is None:
+                    rc, o, e = await self.async_cmd_status_host(
+                        [get_exec_path_host("podman"), "stop", contid]
+                    )
+                if rc and rc < 128:
+                    self.logger.warning(
+                        "%s: podman stop on cmd failed: %s",
+                        self,
+                        cmd_error(rc, o, e),
+                    )
             # now remove the container
             rc, o, e = await self.async_cmd_status_host(
                 [get_exec_path_host("podman"), "rm", contid]
@@ -922,7 +938,7 @@ class Munet(BaseMunet):
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
     cmd = cmd.strip()
     if shell_cmd or cmd != "/sbin/init":
-        return
+        return cmds, cmd
 
     #
     # Add flash dir and mount it

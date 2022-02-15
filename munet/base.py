@@ -32,6 +32,17 @@ import tempfile
 import time as time_mod
 
 
+try:
+    import pexpect
+
+    from pexpect.popen_spawn import PopenSpawn
+    from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
+    from pexpect.replwrap import PEXPECT_PROMPT
+    from pexpect.replwrap import REPLWrapper
+except ImportError:
+    pass
+
+
 root_hostname = subprocess.check_output("hostname")
 
 # This allows us to cleanup any leftovers later on
@@ -92,7 +103,7 @@ async def acomm_error(p):
     return proc_error(p, *p.saved_output)
 
 
-def convert_number(value):
+def convert_number(value) -> int:
     """Convert a number value with a possible suffix to an integer.
 
     >>> convert_number("100k") == 100 * 1024
@@ -105,7 +116,7 @@ def convert_number(value):
     True
     """
     if value is None:
-        return None
+        raise ValueError("Invalid value None for convert_number")
     rate = str(value)
     base = 1000
     if rate[-1] == "i":
@@ -292,7 +303,7 @@ class Commander:  # pylint: disable=R0904
 
         return pre_cmd, cmd, defaults
 
-    def _popen(self, method, cmd, skip_pre_cmd=False, async_exec=False, **kwargs):
+    def _popen_prologue(self, async_exec, method, cmd, skip_pre_cmd, **kwargs):
         if not async_exec:
             defaults = {
                 "encoding": "utf-8",
@@ -305,21 +316,21 @@ class Commander:  # pylint: disable=R0904
                 "stderr": subprocess.PIPE,
             }
         pre_cmd, cmd, defaults = self._get_sub_args(cmd, defaults, **kwargs)
-
         self.logger.debug('%s: %s("%s", kwargs: %.80s)', self, method, cmd, defaults)
-
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
-        if async_exec:
-            p = asyncio.create_subprocess_exec(*actual_cmd, **defaults)
-        else:
-            p = subprocess.Popen(actual_cmd, **defaults)
-        return p, actual_cmd
+        return actual_cmd, defaults
+
+    async def _async_popen(self, method, cmd, skip_pre_cmd=False, **kwargs):
+        acmd, kwargs = self._popen_prologue(True, method, cmd, skip_pre_cmd, **kwargs)
+        p = await asyncio.create_subprocess_exec(*acmd, **kwargs)
+        return p, acmd
+
+    def _popen(self, method, cmd, skip_pre_cmd=False, **kwargs):
+        acmd, kwargs = self._popen_prologue(False, method, cmd, skip_pre_cmd, **kwargs)
+        p = subprocess.Popen(acmd, **kwargs)
+        return p, acmd
 
     def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, **kwargs):
-        import pexpect
-
-        from pexpect.popen_spawn import PopenSpawn
-
         pre_cmd, cmd, defaults = self._get_sub_args(cmd, {}, **kwargs)
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         if "shell" in defaults:
@@ -382,8 +393,6 @@ class Commander:  # pylint: disable=R0904
             subprocess.CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
-        import pexpect
-
         p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
         p.logfile_read = logfile_read
         p.logfile_send = logfile_send
@@ -393,7 +402,7 @@ class Commander:  # pylint: disable=R0904
         if not use_pty:
             p.echo = False
             p.isalive = lambda: p.proc.poll() is None
-            p.close = lambda: p.wait()
+            p.close = p.wait
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
@@ -404,6 +413,7 @@ class Commander:  # pylint: disable=R0904
         self.logger.debug("%s: quick check for spawned_re: %s", self, spawned_re)
         index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
         if index == 0:
+            assert p.match is not None
             self.logger.debug(
                 "%s: got spawned_re quick: '%s' matching '%s'",
                 self,
@@ -421,6 +431,7 @@ class Commander:  # pylint: disable=R0904
 
             while index := p.expect(patterns):
                 if trace:
+                    assert p.match is not None
                     self.logger.debug(
                         "%s: got expect: '%s' matching %d '%s', sending '%s'",
                         self,
@@ -446,7 +457,7 @@ class Commander:  # pylint: disable=R0904
                 p.buffer,
             )
             raise
-        except pexpect.EOF:
+        except pexpect.EOF as eoferr:
             if p.isalive():
                 raise
             p.close()
@@ -454,7 +465,7 @@ class Commander:  # pylint: disable=R0904
             error = subprocess.CalledProcessError(rc, ac)
             p.expect(pexpect.EOF)
             error.stdout = p.before
-            raise error
+            raise error from eoferr
 
     async def shell_spawn(
         self,
@@ -481,12 +492,6 @@ class Commander:  # pylint: disable=R0904
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
             **kwargs - kwargs passed on the _spawn.
         """
-        import pexpect
-
-        from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
-        from pexpect.replwrap import PEXPECT_PROMPT
-        from pexpect.replwrap import REPLWrapper
-
         prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
         p = self.spawn(
             cmd, prompt, expects, sends, use_pty, logfile_read, logfile_send, **kwargs
@@ -516,7 +521,7 @@ class Commander:  # pylint: disable=R0904
         Returns:
             a subprocess.Popen object.
         """
-        return self._popen("popen", cmd, async_exec=False, **kwargs)[0]
+        return self._popen("popen", cmd, **kwargs)[0]
 
     def popen_host(self, cmd, **kwargs):
         """
@@ -531,7 +536,7 @@ class Commander:  # pylint: disable=R0904
         Returns:
             a subprocess.Popen object.
         """
-        return Commander._popen(self, "popen_host", cmd, async_exec=False, **kwargs)[0]
+        return Commander._popen(self, "popen_host", cmd, **kwargs)[0]
 
     async def async_popen(self, cmd, **kwargs):
         """Creates a pipe with the given `command`.
@@ -546,7 +551,8 @@ class Commander:  # pylint: disable=R0904
         Returns:
             a asyncio.subprocess.Process object.
         """
-        return await self._popen("async_popen", cmd, async_exec=True, **kwargs)[0]
+        p, _ = await self._async_popen("async_popen", cmd, **kwargs)
+        return p
 
     async def async_popen_host(self, cmd, **kwargs):
         """Creates a pipe with the given `command`.
@@ -561,9 +567,8 @@ class Commander:  # pylint: disable=R0904
         Returns:
             a asyncio.subprocess.Process object.
         """
-        return await Commander._popen(
-            self, "async_popen_host", cmd, async_exec=True, **kwargs
-        )[0]
+        p, _ = await Commander._async_popen(self, "async_popen_host", cmd, **kwargs)
+        return p
 
     @staticmethod
     def _cmd_status_input(stdin):
@@ -599,10 +604,9 @@ class Commander:  # pylint: disable=R0904
     ):
         """Execute a command."""
         pinput, stdin = Commander._cmd_status_input(stdin)
-        p, actual_cmd = self._popen(
-            "async_cmd_status", cmds, async_exec=True, stdin=stdin, **kwargs
+        p, actual_cmd = await self._async_popen(
+            "async_cmd_status", cmds, stdin=stdin, **kwargs
         )
-        p = await p
 
         if text is False:
             encoding = None
@@ -682,17 +686,6 @@ class Commander:  # pylint: disable=R0904
         defaults.update(kwargs)
         _, stdout, _ = self.cmd_status(cmd, raises=False, **defaults)
         return stdout
-
-    def run_expect_cmd(self, cmd, login_cmd="", prompt="", user="root", password=""):
-        import pexpect
-
-        p = None
-        try:
-            p = self.popen(login_cmd)
-        finally:
-            if p:
-                p.terminate()
-                p.wait()
 
     # Run a command in a new window (gnome-terminal, screen, tmux, xterm)
     def run_in_window(
