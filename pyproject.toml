@@ -77,7 +77,32 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.flake8]
-ignore = "E203,W504"
+max-line-length = 88
+ignore = "E203,E741,W504"
+
+[tool.pylint.messages_control]
+disable = [
+  "broad-except",
+  "consider-using-f-string",    # this would also be nice, but too much
+  "consider-using-with",        # this would be nice if it wasn't so simple
+  "duplicate-code",
+  "invalid-name",               # sometimes 1 char variable names are fine
+  "missing-function-docstring", # would be nice, a pipe-dream really
+  "too-many-arguments",
+  "too-many-branches",
+  "too-many-instance-attributes",
+  "too-many-lines",
+  "too-many-locals",
+  "too-many-return-statements",
+  "too-many-statements",
+]
+max-line-length = 88
+
+[tool.pylint.design]
+# limiting the number of returns might discourage
+# the use of guard clauses. So we increase the
+# allowed number of returns from 6 to 8
+max-returns = 8
 
 [tool.pytest.ini_options]
 
