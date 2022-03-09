@@ -36,7 +36,7 @@ install:
 export DOCKRUN ?= docker run --user $(shell id -u) --network=host -v $$(pwd):/work labn/org-rfc
 EMACSCMD := $(DOCKRUN) emacs -Q --batch --eval '(setq-default indent-tabs-mode nil)' --eval '(setq org-confirm-babel-evaluate nil)' -l ./ox-rfc.el
 
-$(YANG): $(ORG)
+$(YANG): $(ORG) ox-rfc.el
 	$(EMACSCMD) $< --eval '(org-sbe test-validate-module)' 2>&1
 
 run-yang-test: $(ORG) ox-rfc.el

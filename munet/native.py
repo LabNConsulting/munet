@@ -207,6 +207,7 @@ class L3Node(LinuxNamespace):
         user=None,
         password=None,
         use_pty=False,
+        noecho=False,
         trace=True,
     ):
         lfname = os.path.join(self.rundir, "console-log.txt")
@@ -238,6 +239,7 @@ class L3Node(LinuxNamespace):
             use_pty=use_pty,
             logfile_read=logfile_read,
             logfile_send=logfile_send,
+            noecho=noecho,
             trace=trace,
         )
         return repl

@@ -476,6 +476,7 @@ class Commander:  # pylint: disable=R0904
         prompt,
         expects=(),
         sends=(),
+        noecho=False,
         use_pty=False,
         logfile_read=None,
         logfile_send=None,
@@ -509,7 +510,9 @@ class Commander:  # pylint: disable=R0904
 
         pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
         p.send(pchg)
-        return REPLWrapper(p, ps1, None, extra_init_cmd="export PAGER=cat")
+        return ShellWrapper(
+            p, ps1, None, extra_init_cmd="export PAGER=cat", noecho=noecho
+        )
 
     def popen(self, cmd, **kwargs):
         """
@@ -1687,6 +1690,71 @@ class BaseMunet(LinuxNamespace):
 
 
 BaseMunet.g_unet = None
+
+
+#
+# Extra Functional REPLWrapper from pexpect
+#
+class ShellWrapper(REPLWrapper):
+    """
+    REPLWrapper - a read-execute-print-loop interface
+    """
+
+    def __init__(
+        self, cmd_or_spawn, orig_prompt, prompt_change, noecho=False, **kwargs
+    ):
+        self.noecho = noecho
+        super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
+
+    def cmd_status(self, cmd, timeout=-1):
+        """Execute a shell command
+
+        Returns status and (strip/cleaned \r) output
+        """
+        output = self.run_command(cmd, timeout, async_=False)
+        idx = output.find(cmd)
+        if idx == -1:
+            if not self.noecho:
+                logging.warning(
+                    "Didn't find command ('%s') in expected output ('%s')",
+                    cmd,
+                    output,
+                )
+        else:
+            # Remove up to and including the command from the output stream
+            output = output[idx + len(cmd) :].strip()
+
+        scmd = "echo $?"
+        rcstr = self.run_command(scmd)
+        idx = rcstr.find(scmd)
+        if idx == -1:
+            if self.noecho:
+                logging.warning(
+                    "Didn't find status ('%s') in expected output ('%s')",
+                    scmd,
+                    rcstr,
+                )
+            try:
+                rc = int(rcstr)
+            except Exception:
+                rc = 255
+        else:
+            rcstr = rcstr[idx + len(scmd) :].strip()
+            rc = int(rcstr)
+        return rc, output.replace("\r", "").strip()
+
+    def cmd_raises(self, cmd, timeout=-1):
+        """Execute a shell command.
+
+        Returns (strip/cleaned \r) ouptut
+        Raises CalledProcessError on non-zero exit status
+        """
+        rc, output = self.cmd_status(cmd, timeout)
+        if rc:
+            error = subprocess.CalledProcessError(rc, cmd)
+            error.stdout = output
+            raise error
+        return output
 
 
 # ---------------------------
