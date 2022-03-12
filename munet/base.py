@@ -343,6 +343,8 @@ class Commander:  # pylint: disable=R0904
             if "codec_errors" not in defaults:
                 defaults["codec_errors"] = "ignore"
 
+        defaults["env"]["PS1"] = "$ "
+
         # this is required to avoid receiving a STOPPED signal on expect!
         if not use_pty:
             defaults["preexec_fn"] = os.setsid
