@@ -141,5 +141,17 @@ async def test_ls_cmd(unet):
     assert stdout.getvalue().strip() == match.strip()
 
 
+async def test_toplevel(unet):
+    netname = "net0"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, f"toplevel-ip link show {netname}\n", stdout)
+    assert re.match(rf"\d+: {netname}: <.*> mtu 1500.*", stdout.getvalue())
+
+    netname = "nonet0"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, f"toplevel-ip link show {netname}\n", stdout)
+    assert not re.match(rf"\d+: {netname}: <.*> mtu 1500.*", stdout.getvalue())
+
+
 async def _test_async_cli(unet, rundir):
     await cli.async_cli(unet, histfile=f"{rundir}/cli-histfile.txt")

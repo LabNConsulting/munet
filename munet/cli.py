@@ -29,6 +29,7 @@ import pty
 import re
 import readline
 import select
+import shlex
 import socket
 import subprocess
 import sys
@@ -63,9 +64,11 @@ def spawn(unet, host, cmd, iow, on_host):
     try:
         master_fd, slave_fd = pty.openpty()
 
+        ns = unet.hosts[host] if host else unet
+
         # use os.setsid() make it run in a new process group, or bash job
         # control will not be enabled
-        p = unet.hosts[host].popen(
+        p = ns.popen(
             cmd,
             preexec_fn=os.setsid,
             stdin=slave_fd,
@@ -196,21 +199,27 @@ New Window Commands:\n"""
 
 
 def get_shcmd(unet, host, kinds, execfmt, ucmd):
-    h = unet.hosts[host]
-    kind = h.config.get("kind", "")
-    if kinds and kind not in kinds:
-        return ""
+    if host is not None:
+        h = unet.hosts[host]
+        kind = h.config.get("kind", "")
+        if kinds and kind not in kinds:
+            return ""
     if not isinstance(execfmt, str):
         execfmt = execfmt.get(kind)
     if not execfmt:
         return ""
-    ucmd = execfmt.format(ucmd)
+    if len(re.findall(r"{\d*}", execfmt)) > 1:
+        ucmd = execfmt.format(*shlex.split(ucmd))
+    else:
+        ucmd = execfmt.format(ucmd)
     ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
+    if host is None:
+        return ucmd
     return ucmd.replace("%NAME%", host)
 
 
 async def run_command(
-    unet, outf, line, execfmt, hosts, kinds, on_host=False, with_pty=False
+    unet, outf, line, execfmt, hosts, toplevel, kinds, on_host=False, with_pty=False
 ):
     """Runs a command on a set of hosts.
 
@@ -224,8 +233,11 @@ async def run_command(
         hosts = [x for x in hosts if unet.hosts[x].config.get("kind", "") in kinds]
         logging.info("Filtered hosts: %s", hosts)
 
-    if not hosts:
+    if not toplevel and not hosts:
         return
+
+    if toplevel:
+        hosts = [None]
 
     # if unknowns := [x for x in hosts if x not in unet.hosts]:
     #     outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
@@ -250,10 +262,11 @@ async def run_command(
         shcmd = get_shcmd(unet, host, kinds, execfmt, line)
         if not shcmd:
             continue
+        ns = unet.hosts[host] if host else unet
         if on_host:
-            cmdf = unet.hosts[host].async_cmd_status_host
+            cmdf = ns.async_cmd_status_host
         else:
-            cmdf = unet.hosts[host].async_cmd_status
+            cmdf = ns.async_cmd_status
         aws.append(cmdf(shcmd, warn=False, stderr=subprocess.STDOUT))
 
     results = await asyncio.gather(*aws, return_exceptions=True)
@@ -301,22 +314,34 @@ async def doline(unet, line, outf, background=False, notty=False):
     #
 
     if cmd in unet.cli_in_window_cmds:
-        execfmt, kinds, kwargs = unet.cli_in_window_cmds[cmd][2:]
+        execfmt, toplevel, kinds, kwargs = unet.cli_in_window_cmds[cmd][2:]
 
-        hosts, ucmd = host_cmd_split(unet, nline, kinds, False)
-        if not hosts:
-            return True
+        if toplevel:
+            ucmd = " ".join(nline.split())
+        else:
+            hosts, ucmd = host_cmd_split(unet, nline, kinds, False)
+            if not hosts:
+                return True
 
-        if "{}" not in execfmt and ucmd:
+        if "{}" not in execfmt and ucmd and not toplevel:
             # CLI command does not expect user command so treat as hosts of which some
             # must be unknown
             unknowns = [x for x in ucmd.split() if x not in unet.hosts]
             outf.write(f"% Unknown host[s]: {' '.join(unknowns)}\n")
             return True
+
         try:
-            for host in hosts:
-                shcmd = get_shcmd(unet, host, kinds, execfmt, ucmd)
-                unet.hosts[host].run_in_window(shcmd, **kwargs)
+            if toplevel:
+                logging.debug(
+                    "top-level-window: execfmt: '%s' ucmd: '%s'", execfmt, ucmd
+                )
+                shcmd = get_shcmd(unet, None, None, execfmt, ucmd)
+                logging.debug("top-level-window: cmd: '%s' kwargs: '%s'", shcmd, kwargs)
+                unet.run_in_window(shcmd, **kwargs)
+            else:
+                for host in hosts:
+                    shcmd = get_shcmd(unet, host, kinds, execfmt, ucmd)
+                    unet.hosts[host].run_in_window(shcmd, **kwargs)
         except Exception as error:
             outf.write(f"% Error: {error}\n")
         return True
@@ -324,9 +349,14 @@ async def doline(unet, line, outf, background=False, notty=False):
     #
     # Inline commands
     #
-    hosts, cmd, nline = host_line_split(unet, line)
 
-    logging.debug("hosts: %s cmd: %s nline: %s", hosts, cmd, nline)
+    toplevel = unet.cli_run_cmds[cmd][3] if cmd in unet.cli_run_cmds else False
+    if toplevel:
+        logging.debug("top-level: cmd: '%s' nline: '%s'", cmd, nline)
+        hosts = None
+    else:
+        hosts, cmd, nline = host_line_split(unet, line)
+        logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hosts, cmd, nline)
 
     if cmd in unet.cli_run_cmds:
         pass
@@ -337,11 +367,13 @@ async def doline(unet, line, outf, background=False, notty=False):
         outf.write(f"% Unknown command: {cmd} {nline}\n")
         return True
 
-    execfmt, kinds, on_host, with_pty = unet.cli_run_cmds[cmd][2:]
+    execfmt, toplevel, kinds, on_host, with_pty = unet.cli_run_cmds[cmd][2:]
     if with_pty and notty:
         outf.write("% Error: interactive command must be run from primary CLI\n")
         return True
-    await run_command(unet, outf, nline, execfmt, hosts, kinds, on_host, with_pty)
+    await run_command(
+        unet, outf, nline, execfmt, hosts, toplevel, kinds, on_host, with_pty
+    )
     return True
 
 
@@ -465,7 +497,9 @@ async def remote_cli(unet, prompt, title, background):
         logging.error("cli server: unexpected exception: %s", error)
 
 
-def add_cli_in_window_cmd(unet, name, helpfmt, helptxt, execfmt, kinds, **kwargs):
+def add_cli_in_window_cmd(
+    unet, name, helpfmt, helptxt, execfmt, toplevel, kinds, **kwargs
+):
     """Adds a CLI command to the CLI.
 
     The command `cmd` is added to the commands executable by the user from the CLI.  See
@@ -479,14 +513,23 @@ def add_cli_in_window_cmd(unet, name, helpfmt, helptxt, execfmt, kinds, **kwargs
         helptxt: help string for command (right side)
         execfmt: interpreter `cmd` to pass to `host.run_in_window()`, if {} present then
           allow for user commands to be entered and inserted.
+        toplevel: run command in common top-level namespaec not inside hosts
         kinds: limit CLI command to nodes which match list of kinds.
         **kwargs: keyword args to pass to `host.run_in_window()`
     """
-    unet.cli_in_window_cmds[name] = (helpfmt, helptxt, execfmt, kinds, kwargs)
+    unet.cli_in_window_cmds[name] = (helpfmt, helptxt, execfmt, toplevel, kinds, kwargs)
 
 
 def add_cli_run_cmd(
-    unet, name, helpfmt, helptxt, execfmt, kinds, on_host=False, interactive=False
+    unet,
+    name,
+    helpfmt,
+    helptxt,
+    execfmt,
+    toplevel,
+    kinds,
+    on_host=False,
+    interactive=False,
 ):
     """Adds a CLI command to the CLI.
 
@@ -500,11 +543,20 @@ def add_cli_run_cmd(
         helpfmt: format of command to display in help (left side)
         helptxt: help string for command (right side)
         execfmt: format string to insert user cmds into for execution
+        toplevel: run command in common top-level namespaec not inside hosts
         kinds: limit CLI command to nodes which match list of kinds.
         on_host: Should execute the command on the host vs in the node namespace.
         interactive: Should execute the command inside an allocated pty (interactive)
     """
-    unet.cli_run_cmds[name] = (helpfmt, helptxt, execfmt, kinds, on_host, interactive)
+    unet.cli_run_cmds[name] = (
+        helpfmt,
+        helptxt,
+        execfmt,
+        toplevel,
+        kinds,
+        on_host,
+        interactive,
+    )
 
 
 def add_cli_config(unet, config):
@@ -526,6 +578,12 @@ def add_cli_config(unet, config):
           format: "vtysh HOST [HOST ...]"
           exec: "vtysh"
           new-window: true
+        - name: "capture"
+          help: "Capture packets on a given network"
+          format: "pcap NETWORK"
+          exec: "tshark -i {0} -w /tmp/capture-{0}.pcap"
+          new-window: true
+          top-level: true # run in top-level container namespace, above hosts
 
     The `new_window` key can also be a dictionary which will be passed as keyward
     arguments to the `Commander.run_in_window()` function.
@@ -540,17 +598,18 @@ def add_cli_config(unet, config):
         helpfmt = cli_cmd.get("format", "")
         helptxt = cli_cmd.get("help", "")
         execfmt = cli_cmd.get("exec", "bash -c '{}'")
+        toplevel = cli_cmd.get("top-level", False)
         kinds = cli_cmd.get("kinds", [])
-        stdargs = (unet, name, helpfmt, helptxt, execfmt, kinds)
+        stdargs = (unet, name, helpfmt, helptxt, execfmt, toplevel, kinds)
         new_window = cli_cmd.get("new-window", None)
-        if new_window is True:
-            add_cli_in_window_cmd(*stdargs)
-        elif new_window is not None:
+        if isinstance(new_window, dict):
             add_cli_in_window_cmd(*stdargs, **new_window)
+        elif bool(new_window):
+            add_cli_in_window_cmd(*stdargs)
         else:
             add_cli_run_cmd(
                 *stdargs,
-                cli_cmd.get("run-on-host", False),
+                cli_cmd.get("on-host", False),
                 cli_cmd.get("interactive", False),
             )
 

@@ -813,10 +813,22 @@ class Munet(BaseMunet):
 
         cli.add_cli_in_window_cmd(
             self,
+            "pcap",
+            "pcap NETWORK",
+            "capture packets from NETWORK into file capture-NETWORK.pcap, the command "
+            "is run within a new window which also shows packet summaries",
+            "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
+            True,
+            [],
+            on_host=False,
+        )
+        cli.add_cli_in_window_cmd(
+            self,
             "hterm",
             "hterm HOST [HOST ...]",
             "open terminal[s] on HOST[S] (outside containers), * for all",
             "bash",
+            False,
             [],
             on_host=True,
         )
@@ -826,6 +838,7 @@ class Munet(BaseMunet):
             "term HOST [HOST ...]",
             "open terminal[s] (TMUX or XTerm) on HOST[S], * for all",
             "bash",
+            False,
             [],
         )
         cli.add_cli_in_window_cmd(
@@ -834,6 +847,7 @@ class Munet(BaseMunet):
             "xterm HOST [HOST ...]",
             "open XTerm[s] on HOST[S], * for all",
             "bash",
+            False,
             [],
             forcex=True,
         )
@@ -843,6 +857,7 @@ class Munet(BaseMunet):
             "[HOST ...] sh <SHELL-COMMAND>",
             "execute <SHELL-COMMAND> on hosts",
             "bash -c '{}'",
+            False,
             [],
             False,
             False,
@@ -853,6 +868,7 @@ class Munet(BaseMunet):
             "[HOST ...] shi <INTERACTIVE-COMMAND>",
             "execute <INTERACTIVE-COMMAND> on HOST[s]",
             "bash -c '{}'",
+            False,
             [],
             False,
             True,

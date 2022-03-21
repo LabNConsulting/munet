@@ -404,6 +404,14 @@ module: labn-munet-config
             "Controls if the command runs in the CLI window or opens a new
              terminal window to run the command in.";
         }
+        leaf top-level {
+          type boolean;
+          default false;
+          description
+            "If true the command is run in the top-level containing namespace. This is the
+             namespace from which each of the hosts allocated sub-namespaces from.
+             or a host namespace.";
+        }
       }
     }
 

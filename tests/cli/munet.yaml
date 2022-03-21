@@ -16,6 +16,12 @@ cli:
       help: "Open terminals on HOST[s] performing count to 10"
       new-window: true
 
+    - name: "toplevel-ip"
+      exec: "ip {}"
+      format: "ip IPARGS"
+      help: "Run ip command in top-level namespace"
+      top-level: true
+
 topology:
   networks:
     - name: net0
