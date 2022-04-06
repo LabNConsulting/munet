@@ -22,7 +22,7 @@ sections.
 
 ** Config Tree
 #+NAME: Munet standalone config YANG tree diagram
-#+begin_src emacs-lisp
+#+begin_src emacs-lisp :exports none
   (org-sbe "generate-tree" (module labn-munet-config))
 #+end_src
 
