@@ -26,7 +26,7 @@ sections.
   (org-sbe "generate-tree" (module labn-munet-config))
 #+end_src
 
-#+RESULTS: Munet standalone config YANG tree diagram
+#+NAME: Munet standalone config YANG tree diagram
 #+begin_example
 module: labn-munet-config
   +--rw cli
