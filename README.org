@@ -21,12 +21,11 @@ The config itself is defined with a YANG model which is defined in the following
 sections.
 
 ** Config Tree
-#+NAME: Munet standalone config YANG tree diagram
-#+begin_src emacs-lisp :exports none
-  (org-sbe "generate-tree" (module labn-munet-config))
-#+end_src
 
 #+NAME: Munet standalone config YANG tree diagram
+#+CALL: generate-tree(module=labn-munet-config)
+
+#+RESULTS: Munet standalone config YANG tree diagram
 #+begin_example
 module: labn-munet-config
   +--rw cli
@@ -40,6 +39,7 @@ module: labn-munet-config
   |     +--rw kinds*        -> ../../../kinds/name
   |     +--rw name          string
   |     +--rw new-window?   boolean
+  |     +--rw top-level?    boolean
   +--rw kinds* [name]
   |  +--rw merge*         string
   |  +--rw cap-add*       string
@@ -118,6 +118,7 @@ module: labn-munet-config
   |     +--rw volumes*       string
   +--rw version?    uint32
 #+end_example
+
 
 ** Config Model
 
@@ -503,8 +504,6 @@ module: labn-munet-config
   [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
   $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
 #+end_src
-
-#+RESULTS: generate-tree
 
 #+NAME: validate-module
 #+HEADER: :var dep1=dep-babel
