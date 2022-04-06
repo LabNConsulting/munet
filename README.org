@@ -26,7 +26,7 @@ sections.
 #+CALL: generate-tree(module=labn-munet-config)
 
 #+RESULTS: Munet standalone config YANG tree diagram
-#+begin_example
+#+begin_verbatim
 module: labn-munet-config
   +--rw cli
   |  +--rw commands* [name]
@@ -117,7 +117,7 @@ module: labn-munet-config
   |     +--rw shell?         union
   |     +--rw volumes*       string
   +--rw version?    uint32
-#+end_example
+#+end_verbatim
 
 
 ** Config Model
@@ -500,7 +500,7 @@ module: labn-munet-config
 
 #+NAME: generate-tree
 #+HEADER: :var dep1=dep-babel
-#+begin_src shell :results output verbatim replace :exports results
+#+begin_src shell :results output verbatim replace :wrap verbatim :exports results
   [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
   $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
 #+end_src
