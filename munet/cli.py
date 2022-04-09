@@ -275,13 +275,74 @@ async def run_command(
         if len(hosts) > 1:
             outf.write(f"------ Host: {host} ------\n")
         if rc:
-            outf.write("*** non-zero exit status: %d\n" % rc)
+            outf.write(f"*** non-zero exit status: {rc}\n")
         outf.write(o)
         if len(hosts) > 1:
             outf.write(f"------- End: {host} ------\n")
 
 
-async def doline(unet, line, outf, background=False, notty=False):
+cli_builtins = ["cli", "help", "hosts", "quit"]
+
+
+class Completer:
+    "A completer class for the CLI"
+
+    def __init__(self, unet):
+        self.unet = unet
+
+    def complete(self, text, state):
+        line = readline.get_line_buffer()
+        tokens = line.split()
+        # print(f"\nXXX: tokens: {tokens} text: '{text}' state: {state}'\n")
+
+        first_token = not tokens or (text and len(tokens) == 1)
+
+        # If we have already have a builtin command we are done
+        if tokens and tokens[0] in cli_builtins:
+            return [None]
+
+        cli_run_cmds = set(self.unet.cli_run_cmds.keys())
+        top_run_cmds = {x for x in cli_run_cmds if self.unet.cli_run_cmds[x][3]}
+        cli_run_cmds -= top_run_cmds
+        cli_win_cmds = set(self.unet.cli_in_window_cmds.keys())
+        hosts = set(self.unet.hosts.keys())
+        is_window_cmd = bool(tokens) and tokens[0] in cli_win_cmds
+        done_set = set()
+        if bool(tokens):
+            if text:
+                done_set = set(tokens[:-1])
+            else:
+                done_set = set(tokens)
+
+        # Determine the domain for completions
+        if not tokens or first_token:
+            all_cmds = (
+                set(cli_builtins) | hosts | cli_run_cmds | cli_win_cmds | top_run_cmds
+            )
+        elif is_window_cmd:
+            all_cmds = hosts
+        elif tokens and tokens[0] in top_run_cmds:
+            # nothing to complete if a top level command
+            pass
+        elif not bool(done_set & cli_run_cmds):
+            all_cmds = hosts | cli_run_cmds
+
+        if not text:
+            completes = all_cmds
+        else:
+            # print(f"\nXXX: all_cmds: {all_cmds} text: '{text}'\n")
+            completes = {x + " " for x in all_cmds if x.startswith(text)}
+
+        # print(f"\nXXX: completes: {completes} text: '{text}' state: {state}'\n")
+        # remove any completions already present
+        completes -= done_set
+        completes = sorted(completes) + [None]
+        return completes[state]
+
+
+async def doline(
+    unet, line, outf, background=False, notty=False
+):  # pylint: disable=R0911
 
     line = line.strip()
     m = re.match(r"^(\S+)(?:\s+(.*))?$", line)
@@ -420,12 +481,20 @@ async def cli_client(sockpath, prompt="munet> "):
 async def local_cli(unet, outf, prompt, histfile, background):
     """Implement the user-side CLI for local munet"""
 
+    if unet:
+        completer = Completer(unet)
+        readline.parse_and_bind("tab: complete")
+        readline.set_completer(completer.complete)
+
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
         try:
             line = await async_input(prompt, histfile)
             if line is None:
                 return
+
+            assert unet is not None
+
             if not await doline(unet, line, outf, background):
                 return
         except KeyboardInterrupt:
@@ -486,11 +555,11 @@ async def remote_cli(unet, prompt, title, background):
         # Open a new window with a new CLI
         python_path = await unet.async_get_exec_path(["python3", "python"])
         us = os.path.realpath(__file__)
-        cmd = "{} {}".format(python_path, us)
+        cmd = f"{python_path} {us}"
         if unet.cli_histfile:
             cmd += " --histfile=" + unet.cli_histfile
         if prompt:
-            cmd += " --prompt='{}'".format(prompt)
+            cmd += f" --prompt='{prompt}'"
         cmd += " " + unet.cli_sockpath
         unet.run_in_window(cmd, title=title, background=False)
     except Exception as error:

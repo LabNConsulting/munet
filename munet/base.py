@@ -764,11 +764,16 @@ class Commander:  # pylint: disable=R0904
             if tmux_target:
                 cmd.append("-t")
                 cmd.append(tmux_target)
-            if title:
-                nscmd = f"printf '\033]2;{title}\033\\'; {nscmd}"
-            if channel:
-                nscmd = 'trap "tmux wait -S {}; exit 0" EXIT; {}'.format(channel, nscmd)
-            cmd.append(nscmd)
+            if isinstance(nscmd, str) or title or channel:
+                if not isinstance(nscmd, str):
+                    nscmd = shlex.join(nscmd)
+                if title:
+                    nscmd = f"printf '\033]2;{title}\033\\'; {nscmd}"
+                if channel:
+                    nscmd = f'trap "tmux wait -S {channel}; exit 0" EXIT; {nscmd}'
+                cmd.append(nscmd)
+            else:
+                cmd.extend(nscmd)
         elif "STY" in os.environ and not forcex:
             # wait for not supported in screen for now
             channel = None

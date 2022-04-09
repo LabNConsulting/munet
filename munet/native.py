@@ -475,7 +475,8 @@ class L3ContainerNode(L3Node):
         return cmds
 
     def get_cmd_container(self, cmd, sudo=False, tty=False):
-        return " ".join(self._get_podman_precmd(cmd, sudo=sudo, tty=tty))
+        # return " ".join(self._get_podman_precmd(cmd, sudo=sudo, tty=tty))
+        return self._get_podman_precmd(cmd, sudo=sudo, tty=tty)
 
     def popen(self, cmd, **kwargs):
         """
@@ -811,68 +812,64 @@ class Munet(BaseMunet):
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
 
-        cli.add_cli_in_window_cmd(
-            self,
-            "pcap",
-            "pcap NETWORK",
-            "capture packets from NETWORK into file capture-NETWORK.pcap, the command "
-            "is run within a new window which also shows packet summaries",
-            "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
-            True,
-            [],
-            on_host=False,
-        )
-        cli.add_cli_in_window_cmd(
-            self,
-            "hterm",
-            "hterm HOST [HOST ...]",
-            "open terminal[s] on HOST[S] (outside containers), * for all",
-            "bash",
-            False,
-            [],
-            on_host=True,
-        )
-        cli.add_cli_in_window_cmd(
-            self,
-            "term",
-            "term HOST [HOST ...]",
-            "open terminal[s] (TMUX or XTerm) on HOST[S], * for all",
-            "bash",
-            False,
-            [],
-        )
-        cli.add_cli_in_window_cmd(
-            self,
-            "xterm",
-            "xterm HOST [HOST ...]",
-            "open XTerm[s] on HOST[S], * for all",
-            "bash",
-            False,
-            [],
-            forcex=True,
-        )
-        cli.add_cli_run_cmd(
-            self,
-            "sh",
-            "[HOST ...] sh <SHELL-COMMAND>",
-            "execute <SHELL-COMMAND> on hosts",
-            "bash -c '{}'",
-            False,
-            [],
-            False,
-            False,
-        )
-        cli.add_cli_run_cmd(
-            self,
-            "shi",
-            "[HOST ...] shi <INTERACTIVE-COMMAND>",
-            "execute <INTERACTIVE-COMMAND> on HOST[s]",
-            "bash -c '{}'",
-            False,
-            [],
-            False,
-            True,
-        )
+        # Common CLI commands for any topology
+        cdict = {
+            "commands": [
+                {
+                    "name": "pcap",
+                    "format": "pcap NETWORK",
+                    "help": (
+                        "capture packets from NETWORK into file capture-NETWORK.pcap"
+                        " the command is run within a new window which also shows"
+                        " packet summaries"
+                    ),
+                    "exec": "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
+                    "top-level": True,
+                    "new-window": True,
+                },
+                {
+                    "name": "hterm",
+                    "format": "hterm HOST [HOST ...]",
+                    "help": (
+                        "open terminal[s] on HOST[S] (outside containers), * for all"
+                    ),
+                    "exec": "bash",
+                    "on-host": True,
+                    "new-window": True,
+                },
+                {
+                    "name": "term",
+                    "format": "term HOST [HOST ...]",
+                    "help": "open terminal[s] (TMUX or XTerm) on HOST[S], * for all",
+                    "exec": "bash",
+                    "new-window": True,
+                },
+                {
+                    "name": "xterm",
+                    "format": "xterm HOST [HOST ...]",
+                    "help": "open XTerm[s] on HOST[S], * for all",
+                    "exec": "bash",
+                    "new-window": {
+                        "forcex": True,
+                    },
+                },
+                {
+                    "name": "sh",
+                    "format": "[HOST ...] sh <SHELL-COMMAND>",
+                    "help": "execute <SHELL-COMMAND> on hosts",
+                    "exec": "bash -c '{}'",
+                },
+                {
+                    "name": "shi",
+                    "format": "[HOST ...] shi <INTERACTIVE-COMMAND>",
+                    "help": "execute <INTERACTIVE-COMMAND> on HOST[s]",
+                    "exec": "bash -c '{}'",
+                    "interactive": True,
+                },
+            ]
+        }
+
+        cli.add_cli_config(self, cdict)
 
     @property
     def autonumber(self):

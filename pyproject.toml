@@ -88,6 +88,7 @@ disable = [
   "duplicate-code",
   "invalid-name",               # sometimes 1 char variable names are fine
   "missing-function-docstring", # would be nice, a pipe-dream really
+  "too-few-public-methods",
   "too-many-arguments",
   "too-many-branches",
   "too-many-instance-attributes",

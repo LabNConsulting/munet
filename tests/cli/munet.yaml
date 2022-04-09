@@ -4,22 +4,21 @@ cli:
   commands:
     - name: ""
       exec: "bash -c 'echo name:%NAME% echo:{}'"
-      help-format: "[HOST ...] ECHO-BACK"
-      help: "echo ECHO-BACK"
+      format: "[HOST ...] ECHO-BACK-TEXT"
+      help: "echo's ECHO-BACK-TEXT"
     - name: "ls"
       exec: "ls {}"
-      format: "ls [HOST ...] OBJECT [OBJECT ...]"
+      format: "[HOST ...] ls OBJECT [OBJECT ...]"
       help: "get an `ls -l` on OBJECTs on the given HOST[s]"
     - name: "count"
       exec: "bash -c 'for ((i=0; i<10; i++)); do echo $i; sleep 1; done'"
       format: "count HOST [HOST ...]"
       help: "Open terminals on HOST[s] performing count to 10"
       new-window: true
-
     - name: "toplevel-ip"
       exec: "ip {}"
-      format: "ip IPARGS"
-      help: "Run ip command in top-level namespace"
+      format: "toplevel-ip IPARGS"
+      help: "Run `ip` command in top-level namespace"
       top-level: true
 
 topology:
