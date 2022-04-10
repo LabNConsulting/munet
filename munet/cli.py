@@ -96,35 +96,82 @@ def spawn(unet, host, cmd, iow, on_host):
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_tty)
 
 
-def host_line_split(unet, line):
+def is_host_regex(restr):
+    return len(restr) > 2 and restr[0] == "/" and restr[-1] == "/"
+
+
+def get_host_regex(restr):
+    if len(restr) < 3 or restr[0] != "/" or restr[-1] != "/":
+        return None
+    return re.compile(restr[1:-1])
+
+
+def host_in(restr, names):
+    "Determine if matcher is a regex that matches one of names"
+    if not (regexp := get_host_regex(restr)):
+        return restr in names
+    for name in names:
+        if regexp.fullmatch(name):
+            return True
+    return False
+
+
+def expand_host(restr, names):
+    "Expand name or regexp into list of hosts"
+    hosts = []
+    if not (regexp := get_host_regex(restr)):
+        assert restr in names
+        hosts.append(restr)
+    else:
+        for name in names:
+            if regexp.fullmatch(name):
+                hosts.append(name)
+    return sorted(hosts)
+
+
+def expand_hosts(restrs, names):
+    "Expand list of host names or regex into list of hosts"
+    hosts = []
+    for restr in restrs:
+        hosts += expand_host(restr, names)
+    return sorted(hosts)
+
+
+def host_cmd_split(unet, line):
     all_hosts = set(unet.hosts)
     csplit = line.split()
     i = 0
+    banner = False
     for i, e in enumerate(csplit):
-        if e not in all_hosts:
-            break
+        if is_re := is_host_regex(e):
+            banner = True
+        if not host_in(e, all_hosts):
+            if not is_re:
+                break
     else:
         i += 1
 
     if i == 0 and csplit and csplit[0] == "*":
         hosts = sorted(all_hosts)
         csplit = csplit[1:]
+        banner = True
     else:
-        hosts = csplit[:i]
+        hosts = expand_hosts(csplit[:i], all_hosts)
         csplit = csplit[i:]
 
-    if not hosts:
-        hosts = sorted(all_hosts)
+        if not hosts and not csplit[:i]:
+            hosts = sorted(all_hosts)
+            banner = True
 
     if not csplit:
-        return hosts, "", ""
+        return hosts, "", "", True
 
     i = line.index(csplit[0])
     i += len(csplit[0])
-    return hosts, csplit[0], line[i:].strip()
+    return hosts, csplit[0], line[i:].strip(), banner
 
 
-def host_cmd_split(unet, cmd, kinds, defall):
+def win_cmd_host_split(unet, cmd, kinds, defall):
     if kinds:
         all_hosts = {
             x for x in unet.hosts if unet.hosts[x].config.get("kind", "") in kinds
@@ -135,8 +182,9 @@ def host_cmd_split(unet, cmd, kinds, defall):
     csplit = cmd.split()
     i = 0
     for i, e in enumerate(csplit):
-        if e not in all_hosts:
-            break
+        if not host_in(e, all_hosts):
+            if not is_host_regex(e):
+                break
     else:
         i += 1
 
@@ -144,10 +192,11 @@ def host_cmd_split(unet, cmd, kinds, defall):
         hosts = sorted(all_hosts)
         csplit = csplit[1:]
     else:
-        hosts = csplit[:i]
+        hosts = expand_hosts(csplit[:i], all_hosts)
 
-    if not hosts and defall:
-        hosts = sorted(all_hosts)
+        if not hosts and defall and not csplit[:i]:
+            hosts = sorted(all_hosts)
+
     # Filter hosts based on cmd
     cmd = " ".join(csplit[i:])
     return hosts, cmd
@@ -189,6 +238,8 @@ Basic Commands:
   hosts :: list hosts
   quit  :: quit the cli
 
+  (HOST can also be a regex specified wthin '//)'
+
 New Window Commands:\n"""
         + "\n".join([f"  {ww[v][0]}\t:: {ww[v][1]}" for v in w])
         + """\nInline Commands:\n"""
@@ -219,7 +270,16 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
 
 
 async def run_command(
-    unet, outf, line, execfmt, hosts, toplevel, kinds, on_host=False, with_pty=False
+    unet,
+    outf,
+    line,
+    execfmt,
+    banner,
+    hosts,
+    toplevel,
+    kinds,
+    on_host=False,
+    with_pty=False,
 ):
     """Runs a command on a set of hosts.
 
@@ -249,10 +309,10 @@ async def run_command(
             shcmd = get_shcmd(unet, host, kinds, execfmt, line)
             if not shcmd:
                 continue
-            if len(hosts) > 1:
+            if len(hosts) > 1 or banner:
                 outf.write(f"------ Host: {host} ------\n")
             spawn(unet, host, shcmd, outf, on_host)
-            if len(hosts) > 1:
+            if len(hosts) > 1 or banner:
                 outf.write(f"------- End: {host} ------\n")
         outf.write("\n")
         return
@@ -272,12 +332,12 @@ async def run_command(
     results = await asyncio.gather(*aws, return_exceptions=True)
     for host, result in zip(hosts, results):
         rc, o, _ = result
-        if len(hosts) > 1:
+        if len(hosts) > 1 or banner:
             outf.write(f"------ Host: {host} ------\n")
         if rc:
             outf.write(f"*** non-zero exit status: {rc}\n")
         outf.write(o)
-        if len(hosts) > 1:
+        if len(hosts) > 1 or banner:
             outf.write(f"------- End: {host} ------\n")
 
 
@@ -345,7 +405,7 @@ async def doline(
 ):  # pylint: disable=R0911
 
     line = line.strip()
-    m = re.match(r"^(\S+)(?:\s+(.*))?$", line)
+    m = re.fullmatch(r"^(\S+)(?:\s+(.*))?$", line)
     if not m:
         return True
 
@@ -380,7 +440,7 @@ async def doline(
         if toplevel:
             ucmd = " ".join(nline.split())
         else:
-            hosts, ucmd = host_cmd_split(unet, nline, kinds, False)
+            hosts, ucmd = win_cmd_host_split(unet, nline, kinds, False)
             if not hosts:
                 return True
 
@@ -415,8 +475,9 @@ async def doline(
     if toplevel:
         logging.debug("top-level: cmd: '%s' nline: '%s'", cmd, nline)
         hosts = None
+        banner = False
     else:
-        hosts, cmd, nline = host_line_split(unet, line)
+        hosts, cmd, nline, banner = host_cmd_split(unet, line)
         logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hosts, cmd, nline)
 
     if cmd in unet.cli_run_cmds:
@@ -433,7 +494,7 @@ async def doline(
         outf.write("% Error: interactive command must be run from primary CLI\n")
         return True
     await run_command(
-        unet, outf, nline, execfmt, hosts, toplevel, kinds, on_host, with_pty
+        unet, outf, nline, execfmt, banner, hosts, toplevel, kinds, on_host, with_pty
     )
     return True
 
