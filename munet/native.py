@@ -802,8 +802,11 @@ class Munet(BaseMunet):
 
     def __init__(self, rundir=None, **kwargs):
         super().__init__(**kwargs)
+
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
+        self.set_cwd(self.rundir)
+
         self.config = {}
         self.config_pathname = ""
         self.config_dirname = ""
