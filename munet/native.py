@@ -828,7 +828,7 @@ class Munet(BaseMunet):
                     ),
                     "exec": "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
                     "top-level": True,
-                    "new-window": True,
+                    "new-window": {"background": True},
                 },
                 {
                     "name": "hterm",
