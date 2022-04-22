@@ -66,12 +66,20 @@ def pytest_configure(config):
     if "PYTEST_XDIST_WORKER" not in os.environ:
         os.environ["PYTEST_XDIST_MODE"] = config.getoption("dist", "no")
         os.environ["PYTEST_IS_WORKER"] = ""
-        # is_xdist = os.environ["PYTEST_XDIST_MODE"] != "no"
+        is_xdist = os.environ["PYTEST_XDIST_MODE"] != "no"
         # is_worker = False
     else:
         os.environ["PYTEST_IS_WORKER"] = os.environ["PYTEST_XDIST_WORKER"]
-        # is_xdist = True
+        is_xdist = True
         # is_worker = True
+
+    # Turn on live logging if user specified verbose and the config has a CLI level set
+    if config.getoption("--verbose") and not is_xdist and not config.getini("log_cli"):
+        if config.getoption("--log-cli-level", None) is None:
+            # By setting the CLI option to the ini value it enables log_cli=1
+            cli_level = config.getini("log_cli_level")
+            if cli_level is not None:
+                config.option.log_cli_level = cli_level
 
 
 def pytest_runtest_makereport(item, call):
