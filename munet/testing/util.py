@@ -19,8 +19,11 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 """Utility functions useful when using munet testing functionailty in pytest."""
+import datetime
+import functools
 import logging
 import sys
+import time
 
 from munet.base import BaseMunet
 from munet.cli import cli
@@ -51,3 +54,62 @@ def pause_test(desc=""):
             print(f'Unrecognized input: "{user}"')
         else:
             break
+
+
+def retry(retry_timeout, initial_wait=0, expected=True):
+    """
+    decorator: retry while function return value is not None or it raises an exception.
+
+    * `retry_timeout`: Retry for at least this many seconds; after waiting
+                       initial_wait seconds
+    * `initial_wait`: Sleeps for this many seconds before first executing function
+    * `expected`: if False then the return logic is inverted, except for exceptions,
+                  (i.e., a non None ends the retry loop, and returns that value)
+    """
+
+    def _retry(func):
+        @functools.wraps(func)
+        def func_retry(*args, **kwargs):
+            retry_sleep = 2
+
+            # Allow the wrapped function's args to override the fixtures
+            _retry_timeout = kwargs.pop("retry_timeout", retry_timeout)
+            _expected = kwargs.pop("expected", expected)
+            _initial_wait = kwargs.pop("initial_wait", initial_wait)
+            retry_until = datetime.datetime.now() + datetime.timedelta(
+                seconds=_retry_timeout + _initial_wait
+            )
+
+            if initial_wait > 0:
+                logging.info("Waiting for [%s]s as initial delay", initial_wait)
+                time.sleep(initial_wait)
+
+            while True:
+                seconds_left = (retry_until - datetime.datetime.now()).total_seconds()
+                try:
+                    ret = func(*args, **kwargs)
+                    if _expected and ret is None:
+                        logging.debug("Function succeeds")
+                        return ret
+                    logging.debug("Function returned %s", ret)
+                except Exception as error:
+                    logging.info("Function raised exception: %s", str(error))
+                    ret = error
+
+                if seconds_left < 0:
+                    logging.info("Retry timeout of %ds reached", _retry_timeout)
+                    if isinstance(ret, Exception):
+                        raise ret
+                    return ret
+
+                logging.info(
+                    "Sleeping %ds until next retry with %.1f retry time left",
+                    retry_sleep,
+                    seconds_left,
+                )
+                time.sleep(retry_sleep)
+
+        func_retry._original = func  # pylint: disable=W0212
+        return func_retry
+
+    return _retry
