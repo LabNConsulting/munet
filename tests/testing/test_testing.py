@@ -1,8 +1,8 @@
 # -*- coding: utf-8 eval: (blacken-mode 1) -*-
 #
-# September 30 2021, Christian Hopps <chopps@labn.net>
+# April 22 2022, Christian Hopps <chopps@gmail.com>
 #
-# Copyright 2021, LabN Consulting, L.L.C.
+# Copyright (c) 2022, LabN Consulting, L.L.C.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,8 +18,18 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"Fixtures and other utilities for munet testing."
-# pylint: disable=W0614
-# pylint: disable=W0401
-from munet.testing.fixtures import *
-from munet.testing.hooks import *
+"Test the testing fucntionality that has been imported into conftest.py"
+
+
+def test_import_util():
+    from munet.testing.util import pause_test # pylint: disable=C0415,W0611
+
+
+def test_addopts(pytestconfig):
+    assert hasattr(pytestconfig.option, "cli_on_error")
+    assert hasattr(pytestconfig.option, "pause")
+    assert hasattr(pytestconfig.option, "pause_on_error")
+
+def test_stepfunction(stepf):
+    stepf("the first step")
+    stepf("the second step")
