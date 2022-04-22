@@ -18,8 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"Fixtures and other utilities for munet testing."
-# pylint: disable=W0614
-# pylint: disable=W0401
-from munet.testing.fixtures import *
-from munet.testing.hooks import *
+"""Fixtures and other utilities for munet testing."""
+# pylint: disable=wildcard-import,unused-wildcard-import
+from munet.testing.fixtures import *  # noqa
+from munet.testing.hooks import *  # noqa
