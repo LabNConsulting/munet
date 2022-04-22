@@ -124,3 +124,11 @@ def pytest_runtest_makereport(item, call):
             pause_test(f"before test '{item.nodeid}'")
         elif call.when == "teardown":
             pause_test(f"after test '{item.nodeid}'")
+        elif error:
+            print(f"\nPAUSE-ON-ERROR: {call.excinfo.typename}")
+            print(f"PAUSE-ON-ERROR:\ntest {modname}/{item.name} failed: {exval}")
+            if hasattr(exval, "stdout"):
+                print("stdout: " + exval.stdout.replace("\n", "\nstdout: "))
+            if hasattr(exval, "stderr"):
+                print("stderr: " + exval.stderr.replace("\n", "\nstderr: "))
+            pause_test(f"PAUSE-ON-ERROR: '{item.nodeid}'")
