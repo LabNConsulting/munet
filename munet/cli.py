@@ -753,29 +753,9 @@ def cli(
     prompt=None,
     background=True,
 ):
-    if prompt is None:
-        prompt = "munet> "
-
-    if force_window or not sys.stdin.isatty():
-        asyncio.run(remote_cli(unet, prompt, title, background))
-        return
-
-    if not unet:
-        logger.debug("client-cli using sockpath %s", sockpath)
-
-    try:
-        if sockpath:
-            asyncio.run(cli_client(sockpath, prompt))
-        else:
-            asyncio.run(local_cli(unet, sys.stdout, prompt, histfile, background))
-    except EOFError:
-        pass
-    except Exception as ex:
-        logger.critical("cli: got exception: %s", ex, exc_info=True)
-        raise
-    finally:
-        # readline.write_history_file(histfile)
-        pass
+    asyncio.run(
+        async_cli(unet, histfile, sockpath, force_window, title, prompt, background)
+    )
 
 
 async def async_cli(

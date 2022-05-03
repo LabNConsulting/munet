@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from munet.base import Bridge
 from munet.cleanup import cleanup_current
@@ -38,21 +39,13 @@ from munet.cleanup import cleanup_previous
 from munet.native import L3Node
 from munet.parser import build_topology
 from munet.parser import get_config
+from munet.testing.util import async_pause_test
 from munet.testing.util import pause_test
 
 
 # =================
 # Sessions Fixtures
 # =================
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    logging.debug("conftest: got event loop")
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -77,6 +70,15 @@ def session_autouse():
 # ===============
 # Module Fixtures
 # ===============
+
+
+@pytest.fixture(scope="module")
+def event_loop():
+    """Create an instance of the default event loop for the session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    logging.debug("conftest: got event loop")
+    yield loop
+    loop.close()
 
 
 def get_test_logdir(nodeid=None, module=False):
@@ -169,6 +171,28 @@ def stepf(pytestconfig):
         desc = f": {desc}" if desc else ""
         if pause:
             pause_test(f"before step {stepnum.num}{desc}")
+        logging.info("STEP %s%s", stepnum.num, desc)
+        stepnum.inc()
+
+    return stepfunction
+
+
+@pytest_asyncio.fixture(scope="function")
+async def astepf(pytestconfig):
+    class Stepnum:
+        "Track the stepnum in closure"
+        num = 0
+
+        def inc(self):
+            self.num += 1
+
+    pause = pytestconfig.getoption("pause")
+    stepnum = Stepnum()
+
+    async def stepfunction(desc=""):
+        desc = f": {desc}" if desc else ""
+        if pause:
+            await async_pause_test(f"before step {stepnum.num}{desc}")
         logging.info("STEP %s%s", stepnum.num, desc)
         stepnum.inc()
 

@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 """Utility functions useful when using munet testing functionailty in pytest."""
+import asyncio
 import datetime
 import functools
 import logging
@@ -26,7 +27,7 @@ import sys
 import time
 
 from munet.base import BaseMunet
-from munet.cli import cli
+from munet.cli import async_cli
 
 
 # =================
@@ -34,7 +35,7 @@ from munet.cli import cli
 # =================
 
 
-def pause_test(desc=""):
+async def async_pause_test(desc=""):
     isatty = sys.stdout.isatty()
     if not isatty:
         desc = f" for {desc}" if desc else ""
@@ -47,13 +48,17 @@ def pause_test(desc=""):
         user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
         user = user.strip()
         if user == "cli":
-            cli(BaseMunet.g_unet)
+            await async_cli(BaseMunet.g_unet)
         elif user == "pdb":
             breakpoint()  # pylint: disable=W1515
         elif user:
             print(f'Unrecognized input: "{user}"')
         else:
             break
+
+
+def pause_test(desc=""):
+    asyncio.run(async_pause_test(desc))
 
 
 def retry(retry_timeout, initial_wait=0, expected=True):

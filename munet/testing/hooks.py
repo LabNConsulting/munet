@@ -113,9 +113,9 @@ def pytest_runtest_makereport(item, call):
         else:
             print(f"\nCLI-ON-ERROR: {call.excinfo.typename}")
             print(f"CLI-ON-ERROR:\ntest {modname}/{item.name} failed: {exval}")
-            if hasattr(exval, "stdout"):
+            if hasattr(exval, "stdout") and exval.stdout:
                 print("stdout: " + exval.stdout.replace("\n", "\nstdout: "))
-            if hasattr(exval, "stderr"):
+            if hasattr(exval, "stderr") and exval.stderr:
                 print("stderr: " + exval.stderr.replace("\n", "\nstderr: "))
             cli(BaseMunet.g_unet)
 
@@ -127,8 +127,8 @@ def pytest_runtest_makereport(item, call):
         elif error:
             print(f"\nPAUSE-ON-ERROR: {call.excinfo.typename}")
             print(f"PAUSE-ON-ERROR:\ntest {modname}/{item.name} failed: {exval}")
-            if hasattr(exval, "stdout"):
+            if hasattr(exval, "stdout") and exval.stdout:
                 print("stdout: " + exval.stdout.replace("\n", "\nstdout: "))
-            if hasattr(exval, "stderr"):
+            if hasattr(exval, "stderr") and exval.stderr:
                 print("stderr: " + exval.stderr.replace("\n", "\nstderr: "))
             pause_test(f"PAUSE-ON-ERROR: '{item.nodeid}'")

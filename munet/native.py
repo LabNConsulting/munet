@@ -869,6 +869,20 @@ class Munet(BaseMunet):
                     "exec": "bash -c '{}'",
                     "interactive": True,
                 },
+                {
+                    "name": "stdout",
+                    "exec": "tail -f %RUNDIR%/%NAME%/cmd.out",
+                    "format": "stdout HOST [HOST ...]",
+                    "help": "tail -f on the stdout of the cmd for this node",
+                    "new-window": True,
+                },
+                {
+                    "name": "stderr",
+                    "exec": "tail -f %RUNDIR%/%NAME%/cmd.err",
+                    "format": "stdout HOST [HOST ...]",
+                    "help": "tail -f on the stdout of the cmd for this node",
+                    "new-window": True,
+                },
             ]
         }
 
