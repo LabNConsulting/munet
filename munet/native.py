@@ -200,6 +200,9 @@ class L3Node(LinuxNamespace):
         if os.path.exists(hosts_file):
             self.bind_mount(hosts_file, "/etc/hosts")
 
+        if not self.is_container:
+            self.pytest_hook_open_shell()
+
     async def console(
         self,
         concmd,
@@ -298,19 +301,25 @@ class L3Node(LinuxNamespace):
         else:
             cmds = shlex.split(cmd)
 
+        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
+        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,
-            stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
-            stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
+            stdout=stdout,
+            stderr=stderr,
             start_new_session=True,  # allows us to signal all children to exit
         )
+
         self.logger.debug(
             "%s: async_popen %s => %s",
             self,
             cmds,
             self.cmd_p.pid,
         )
+
+        self.pytest_hook_run_cmd(stdout, stderr)
+
         return self.cmd_p
 
     def cmd_completed(self, future):
@@ -349,6 +358,28 @@ class L3Node(LinuxNamespace):
 
         if hasattr(switch, "is_nat") and switch.is_nat:
             self.cmd_raises(f"ip route add default via {switch.ip_address}")
+
+    def pytest_hook_run_cmd(self, stdout, stderr):
+        if not self.unet or not self.unet.pytest_config:
+            return
+
+        outopt = self.unet.pytest_config.getoption("--stdout")
+        outopt = outopt if outopt is not None else ""
+        if outopt == "all" or self.name in outopt.split(","):
+            self.run_in_window(f"tail -F {stdout.name}")
+
+        erropt = self.unet.pytest_config.getoption("--stderr")
+        erropt = erropt if erropt is not None else ""
+        if erropt == "all" or self.name in erropt.split(","):
+            self.run_in_window(f"tail -F {stderr.name}")
+
+    def pytest_hook_open_shell(self):
+        if not self.unet or not self.unet.pytest_config:
+            return
+        shellopt = self.unet.pytest_config.getoption("--shell")
+        shellopt = shellopt if shellopt is not None else ""
+        if shellopt == "all" or self.name in shellopt.split(","):
+            self.run_in_window("bash")
 
     def set_p2p_addr(self, other, cconf, occonf):
         ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf.get("ip") else None
@@ -696,11 +727,13 @@ class L3ContainerNode(L3Node):
                 else:
                     cmds.extend(cmd)
 
+        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
+        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,
-            stdout=open(os.path.join(self.rundir, "cmd.out"), "wb"),
-            stderr=open(os.path.join(self.rundir, "cmd.err"), "wb"),
+            stdout=stdout,
+            stderr=stderr,
             # We don't need this here b/c we are only ever running podman and that's all
             # we need to kill for cleanup
             # start_new_session=True,  # allows us to signal all children to exit
@@ -708,6 +741,8 @@ class L3ContainerNode(L3Node):
         )
 
         self.logger.debug("%s: async_popen => %s", self, self.cmd_p.pid)
+
+        self.pytest_hook_run_cmd(stdout, stderr)
 
         # ---------------------------------------
         # Now let's wait until container shows up
@@ -741,6 +776,8 @@ class L3ContainerNode(L3Node):
             assert not timeout.is_expired()
 
         self.logger.info("%s: started container", self.name)
+
+        self.pytest_hook_open_shell()
 
         return self.cmd_p
 
@@ -800,7 +837,7 @@ class Munet(BaseMunet):
     Munet.
     """
 
-    def __init__(self, rundir=None, **kwargs):
+    def __init__(self, rundir=None, pytestconfig=None, **kwargs):
         super().__init__(**kwargs)
 
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
@@ -810,6 +847,7 @@ class Munet(BaseMunet):
         self.config = {}
         self.config_pathname = ""
         self.config_dirname = ""
+        self.pytest_config = pytestconfig
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
@@ -871,14 +909,14 @@ class Munet(BaseMunet):
                 },
                 {
                     "name": "stdout",
-                    "exec": "tail -f %RUNDIR%/%NAME%/cmd.out",
+                    "exec": "tail -F %RUNDIR%/%NAME%/cmd.out",
                     "format": "stdout HOST [HOST ...]",
                     "help": "tail -f on the stdout of the cmd for this node",
                     "new-window": True,
                 },
                 {
                     "name": "stderr",
-                    "exec": "tail -f %RUNDIR%/%NAME%/cmd.err",
+                    "exec": "tail -F %RUNDIR%/%NAME%/cmd.err",
                     "format": "stdout HOST [HOST ...]",
                     "help": "tail -f on the stdout of the cmd for this node",
                     "new-window": True,

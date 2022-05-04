@@ -130,9 +130,9 @@ def module_autouse(request):
 
 
 @pytest.fixture(scope="module")
-async def unet(rundir_module):  # pylint: disable=W0621
+async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
     # Reset the class variables so auto number is predictable
-    _unet = build_topology(rundir=rundir_module)
+    _unet = build_topology(rundir=rundir_module, pytestconfig=pytestconfig)
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
 
@@ -221,9 +221,13 @@ def pytest_runtest_setup(item):
 
 
 @pytest.fixture
-async def unet_param(request, rundir):  # pylint: disable=W0621
+async def unet_param(request, rundir, pytestconfig):  # pylint: disable=W0621
     """Build unet per test function with an optional topology basename parameter"""
-    _unet = build_topology(config=get_config(basename=request.param), rundir=rundir)
+    _unet = build_topology(
+        config=get_config(basename=request.param),
+        rundir=rundir,
+        pytestconfig=pytestconfig,
+    )
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
 

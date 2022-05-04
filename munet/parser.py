@@ -273,13 +273,15 @@ def merge_kind_config(kconf, config):
     return new
 
 
-def build_topology(config=None, logger=None, rundir=None, args=None):
+def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfig=None):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
 
     isolated = not args.host if args else True
-    unet = Munet(logger=logger, rundir=rundir, isolated=isolated)
+    unet = Munet(
+        logger=logger, rundir=rundir, isolated=isolated, pytestconfig=pytestconfig
+    )
     if not config:
         config = get_config(basename="munet")
     unet.config = config

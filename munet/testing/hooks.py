@@ -28,6 +28,8 @@ import logging
 import os
 import sys
 
+import pytest
+
 from munet.base import BaseMunet
 from munet.cli import cli
 from munet.testing.util import pause_test
@@ -61,17 +63,36 @@ def pytest_addoption(parser):
         help="Do not pause after (disables default when --shell or -vtysh given)",
     )
 
+    parser.addoption(
+        "--shell",
+        metavar="NODE[,NODE...]",
+        help="Comma-separated list of nodes to spawn shell on, or 'all'",
+    )
+
+    parser.addoption(
+        "--stdout",
+        metavar="NODE[,NODE...]",
+        help="Comma-separated list of nodes to open tail-f stdout window on, or 'all'",
+    )
+
+    parser.addoption(
+        "--stderr",
+        metavar="NODE[,NODE...]",
+        help="Comma-separated list of nodes to open tail-f stderr window on, or 'all'",
+    )
+
+
 
 def pytest_configure(config):
     if "PYTEST_XDIST_WORKER" not in os.environ:
         os.environ["PYTEST_XDIST_MODE"] = config.getoption("dist", "no")
         os.environ["PYTEST_IS_WORKER"] = ""
         is_xdist = os.environ["PYTEST_XDIST_MODE"] != "no"
-        # is_worker = False
+        is_worker = False
     else:
         os.environ["PYTEST_IS_WORKER"] = os.environ["PYTEST_XDIST_WORKER"]
         is_xdist = True
-        # is_worker = True
+        is_worker = True
 
     # Turn on live logging if user specified verbose and the config has a CLI level set
     if config.getoption("--verbose") and not is_xdist and not config.getini("log_cli"):
@@ -80,6 +101,24 @@ def pytest_configure(config):
             cli_level = config.getini("log_cli_level")
             if cli_level is not None:
                 config.option.log_cli_level = cli_level
+
+    have_tmux = bool(os.getenv("TMUX", ""))
+    have_screen = not have_tmux and bool(os.getenv("STY", ""))
+    have_xterm = not have_tmux and not have_screen and bool(os.getenv("DISPLAY", ""))
+    have_windows = have_tmux or have_screen or have_xterm
+    have_windows_pause = have_tmux or have_xterm
+    xdist_no_windows = is_xdist and not is_worker and not have_windows_pause
+
+    for winopt in ["--shell", "--stdout", "--stderr"]:
+        b = config.getoption(winopt)
+        if b and xdist_no_windows:
+            pytest.exit(
+                "{} use requires byobu/TMUX/XTerm under dist {}".format(
+                    winopt, os.environ["PYTEST_XDIST_MODE"]
+                )
+            )
+        elif b and not is_xdist and not have_windows:
+            pytest.exit("{} use requires byobu/TMUX/SCREEN/XTerm".format(winopt))
 
 
 def pytest_runtest_makereport(item, call):

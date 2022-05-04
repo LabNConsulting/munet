@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.8.19"
+version = "0.8.20"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -27,7 +27,7 @@ pylint = "^2.11.1"
 pytest = "^6.2.5"
 pytest-asyncio = "^0.18.3"
 pytest-cov = "^3.0.0"
-black = {version = "^21.9b0", allow-prereleases = true}
+black = "^22.3.0"
 pytest-xdist = "^2.4.0"
 
 [tool.poetry.extras]
