@@ -250,7 +250,9 @@ New Window Commands:\n"""
 
 
 def get_shcmd(unet, host, kinds, execfmt, ucmd):
-    if host is not None:
+    if host is None:
+        h = None
+    else:
         h = unet.hosts[host]
         kind = h.config.get("kind", "")
         if kinds and kind not in kinds:
@@ -259,10 +261,21 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
         execfmt = execfmt.get(kind)
     if not execfmt:
         return ""
-    if len(re.findall(r"{\d*}", execfmt)) > 1:
+    numfmt = len(re.findall(r"{\d*}", execfmt))
+    if numfmt > 1:
         ucmd = execfmt.format(*shlex.split(ucmd))
-    else:
+    elif numfmt:
         ucmd = execfmt.format(ucmd)
+    else:
+        if '"' in execfmt:
+            fstring = "f'" + execfmt + "'"
+        else:
+            fstring = 'f"' + execfmt + '"'
+        ucmd = eval(  # pylint: disable=W0123
+            fstring,
+            globals(),
+            {"host": h, "unet": unet, "user_input": ucmd},
+        )
     ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
     if host is None:
         return ucmd

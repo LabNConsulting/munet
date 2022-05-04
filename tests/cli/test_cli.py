@@ -141,6 +141,20 @@ async def test_ls_cmd(unet):
     assert stdout.getvalue().strip() == match.strip()
 
 
+async def test_fstring(unet):
+    match = r"HOSTNAME is r1"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "r1 hostname\n", stdout)
+    assert stdout.getvalue().strip() == match.strip()
+    # assert re.match(match, stdout.getvalue().strip())
+
+    # match = r"/bin/bash"
+    # stdout = io.StringIO()
+    # assert await cli.doline(unet, "r2 ls /bin/bash\n", stdout)
+    # # assert re.match(match, stdout.getvalue().strip())
+    # assert stdout.getvalue().strip() == match.strip()
+
+
 async def test_toplevel(unet):
     netname = "net0"
     stdout = io.StringIO()

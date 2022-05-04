@@ -230,7 +230,7 @@ class L3Node(LinuxNamespace):
         if user:
             expects.append("ogin:")
             sends.append(user + "\n")
-        if password:
+        if password is not None:
             expects.append("assword:")
             sends.append(password + "\n")
         repl = await self.shell_spawn(

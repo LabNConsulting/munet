@@ -147,7 +147,7 @@ module: labn-munet-config
       "LabN Consulting, L.L.C.";
 
     contact
-       "Author: Christian Hopps
+      "Author: Christian Hopps
                <mailto:chopps@labn.net>";
 
     description
@@ -361,9 +361,11 @@ module: labn-munet-config
         leaf exec {
           type string;
           description
-            "Command to execute when the CLI command is given. The string will
-             have the user input that follows the command name substituted in for
-             the characters `{}`.";
+            "Command to execute when the CLI command is given. The string is
+             evaluated as a python f-string with `{host}` set to the current
+             host object (or None) `{unet}` set to the Munet object, and
+             `{user_input}` to any user input that follows the command (or '' if
+             none specified).";
         }
         list exec-kind {
           key kind;
@@ -376,9 +378,11 @@ module: labn-munet-config
           leaf exec {
             type string;
             description
-              "Command to execute when the CLI command is given. The string will
-               have the user input that follows the command name substituted in
-               for the characters `{}`.";
+              "Command to execute when the CLI command is given. The string is
+               evaluated as a python f-string with `{host}` set to the current
+               host object (or None) `{unet}` set to the Munet object, and
+               `{user_input}` to any user input that follows the command (or ''
+               if none specified).";
           }
         }
         leaf format {

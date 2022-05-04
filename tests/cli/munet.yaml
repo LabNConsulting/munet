@@ -20,6 +20,10 @@ cli:
       format: "toplevel-ip IPARGS"
       help: "Run `ip` command in top-level namespace"
       top-level: true
+    - name: "hostname"
+      exec: "echo HOSTNAME is {host.name}"
+      format: "hostname HOST [HOST ...]"
+      help: "Echo the hostname"
 
 topology:
   networks:
