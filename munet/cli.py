@@ -276,6 +276,7 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
             globals(),
             {"host": h, "unet": unet, "user_input": ucmd},
         )
+    ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
     ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
     if host is None:
         return ucmd
@@ -296,10 +297,22 @@ async def run_command(
 ):
     """Runs a command on a set of hosts.
 
-    Runs `execfmt` after calling `str.format` on it passing `uargs` as the lone
-        substitution value.  The output is sent to `outf`.  If `on_host` is True then
-        the `execfmt` is run using `Commander.cmd_status_host` otherwise it is run
-        with `Commander.cmd_status`.
+    Runs `execfmt`. Prior to executing the string the following transformations are
+    performed on it.
+
+    - if `{}` is present then `str.format` is called to replace `{}` with any extra
+       input values after the command and hosts are removed from the input.
+    - else if any `{digits}` are present then `str.format` is called to replace
+      `{digits}` with positional args obtained from the addittional user input
+      first passed to `shlex.split`.
+    - else f-string style interpolation is performed on the string with
+      the local variables `host` (the current node object or None),
+      `unet` (the Munet object), and `user_input` (the additional command input)
+      defined.
+
+    The output is sent to `outf`.  If `on_host` is True then the `execfmt` is
+    run using `Commander.cmd_status_host` otherwise it is run with
+    `Commander.cmd_status`.
     """
     if kinds:
         logging.info("Filtering hosts to kinds: %s", kinds)
@@ -705,10 +718,14 @@ def add_cli_run_cmd(
 def add_cli_config(unet, config):
     """Adds CLI commands based on config.
 
-    All strings will have %NAME% and %RUNDIR% replaced with the corresponding
-    current node `name` and `rundir`.  The format of the config dictionary can
-    be seen in the following example.  The first list entry represents the default
-    command because it has no `name` key.
+    All exec strings will have %CONFIGDIR%, %NAME% and %RUNDIR% replaced with the
+    corresponding config directory and the current nodes `name` and `rundir`.
+    Additionally, the exec string will have f-string style interpolation performed
+    with the local variables `host` (node object or None), `unet` (Munet object) and
+    `user_input` (if provided to the CLI command) defined.
+
+    The format of the config dictionary can be seen in the following example.
+    The first list entry represents the default command because it has no `name` key.
 
       commands:
         - help: "run the given FRR command using vtysh"
