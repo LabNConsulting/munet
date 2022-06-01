@@ -40,8 +40,10 @@ try:
     from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
     from pexpect.replwrap import PEXPECT_PROMPT
     from pexpect.replwrap import REPLWrapper
+
+    have_repl_wrapper = True
 except ImportError:
-    pass
+    have_repl_wrapper = False
 
 
 root_hostname = subprocess.check_output("hostname")
@@ -1702,66 +1704,68 @@ BaseMunet.g_unet = None
 #
 # Extra Functional REPLWrapper from pexpect
 #
-class ShellWrapper(REPLWrapper):
-    """
-    REPLWrapper - a read-execute-print-loop interface
-    """
+if have_repl_wrapper:
 
-    def __init__(
-        self, cmd_or_spawn, orig_prompt, prompt_change, noecho=False, **kwargs
-    ):
-        self.noecho = noecho
-        super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
-
-    def cmd_status(self, cmd, timeout=-1):
-        """Execute a shell command
-
-        Returns status and (strip/cleaned \r) output
+    class ShellWrapper(REPLWrapper):
         """
-        output = self.run_command(cmd, timeout, async_=False)
-        idx = output.find(cmd)
-        if idx == -1:
-            if not self.noecho:
-                logging.warning(
-                    "Didn't find command ('%s') in expected output ('%s')",
-                    cmd,
-                    output,
-                )
-        else:
-            # Remove up to and including the command from the output stream
-            output = output[idx + len(cmd) :].strip()
+        REPLWrapper - a read-execute-print-loop interface
+        """
 
-        scmd = "echo $?"
-        rcstr = self.run_command(scmd)
-        idx = rcstr.find(scmd)
-        if idx == -1:
-            if self.noecho:
-                logging.warning(
-                    "Didn't find status ('%s') in expected output ('%s')",
-                    scmd,
-                    rcstr,
-                )
-            try:
+        def __init__(
+            self, cmd_or_spawn, orig_prompt, prompt_change, noecho=False, **kwargs
+        ):
+            self.noecho = noecho
+            super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
+
+        def cmd_status(self, cmd, timeout=-1):
+            """Execute a shell command
+
+            Returns status and (strip/cleaned \r) output
+            """
+            output = self.run_command(cmd, timeout, async_=False)
+            idx = output.find(cmd)
+            if idx == -1:
+                if not self.noecho:
+                    logging.warning(
+                        "Didn't find command ('%s') in expected output ('%s')",
+                        cmd,
+                        output,
+                    )
+            else:
+                # Remove up to and including the command from the output stream
+                output = output[idx + len(cmd) :].strip()
+
+            scmd = "echo $?"
+            rcstr = self.run_command(scmd)
+            idx = rcstr.find(scmd)
+            if idx == -1:
+                if self.noecho:
+                    logging.warning(
+                        "Didn't find status ('%s') in expected output ('%s')",
+                        scmd,
+                        rcstr,
+                    )
+                try:
+                    rc = int(rcstr)
+                except Exception:
+                    rc = 255
+            else:
+                rcstr = rcstr[idx + len(scmd) :].strip()
                 rc = int(rcstr)
-            except Exception:
-                rc = 255
-        else:
-            rcstr = rcstr[idx + len(scmd) :].strip()
-            rc = int(rcstr)
-        return rc, output.replace("\r", "").strip()
+            return rc, output.replace("\r", "").strip()
 
-    def cmd_raises(self, cmd, timeout=-1):
-        """Execute a shell command.
+        def cmd_raises(self, cmd, timeout=-1):
+            """Execute a shell command.
 
-        Returns (strip/cleaned \r) ouptut
-        Raises CalledProcessError on non-zero exit status
-        """
-        rc, output = self.cmd_status(cmd, timeout)
-        if rc:
-            error = subprocess.CalledProcessError(rc, cmd)
-            error.stdout = output
-            raise error
-        return output
+            Returns (strip/cleaned \r) ouptut
+            Raises CalledProcessError on non-zero exit status
+            """
+            rc, output = self.cmd_status(cmd, timeout)
+            if rc:
+                error = subprocess.CalledProcessError(rc, cmd)
+                error.stdout = output
+                raise error
+            return output
 
 
 # ---------------------------
