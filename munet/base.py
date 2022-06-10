@@ -204,7 +204,7 @@ class Commander:  # pylint: disable=R0904
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
-    def _get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
+    def _get_exec_path(self, binary, cmdf, cache):  # pylint: disable=no-self-use
         if isinstance(binary, str):
             bins = [binary]
         else:
@@ -219,7 +219,9 @@ class Commander:  # pylint: disable=R0904
                 return cache[b]
         return None
 
-    async def _async_get_exec_path(self, binary, cmdf, cache):  # pylint: disable=R0201
+    async def _async_get_exec_path(
+        self, binary, cmdf, cache
+    ):  # pylint: disable=no-self-use
         if isinstance(binary, str):
             bins = [binary]
         else:
@@ -250,7 +252,7 @@ class Commander:  # pylint: disable=R0904
         """
         return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
 
-    def get_exec_path_host(self, binary):  # pylint: disable=R0201
+    def get_exec_path_host(self, binary):  # pylint: disable=no-self-use
         """Return the full path to the binary executable.
 
         If the object is actually a derived class (e.g., a container) this method will
@@ -277,7 +279,9 @@ class Commander:  # pylint: disable=R0904
         """Check if path exists."""
         return self.test("-e", path)
 
-    def get_cmd_container(self, cmd, sudo=False, tty=False):  # pylint: disable=R0201
+    def get_cmd_container(
+        self, cmd, sudo=False, tty=False
+    ):  # pylint: disable=no-self-use
         # The overrides of this function *do* use the self parameter
         del tty  # lint
         if sudo:
@@ -631,7 +635,7 @@ class Commander:  # pylint: disable=R0904
             e = e.decode(encoding) if e is not None else e
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
-    def cmd_get_cmd_list(self, cmd):  # pylint: disable=R0201
+    def cmd_get_cmd_list(self, cmd):  # pylint: disable=no-self-use
         if not isinstance(cmd, str):
             cmds = cmd
         else:
@@ -846,6 +850,7 @@ class InterfaceMixin:
     def __init__(self, **kwargs):
         del kwargs  # get rid of lint
         self.intf_addrs = {}
+        self.net_intfs = {}
         self.next_intf_index = 0
         self.basename = "eth"
         # self.basename = name + "-eth"
@@ -854,6 +859,15 @@ class InterfaceMixin:
     @property
     def intfs(self):
         return self.intf_addrs.keys()
+
+    @property
+    def networks(self):
+        return self.net_intfs.keys()
+
+    def net_addr(self, netname):
+        if netname not in self.net_intfs:
+            return None
+        return self.intf_addrs[self.net_intfs[netname]]
 
     def set_intf_basename(self, basename):
         self.basename = basename
@@ -869,6 +883,12 @@ class InterfaceMixin:
     def register_interface(self, ifname):
         if ifname not in self.intf_addrs:
             self.intf_addrs[ifname] = None
+
+    def register_network(self, netname, ifname):
+        if netname in self.net_intfs:
+            assert self.net_intfs[netname] == ifname
+        else:
+            self.net_intfs[netname] = ifname
 
     def get_linux_tc_args(self, ifname, config):
         """Get interface constraints (jitter, delay, rate) for linux TC
@@ -1601,6 +1621,7 @@ class BaseMunet(LinuxNamespace):
 
             switch.register_interface(if1)
             host.register_interface(if2)
+            host.register_network(switch.name, if2)
 
             switch.cmd_raises_host(f"ip link set {if1} master {switch.name}")
             switch.cmd_raises_host(f"ip link set {if1} up")

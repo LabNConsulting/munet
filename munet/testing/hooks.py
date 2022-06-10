@@ -47,9 +47,20 @@ def pytest_addoption(parser):
         help="CLI on test failure",
     )
     parser.addoption(
+        "--pcap",
+        metavar="NODE[,NODE...]",
+        help="Comma-separated list of networks to capture packets on, or 'all'",
+    )
+
+    parser.addoption(
         "--pause",
         action="store_true",
         help="Pause after each test",
+    )
+    parser.addoption(
+        "--pause-at-end",
+        action="store_true",
+        help="Pause before taking munet down",
     )
     parser.addoption(
         "--pause-on-error",
@@ -80,7 +91,6 @@ def pytest_addoption(parser):
         metavar="NODE[,NODE...]",
         help="Comma-separated list of nodes to open tail-f stderr window on, or 'all'",
     )
-
 
 
 def pytest_configure(config):

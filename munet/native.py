@@ -998,12 +998,38 @@ class Munet(BaseMunet):
             x for x in run_nodes if x.config.get("cmd") or x.config.get("image")
         ]
 
+        if not self.pytest_config:
+            pcapopt = ""
+        else:
+            pcapopt = self.pytest_config.getoption("--pcap")
+            pcapopt = pcapopt if pcapopt else ""
+        if pcapopt == "all":
+            pcapopt = self.switches.keys()
+        if pcapopt:
+            for pcap in pcapopt.split(","):
+                self.run_in_window(
+                    f"tshark -s 1508 -i {pcap} -P -w capture-{pcap}.pcap",
+                    background=True,
+                )
+
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
             task.add_done_callback(node.cmd_completed)
             tasks.append(task)
         return tasks
+
+    async def async_delete(self):
+        from munet.testing.util import async_pause_test  # pylint: disable=C0415
+
+        if not self.pytest_config:
+            pause = False
+        else:
+            pause = bool(self.pytest_config.getoption("--pause-at-end"))
+            pause = pause or bool(self.pytest_config.getoption("--pause"))
+        if pause:
+            await async_pause_test("Before MUNET delete")
+        return await super().async_delete()
 
 
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
