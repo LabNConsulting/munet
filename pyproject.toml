@@ -12,27 +12,27 @@ include = ["logconf.yaml", "munet-schema.yaml"]
 [tool.poetry.dependencies]
 python = "^3.8"
 toml = {version = "^0.10.2", optional = true}
-PyYAML = "^5.4.1"
-Pygments = {version = "^2.10.0", optional = true}
+PyYAML = "^6.0"
+Pygments = {version = "^2.12.0", optional = true}
 autoflake = {version = "^1.4", optional = true}
-flake8 = {version = "^3.9.2", optional = true}
+flake8 = {version = "^4.0.1", optional = true}
 importmagic = {version = "^0.1.7", optional = true}
-jedi = {version = "^0.18.0", optional = true}
+jedi = {version = "^0.18.1", optional = true}
 json-rpc = {version = "^1.13.0", optional = true}
-jsonschema = {version = "^4.3.1", optional = true}
+jsonschema = {version = "^4.6.0", optional = true}
 pexpect = {version = "^4.8.0", optional = true}
 
 [tool.poetry.dev-dependencies]
-pylint = "^2.11.1"
-pytest = "^6.2.5"
+pylint = "^2.14.1"
+pytest = "^7.1.2"
 pytest-asyncio = "^0.18.3"
 pytest-cov = "^3.0.0"
 black = "^22.3.0"
-pytest-xdist = "^2.4.0"
+pytest-xdist = "^2.5.0"
 
 [tool.poetry.extras]
-ci = ["jsonschema", "pexpect", "pylint"]
-dev = ["jsonschema", "pexpect", "pylint"]
+ci = ["jsonschema", "pexpect", "pylint", "toml"]
+dev = ["jsonschema", "pexpect", "pylint", "toml"]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
 validate = ["jsonschema"]
 
@@ -96,6 +96,7 @@ disable = [
   "too-many-locals",
   "too-many-return-statements",
   "too-many-statements",
+  "unknown-option-value",
 ]
 max-line-length = 88
 
