@@ -280,7 +280,11 @@ def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfi
 
     isolated = not args.host if args else True
     unet = Munet(
-        logger=logger, rundir=rundir, isolated=isolated, pytestconfig=pytestconfig
+        logger=logger,
+        rundir=rundir,
+        isolated=isolated,
+        unshare_inline=args.unshare_inline if args else False,
+        pytestconfig=pytestconfig,
     )
     if not config:
         config = get_config(basename="munet")

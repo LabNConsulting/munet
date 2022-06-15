@@ -23,15 +23,33 @@
 import ctypes  # pylint: disable=C0415
 import ctypes.util  # pylint: disable=C0415
 
+
 libc = None
 
 
-def unshare(flags):
+def _load_libc():
     global libc  # pylint: disable=W0601,W0603
-    if libc is None:
-        lcpath = ctypes.util.find_library("c")
-        libc = ctypes.CDLL(lcpath, use_errno=True)
-    if libc.unshare(flags) == -1:
+    if libc:
+        return
+    lcpath = ctypes.util.find_library("c")
+    libc = ctypes.CDLL(lcpath, use_errno=True)
+
+
+def setns(fd, nstype):
+    """see setns(2)"""
+    if not libc:
+        _load_libc()
+
+    if libc.setns(int(fd), int(nstype)) == -1:
+        raise OSError(ctypes.get_errno())
+
+
+def unshare(flags):
+    """see unshare(2)"""
+    if not libc:
+        _load_libc()
+
+    if libc.unshare(int(flags)) == -1:
         raise OSError(ctypes.get_errno())
 
 
@@ -87,4 +105,23 @@ clone_flag_names = {
     CLONE_NEWPID: "CLONE_NEWPID",
     CLONE_NEWNET: "CLONE_NEWNET",
     CLONE_IO: "CLONE_IO",
+}
+
+
+def clone_flag_string(flags):
+    ns = [v for k, v in clone_flag_names.items() if k & flags]
+    if ns:
+        return "|".join(ns)
+    return "None"
+
+
+namespace_files = {
+    CLONE_NEWUSER: "ns/user",
+    CLONE_NEWCGROUP: "ns/cgroup",
+    CLONE_NEWIPC: "ns/ipc",
+    CLONE_NEWUTS: "ns/uts",
+    CLONE_NEWNET: "ns/net",
+    CLONE_NEWPID: "ns/pid_for_children",
+    CLONE_NEWNS: "ns/mnt",
+    CLONE_NEWTIME: "ns/time_for_children",
 }

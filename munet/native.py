@@ -118,9 +118,9 @@ class L3Bridge(Bridge):
 
     async def async_delete(self):
         if type(self) == L3Bridge:  # pylint: disable=C0123
-            self.logger.info("%s: bridge async deleting", self.name)
+            self.logger.info("%s: deleting", self)
         else:
-            self.logger.debug("%s: bridge async_delete", self.name)
+            self.logger.debug("%s: L3Bridge sub-class async_delete", self)
 
         if self.config.get("nat", False):
             self.cmd_status(
@@ -129,9 +129,6 @@ class L3Bridge(Bridge):
             )
 
         await super().async_delete()
-
-    def delete(self):
-        asyncio.run(super().async_delete())
 
 
 class L3Node(LinuxNamespace):
@@ -413,14 +410,11 @@ class L3Node(LinuxNamespace):
         if type(self) == L3Node:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.debug("%s: node async deleting", self.name)
+            self.logger.info("%s: deleting", self)
         else:
-            self.logger.debug("%s: node async_delete", self.name)
+            self.logger.debug("%s: L3Node sub-class async_delete", self)
         await self.async_cleanup_proc(self.cmd_p)
         await super().async_delete()
-
-    def delete(self):
-        asyncio.run(L3Node.async_delete(self))
 
 
 class L3ContainerNode(L3Node):
@@ -796,9 +790,9 @@ class L3ContainerNode(L3Node):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.debug("%s: container async deleting", self.name)
+            self.logger.info("%s: deleting", self)
         else:
-            self.logger.debug("%s: container async delete", self.name)
+            self.logger.debug("%s: L3ContainerNode delete", self)
 
         if contid := self.container_id:
             o = ""
@@ -825,11 +819,8 @@ class L3ContainerNode(L3Node):
             else:
                 # It's gone
                 self.cmd_p = None
-        # From here on out we do not want our cmd_* overrides to take effect.
-        await super().async_delete()
 
-    def delete(self):
-        asyncio.run(L3ContainerNode.async_delete(self))
+        await super().async_delete()
 
 
 class Munet(BaseMunet):
@@ -1022,6 +1013,11 @@ class Munet(BaseMunet):
     async def async_delete(self):
         from munet.testing.util import async_pause_test  # pylint: disable=C0415
 
+        if type(self) == Munet:  # pylint: disable=C0123
+            self.logger.info("%s: deleting.", self)
+        else:
+            self.logger.debug("%s: Munet sub-class munet deleting.", self)
+
         if not self.pytest_config:
             pause = False
         else:
@@ -1029,7 +1025,8 @@ class Munet(BaseMunet):
             pause = pause or bool(self.pytest_config.getoption("--pause"))
         if pause:
             await async_pause_test("Before MUNET delete")
-        return await super().async_delete()
+
+        await super().async_delete()
 
 
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):

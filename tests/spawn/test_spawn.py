@@ -21,6 +21,7 @@
 "Testing use of pexect/REPL in munet."
 import logging
 import os
+import signal
 import time
 
 import pytest
@@ -49,9 +50,14 @@ async def test_spawn(unet, host, mode, shellcmd):
     else:
         repl = await _test_repl(unet, host, [shellcmd, "-si"], use_pty=False)
 
-    output = repl.run_command("env")
-    logging.info("'env' output: %s", output)
-    output = repl.run_command("ls /sys")
-    logging.info("'ls /sys' output: %s", output)
-    output = repl.run_command("echo $?")
-    logging.info("'echo $?' output: %s", output)
+    try:
+        output = repl.run_command("env")
+        logging.info("'env' output: %s", output)
+        output = repl.run_command("ls /sys")
+        logging.info("'ls /sys' output: %s", output)
+        output = repl.run_command("echo $?")
+        logging.info("'echo $?' output: %s", output)
+    finally:
+        # this is required for setns() restoration to work for non-pty (piped) bash
+        if mode != "pty":
+            repl.child.proc.kill()

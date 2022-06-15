@@ -53,10 +53,11 @@ async def run_and_wait(args, unet):
     else:
         if args.no_wait:
             logger.info("Waiting for all node cmd to complete")
+            task = asyncio.gather(*tasks, return_exceptions=True)
         else:
             logger.info("Waiting on signal to exit")
             task = asyncio.create_task(forever())
-        task = asyncio.gather(task, *tasks, return_exceptions=True)
+            task = asyncio.gather(task, *tasks, return_exceptions=True)
 
     await task
 
@@ -94,6 +95,7 @@ def main(*args):
         action="store_true",
         help="no isolation for top namespace, bridges exposed to default namespace",
     )
+    ap.add_argument("--unshare-inline", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
         "--no-cleanup", action="store_true", help="Do not cleanup previous runs"

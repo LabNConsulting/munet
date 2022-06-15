@@ -32,6 +32,8 @@ import sys
 import tempfile
 import time as time_mod
 
+import munet.unshare as unshare
+
 
 try:
     import pexpect
@@ -106,6 +108,15 @@ async def acomm_error(p):
     if not hasattr(p, "saved_output"):
         p.saved_output = await p.communicate()
     return proc_error(p, *p.saved_output)
+
+
+def get_kernel_version():
+    kvs = (
+        subprocess.check_output("uname -r", shell=True, text=True).strip().split("-", 1)
+    )
+    kv = kvs[0].split(".")
+    kv = [int(x) for x in kv]
+    return kv
 
 
 def convert_number(value) -> int:
@@ -843,6 +854,13 @@ class Commander:  # pylint: disable=R0904
 
         return pane_info
 
+    def delete(self):
+        "Calls self.async_delete within an exec loop"
+        asyncio.run(self.async_delete(self))
+
+    async def async_delete(self):
+        self.logger.info("%s: deleted", self)
+
 
 class InterfaceMixin:
     """A mixin class to support interface functionality."""
@@ -1035,6 +1053,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         pid=False,
         time=False,
         user=False,
+        unshare_inline=False,
+        unshare_func_test=None,
         set_hostname=True,
         private_mounts=None,
         logger=None,
@@ -1072,16 +1092,23 @@ class LinuxNamespace(Commander, InterfaceMixin):
         flags = ""
         self.a_flags = []
         self.ifnetns = {}
+        self.uflags = 0
+        self.p_ns_fds = None
+        self.p_ns_fnames = None
 
+        uflags = 0
         if cgroup:
             nslist.append("cgroup")
             flags += "C"
+            uflags |= unshare.CLONE_NEWCGROUP
         if ipc:
             nslist.append("ipc")
             flags += "i"
+            uflags |= unshare.CLONE_NEWIPC
         if mount:
             nslist.append("mnt")
             flags += "m"
+            uflags |= unshare.CLONE_NEWNS
         if net:
             nslist.append("net")
             # if pid:
@@ -1089,21 +1116,26 @@ class LinuxNamespace(Commander, InterfaceMixin):
             #     cmd.append(f"--net=/tmp/netns-{name}")
             # else:
             flags += "n"
+            uflags |= unshare.CLONE_NEWNET
         if pid:
             nslist.append("pid")
             flags += "f"
             flags += "p"
             cmd.append("--mount-proc")
+            uflags |= unshare.CLONE_NEWPID
         if time:
             nslist.append("time")
             flags += "T"
+            uflags |= unshare.CLONE_NEWTIME
         if user:
             nslist.append("user")
             flags += "U"
             cmd.append("--keep-caps")
+            uflags |= unshare.CLONE_NEWUSER
         if uts:
             nslist.append("uts")
             flags += "u"
+            uflags |= unshare.CLONE_NEWUTS
 
         if flags:
             if aflags := flags.replace("f", ""):
@@ -1116,37 +1148,86 @@ class LinuxNamespace(Commander, InterfaceMixin):
             cmd.append("-vvv")
         cmd.append("/bin/cat")
 
-        # Using cat and a stdin PIPE is nice as it will exit when we do. However, we
-        # also detach it from the pgid so that signals do not propagate to it. This is
-        # b/c it would exit early (e.g., ^C) then, at least the main munet proc which
-        # has no other processes like frr daemons running, will take the main network
-        # namespace with it, which will remove the bridges and the veth pair (because
-        # the bridge side veth is deleted).
-        self.logger.debug("%s: creating namespace process: %s", self, cmd)
-        p = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,  # detach from pgid so signals don't propogate
-            shell=False,
-        )
-        self.p = p
-        self.pid = p.pid
+        self.ppid = os.getppid()
+        if unshare_inline:
+            if (
+                unshare_func_test
+                or sys.version_info[0] < 3
+                or (sys.version_info[0] == 3 and sys.version_info[1] < 9)
+            ):
+                # get list of namespace file descriptors before we unshare
+                self.p_ns_fds = []
+                self.p_ns_fnames = []
+                tmpflags = uflags
+                for i in range(0, 64):
+                    v = 1 << i
+                    if (tmpflags & v) == 0:
+                        continue
+                    tmpflags &= ~v
+                    if v in unshare.namespace_files:
+                        path = os.path.join("/proc/self", unshare.namespace_files[v])
+                        if os.path.exists(path):
+                            self.p_ns_fds.append(os.open(path, 0))
+                            self.p_ns_fnames.append(f"{path} -> {os.readlink(path)}")
+                            self.logger.debug(
+                                "%s: saving old namespace fd %s (%s)",
+                                self,
+                                self.p_ns_fnames[-1],
+                                self.p_ns_fds[-1],
+                            )
+                    if not tmpflags:
+                        break
+            else:
+                self.p_ns_fds = None
+                self.p_ns_fnames = None
+                self.ppid_fd = os.pidfd_open(self.ppid)  # pylint: disable=no-member
 
+            self.logger.debug(
+                "%s: unshare to new namespaces %s",
+                self,
+                unshare.clone_flag_string(uflags),
+            )
+            unshare.unshare(uflags)
+            self.pid = os.getpid()
+            self.uflags = uflags
+            p = None
+        else:
+            # Using cat and a stdin PIPE is nice as it will exit when we do. However,
+            # we also detach it from the pgid so that signals do not propagate to it.
+            # This is b/c it would exit early (e.g., ^C) then, at least the main munet
+            # proc which has no other processes like frr daemons running, will take the
+            # main network namespace with it, which will remove the bridges and the
+            # veth pair (because the bridge side veth is deleted).
+            self.logger.debug("%s: creating namespace process: %s", self, cmd)
+            p = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,  # detach from pgid so signals don't propogate
+                shell=False,
+            )
+            self.pid = p.pid
+
+        self.p = p
         self.logger.debug("%s: namespace pid: %d", self, self.pid)
 
         # -----------------------------------------------
         # Now let's wait until unshare completes it's job
         # -----------------------------------------------
         timeout = Timeout(30)
-        while p.poll() is None and not timeout.is_expired():
+        while (p is None or p.poll() is None) and not timeout.is_expired():
             for fname in tuple(nslist):
-                ours = os.readlink("/proc/self/ns/{}".format(fname))
-                theirs = os.readlink("/proc/{}/ns/{}".format(self.pid, fname))
-                # See if their namespace is different
-                if ours != theirs:
+                if p is None:
+                    # self is changing so compare with parent pid's NS
+                    pidnsf = os.readlink("/proc/{}/ns/{}".format(self.ppid, fname))
+                else:
+                    # new pid is changing so compare with self's NS
+                    pidnsf = os.readlink("/proc/{}/ns/{}".format(self.pid, fname))
+                selfnsf = os.readlink("/proc/self/ns/{}".format(fname))
+                # See if their namespace is different and remove from check if so
+                if selfnsf != pidnsf:
                     nslist.remove(fname)
             if not nslist or (pid and nslist == ["pid"]):
                 break
@@ -1163,9 +1244,12 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     "%s: unshare taking more than %ss: %s", self, elapsed, nslist
                 )
                 time_mod.sleep(1)
-        if p.poll():
-            self.logger.error("%s: namespace process failed: %s", self, comm_error(p))
-        assert p.poll() is None, "unshare unexpectedly exited!"
+        if p is not None:
+            if p.poll():
+                self.logger.error(
+                    "%s: namespace process failed: %s", self, comm_error(p)
+                )
+            assert p.poll() is None, "unshare unexpectedly exited!"
         # assert not nslist, "unshare never unshared!"
 
         # Set pre-command based on our namespace proc
@@ -1177,6 +1261,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # Remount /sys to pickup any changes, but keep root /sys/fs/cgroup
         # This pattern could be made generic and supported for any overlapping mounts
         tmpmnt = f"/tmp/cgm-{self.pid}"
+
+        if self.p is None:
+            self.cmd_raises("mount --make-rprivate /")
 
         #
         # We do not want cmd_status in child classes (e.g., container) for the remaining
@@ -1192,10 +1279,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # o = self.cmd_raises("ls -l /sys/fs/cgroup")
         # self.logger.warning("XXX %s", o)
 
-        # self.cmd_status_host(f"mount --make-rprivate /")
-
         # Set the hostname to the namespace name
-        if uts and set_hostname:
+        if uts and set_hostname and self.p is not None:
             # Debugging get the root hostname
             self.cmd_status_host("hostname " + self.name)
             nroot = subprocess.check_output("hostname")
@@ -1376,15 +1461,55 @@ class LinuxNamespace(Commander, InterfaceMixin):
             )
         return None
 
-    def delete(self):
-        asyncio.run(LinuxNamespace.async_delete(self))
-
     async def async_delete(self):
         if type(self) == LinuxNamespace:  # pylint: disable=C0123
-            self.logger.info("%s: async linuxnamespace deleting", self.name)
-        self.cleanup_proc(self.p)
+            self.logger.info("%s: deleting", self)
+        else:
+            self.logger.debug("%s: LinuxNamespace sub-class deleting", self)
+
+        if self.p is not None:
+            self.cleanup_proc(self.p)
+        # return to the previous namespace
+        if self.uflags:
+            # This only works in linux>=5.8
+            if self.p_ns_fds is None:
+                self.logger.debug(
+                    "%s: restoring namespaces %s",
+                    self,
+                    unshare.clone_flag_string(self.uflags),
+                )
+                fd = os.pidfd_open(self.ppid, 0)
+                unshare.setns(fd, self.uflags)
+                os.close(fd)
+            else:
+                while self.p_ns_fds:
+                    fd = self.p_ns_fds.pop()
+                    fname = self.p_ns_fnames.pop()
+                    self.logger.debug(
+                        "%s: restoring namespace from fd %s (%s)", self, fname, fd
+                    )
+                    retry = 3
+                    for i in range(0, retry):
+                        try:
+                            unshare.setns(fd, 0)
+                            break
+                        except OSError as error:
+                            self.logger.warning(
+                                "%s: could not reset to old namespace fd %s (%s)",
+                                self,
+                                fname,
+                                fd,
+                            )
+                            if i == retry - 1:
+                                raise
+                        time_mod.sleep(1)
+                    os.close(fd)
+                self.p_ns_fds = None
+                self.p_ns_fnames = None
+
         self.set_pre_cmd(["/bin/false"])
-        self.logger.info("%s: deleted", self.name)
+
+        await super().async_delete()
 
 
 class SharedNamespace(Commander):
@@ -1460,12 +1585,12 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         self.logger.debug("%s: Created, Running", self)
 
-    def delete(self):
-        """Stop the bridge (i.e., delete the linux resources)."""
-        asyncio.run(Bridge.async_delete(self))
-
     async def async_delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
+        if type(self) == Bridge:  # pylint: disable=C0123
+            self.logger.info("%s: deleting", self)
+        else:
+            self.logger.debug("%s: Bridge sub-class deleting", self)
 
         rc, o, e = await self.async_cmd_status(
             [self.ip_path, "link", "show", self.name],
@@ -1487,8 +1612,8 @@ class Bridge(SharedNamespace, InterfaceMixin):
                 self.name,
                 cmd_error(rc, o, e),
             )
-        else:
-            self.logger.info("%s: deleted", self.name)
+
+        await super().async_delete()
 
 
 class BaseMunet(LinuxNamespace):
@@ -1677,13 +1802,13 @@ class BaseMunet(LinuxNamespace):
     def _delete_links(self):
         return asyncio.gather(*[self._delete_link(x) for x in self.links])
 
-    def delete(self):
-        """Delete the munet topology."""
-        asyncio.run(BaseMunet.async_delete(self))
-
     async def async_delete(self):
         """Delete the munet topology."""
-        self.logger.debug("%s: deleting.", self)
+        if type(self) == BaseMunet:  # pylint: disable=C0123
+            self.logger.info("%s: deleting.", self)
+        else:
+            self.logger.debug("%s: BaseMunet sub-class deleting.", self)
+
         try:
             await self._delete_links()
         except Exception as error:
@@ -1715,7 +1840,6 @@ class BaseMunet(LinuxNamespace):
             readline.write_history_file(self.cli_histfile)
             self.cli_histfile = None
 
-        self.logger.debug("%s: deleted", self)
         await super().async_delete()
 
 
