@@ -86,6 +86,7 @@ disable = [
   "consider-using-f-string",    # this would also be nice, but too much
   "consider-using-with",        # this would be nice if it wasn't so simple
   "duplicate-code",
+  "fixme",
   "invalid-name",               # sometimes 1 char variable names are fine
   "missing-function-docstring", # would be nice, a pipe-dream really
   "too-few-public-methods",
@@ -107,6 +108,8 @@ max-line-length = 88
 max-returns = 8
 
 [tool.pytest.ini_options]
+
+asyncio_mode = "auto"
 
 testpaths = [
         "tests",

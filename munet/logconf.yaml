@@ -26,4 +26,6 @@ loggers:
   main:
     level: DEBUG
     propagate: true
-
+  munet.base:
+    level: DEBUG
+    propagate: true
