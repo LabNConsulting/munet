@@ -43,6 +43,38 @@ from munet.testing.util import async_pause_test
 from munet.testing.util import pause_test
 
 
+def _cd_to_test_dir(request, tag):
+    cwd = os.getcwd()
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    logging.debug("conftest: %s: changing cwd from %s to %s", tag, cwd, sdir)
+    os.chdir(sdir)
+
+    yield
+
+    os.chdir(cwd)
+
+
+def get_test_logdir(nodeid=None, module=False):
+    """Get log directory relative pathname."""
+    xdist_worker = os.getenv("PYTEST_XDIST_WORKER", "")
+    mode = os.getenv("PYTEST_XDIST_MODE", "no")
+
+    # nodeid: all_protocol_startup/test_all_protocol_startup.py::test_router_running
+    if not nodeid:
+        nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
+    cur_test = nodeid.replace("[", "_").replace("]", "_")
+    path, testname = cur_test.split("::")
+    path = path[:-3].replace("/", ".")
+
+    # We use different logdir paths based on how xdist is running.
+    if mode == "each":
+        return os.path.join(path, testname, xdist_worker)
+    if mode == "load":
+        return os.path.join(path, testname)
+    assert mode in ("no", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
+    return path if module else os.path.join(path, testname)
+
+
 # =================
 # Sessions Fixtures
 # =================
@@ -72,6 +104,11 @@ def session_autouse():
 # ===============
 
 
+@pytest.fixture(autouse=True, scope="module")
+def munet_module_autouse(request):
+    _cd_to_test_dir(request, "module")
+
+
 @pytest.fixture(scope="module")
 def event_loop():
     """Create an instance of the default event loop for the session."""
@@ -81,52 +118,11 @@ def event_loop():
     loop.close()
 
 
-def get_test_logdir(nodeid=None, module=False):
-    """Get log directory relative pathname."""
-    xdist_worker = os.getenv("PYTEST_XDIST_WORKER", "")
-    mode = os.getenv("PYTEST_XDIST_MODE", "no")
-
-    # nodeid: all_protocol_startup/test_all_protocol_startup.py::test_router_running
-    if not nodeid:
-        nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
-    cur_test = nodeid.replace("[", "_").replace("]", "_")
-    path, testname = cur_test.split("::")
-    path = path[:-3].replace("/", ".")
-
-    # We use different logdir paths based on how xdist is running.
-    if mode == "each":
-        return os.path.join(path, testname, xdist_worker)
-    if mode == "load":
-        return os.path.join(path, testname)
-    assert mode in ("no", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
-    return path if module else os.path.join(path, testname)
-
-
 @pytest.fixture(scope="module")
 def rundir_module():
     d = os.path.join("/tmp/unet-test", get_test_logdir(module=True))
     logging.debug("conftest: test module rundir %s", d)
     return d
-
-
-@pytest.fixture(autouse=True, scope="module")
-def module_autouse(request):
-    # is_xdist = os.environ.get("PYTEST_XDIST_MODE", "no") != "no"
-    # if "PYTEST_TOPOTEST_WORKER" not in os.environ:
-    #     is_worker = False
-    # elif not os.environ["PYTEST_TOPOTEST_WORKER"]:
-    #     is_worker = False
-    # else:
-    #     is_worker = True
-
-    cwd = os.getcwd()
-    sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("conftest: changing cwd from %s to %s", cwd, sdir)
-    os.chdir(sdir)
-
-    yield
-
-    os.chdir(cwd)
 
 
 @pytest.fixture(scope="module")
@@ -153,6 +149,11 @@ async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
 # =================
 # Function Fixtures
 # =================
+
+
+@pytest.fixture(autouse=True, scope="function")
+def munet_func_autoreuse(request):
+    _cd_to_test_dir(request, "function")
 
 
 @pytest.fixture(scope="function")
