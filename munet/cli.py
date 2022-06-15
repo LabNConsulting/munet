@@ -64,7 +64,7 @@ def spawn(unet, host, cmd, iow, on_host):
     try:
         master_fd, slave_fd = pty.openpty()
 
-        ns = unet.hosts[host] if host else unet
+        ns = unet.hosts[host] if host and host != unet else unet
 
         # use os.setsid() make it run in a new process group, or bash job
         # control will not be enabled
@@ -155,6 +155,9 @@ def host_cmd_split(unet, line):
         hosts = sorted(all_hosts)
         csplit = csplit[1:]
         banner = True
+    elif i == 0 and csplit and csplit[0] == ".":
+        hosts = [unet]
+        csplit = csplit[1:]
     else:
         hosts = expand_hosts(csplit[:i], all_hosts)
         csplit = csplit[i:]
@@ -190,6 +193,9 @@ def win_cmd_host_split(unet, cmd, kinds, defall):
 
     if i == 0 and csplit and csplit[0] == "*":
         hosts = sorted(all_hosts)
+        csplit = csplit[1:]
+    elif i == 0 and csplit and csplit[0] == ".":
+        hosts = [unet]
         csplit = csplit[1:]
     else:
         hosts = expand_hosts(csplit[:i], all_hosts)
@@ -238,7 +244,10 @@ Basic Commands:
   hosts :: list hosts
   quit  :: quit the cli
 
-  (HOST can also be a regex specified wthin '//)'
+  HOST can be a host or one of the following:
+    - '*' for all hosts
+    - '.' for the parent munet
+    - a regex specified between '/' (e.g., '/rtr.*/')
 
 New Window Commands:\n"""
         + "\n".join([f"  {ww[v][0]}\t:: {ww[v][1]}" for v in w])
@@ -252,6 +261,8 @@ New Window Commands:\n"""
 def get_shcmd(unet, host, kinds, execfmt, ucmd):
     if host is None:
         h = None
+    elif host is unet:
+        h = unet
     else:
         h = unet.hosts[host]
         kind = h.config.get("kind", "")
@@ -278,7 +289,7 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
         )
     ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
     ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
-    if host is None:
+    if host is None or host is unet:
         return ucmd
     return ucmd.replace("%NAME%", host)
 
@@ -348,7 +359,7 @@ async def run_command(
         shcmd = get_shcmd(unet, host, kinds, execfmt, line)
         if not shcmd:
             continue
-        ns = unet.hosts[host] if host else unet
+        ns = unet.hosts[host] if host and host != unet else unet
         if on_host:
             cmdf = ns.async_cmd_status_host
         else:
@@ -478,7 +489,7 @@ async def doline(
             return True
 
         try:
-            if toplevel:
+            if toplevel or hosts == [unet]:
                 logging.debug(
                     "top-level-window: execfmt: '%s' ucmd: '%s'", execfmt, ucmd
                 )
@@ -504,7 +515,8 @@ async def doline(
         banner = False
     else:
         hosts, cmd, nline, banner = host_cmd_split(unet, line)
-        logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hosts, cmd, nline)
+        hoststr = "munet" if hosts == [unet] else f"{hosts}"
+        logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hoststr, cmd, nline)
 
     if cmd in unet.cli_run_cmds:
         pass
