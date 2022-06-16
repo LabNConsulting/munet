@@ -48,6 +48,13 @@ jobs:
       - name: Make sure podman image is present
         run: sudo podman pull docker.io/labn/docker-ci-test:20.04
 
+      - name: Expose the environment
+        run: |
+          uname -a || true
+          cat /etc/os-release || true
+          cat /proc/meminfo || true
+          cat /proc/cpuinfo || true
+
       - name: Run tests
         run: make test
 
