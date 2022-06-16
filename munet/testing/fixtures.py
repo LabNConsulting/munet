@@ -238,13 +238,28 @@ def pytest_runtest_setup(item):
 
 
 @pytest.fixture
-async def unet_param(request, rundir, pytestconfig):  # pylint: disable=W0621
-    """Build unet per test function with an optional topology basename parameter"""
-    _unet = build_topology(
-        config=get_config(basename=request.param),
-        rundir=rundir,
-        pytestconfig=pytestconfig,
-    )
+async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
+    """
+    Build unet per test function with an optional topology basename parameter
+
+    The fixture can be parameterized to choose different config files.
+    For example, use as follows to run the test with unet_perfunc configured
+    first with a config file named `cfg1.yaml` then with config file `cfg2.yaml`
+    (where the actual files could end with `json` or `toml` rather than `yaml`).
+
+        @pytest.mark.parametrize(
+            "unet_perfunc", ["cfg1", "cfg2]", indirect=["unet_perfunc"]
+        )
+        def test_example(unet_perfunc)
+    """
+    if hasattr(request, "param"):
+        _unet = build_topology(
+            config=get_config(basename=request.param),
+            rundir=rundir,
+            pytestconfig=pytestconfig,
+        )
+    else:
+        _unet = build_topology(rundir=rundir, pytestconfig=pytestconfig)
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
 

@@ -29,18 +29,18 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.parametrize(
-    "unet_param", ["munet", "noinit", "noinit-noshell"], indirect=["unet_param"]
+    "unet_perfunc", ["munet", "noinit", "noinit-noshell"], indirect=["unet_perfunc"]
 )
-async def test_basic_ping(unet_param):
-    unet = unet_param
+async def test_basic_ping(unet_perfunc):
+    unet = unet_perfunc
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.info("ping r2 output: %s", o)
 
 
-@pytest.mark.parametrize("unet_param", ["munet"], indirect=["unet_param"])
-async def test_autonumber_ping(unet_param):
-    unet = unet_param
+@pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
+async def test_autonumber_ping(unet_perfunc):
+    unet = unet_perfunc
     r1 = unet.hosts["r1"]
     r2 = unet.hosts["r2"]
 
