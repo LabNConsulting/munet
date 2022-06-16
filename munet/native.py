@@ -33,6 +33,8 @@ from .base import BaseMunet
 from .base import Bridge
 from .base import LinuxNamespace
 from .base import Timeout
+from .base import _async_get_exec_path
+from .base import _get_exec_path
 from .base import cmd_error
 from .base import get_exec_path_host
 
@@ -448,14 +450,14 @@ class L3ContainerNode(L3Node):
 
         `binary` :: binary name or list of binary names
         """
-        return self._get_exec_path(binary, self.cmd_status, self.cont_exec_paths)
+        return _get_exec_path(binary, self.cmd_status, self.cont_exec_paths)
 
     async def async_get_exec_path(self, binary):
         """Return the full path to the binary executable inside the image.
 
         `binary` :: binary name or list of binary names
         """
-        path = await self._async_get_exec_path(
+        path = await _async_get_exec_path(
             binary, self.async_cmd_status, self.cont_exec_paths
         )
         return path

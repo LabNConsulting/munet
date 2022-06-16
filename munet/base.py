@@ -32,7 +32,7 @@ import sys
 import tempfile
 import time as time_mod
 
-import munet.unshare as unshare
+from munet import unshare
 
 
 try:
@@ -162,6 +162,38 @@ def get_tmp_dir(uniq):
     return os.path.join(tempfile.mkdtemp(), uniq)
 
 
+async def _async_get_exec_path(binary, cmdf, cache):
+    if isinstance(binary, str):
+        bins = [binary]
+    else:
+        bins = binary
+    for b in bins:
+        if b in cache:
+            return cache[b]
+
+        rc, output, _ = await cmdf("which " + b, warn=False)
+        if not rc:
+            cache[b] = os.path.abspath(output.strip())
+            return cache[b]
+    return None
+
+
+def _get_exec_path(binary, cmdf, cache):
+    if isinstance(binary, str):
+        bins = [binary]
+    else:
+        bins = binary
+    for b in bins:
+        if b in cache:
+            return cache[b]
+
+        rc, output, _ = cmdf("which " + b, warn=False)
+        if not rc:
+            cache[b] = os.path.abspath(output.strip())
+            return cache[b]
+    return None
+
+
 class Commander:  # pylint: disable=R0904
     """
     Commander.
@@ -215,44 +247,12 @@ class Commander:  # pylint: disable=R0904
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
 
-    def _get_exec_path(self, binary, cmdf, cache):  # pylint: disable=no-self-use
-        if isinstance(binary, str):
-            bins = [binary]
-        else:
-            bins = binary
-        for b in bins:
-            if b in cache:
-                return cache[b]
-
-            rc, output, _ = cmdf("which " + b, warn=False)
-            if not rc:
-                cache[b] = os.path.abspath(output.strip())
-                return cache[b]
-        return None
-
-    async def _async_get_exec_path(
-        self, binary, cmdf, cache
-    ):  # pylint: disable=no-self-use
-        if isinstance(binary, str):
-            bins = [binary]
-        else:
-            bins = binary
-        for b in bins:
-            if b in cache:
-                return cache[b]
-
-            rc, output, _ = await cmdf("which " + b, warn=False)
-            if not rc:
-                cache[b] = os.path.abspath(output.strip())
-                return cache[b]
-        return None
-
     async def async_get_exec_path(self, binary):
         """Return the full path to the binary executable.
 
         `binary` :: binary name or list of binary names
         """
-        return await self._async_get_exec_path(
+        return await _async_get_exec_path(
             binary, self.async_cmd_status_host, self.exec_paths
         )
 
@@ -261,9 +261,9 @@ class Commander:  # pylint: disable=R0904
 
         `binary` :: binary name or list of binary names
         """
-        return self._get_exec_path(binary, self.cmd_status_host, self.exec_paths)
+        return _get_exec_path(binary, self.cmd_status_host, self.exec_paths)
 
-    def get_exec_path_host(self, binary):  # pylint: disable=no-self-use
+    def get_exec_path_host(self, binary):
         """Return the full path to the binary executable.
 
         If the object is actually a derived class (e.g., a container) this method will
@@ -290,9 +290,7 @@ class Commander:  # pylint: disable=R0904
         """Check if path exists."""
         return self.test("-e", path)
 
-    def get_cmd_container(
-        self, cmd, sudo=False, tty=False
-    ):  # pylint: disable=no-self-use
+    def get_cmd_container(self, cmd, sudo=False, tty=False):
         # The overrides of this function *do* use the self parameter
         del tty  # lint
         if sudo:
@@ -646,7 +644,7 @@ class Commander:  # pylint: disable=R0904
             e = e.decode(encoding) if e is not None else e
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
-    def cmd_get_cmd_list(self, cmd):  # pylint: disable=no-self-use
+    def cmd_get_cmd_list(self, cmd):
         if not isinstance(cmd, str):
             cmds = cmd
         else:
@@ -856,7 +854,7 @@ class Commander:  # pylint: disable=R0904
 
     def delete(self):
         "Calls self.async_delete within an exec loop"
-        asyncio.run(self.async_delete(self))
+        asyncio.run(self.async_delete())
 
     async def async_delete(self):
         self.logger.info("%s: deleted", self)
@@ -1478,7 +1476,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     self,
                     unshare.clone_flag_string(self.uflags),
                 )
-                fd = os.pidfd_open(self.ppid, 0)
+                fd = unshare.pidfd_open(self.ppid)
                 unshare.setns(fd, self.uflags)
                 os.close(fd)
             else:
@@ -1495,10 +1493,11 @@ class LinuxNamespace(Commander, InterfaceMixin):
                             break
                         except OSError as error:
                             self.logger.warning(
-                                "%s: could not reset to old namespace fd %s (%s)",
+                                "%s: could not reset to old namespace fd %s (%s): %s",
                                 self,
                                 fname,
                                 fd,
+                                error,
                             )
                             if i == retry - 1:
                                 raise

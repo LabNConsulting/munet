@@ -105,8 +105,16 @@ def session_autouse():
 
 
 @pytest.fixture(autouse=True, scope="module")
-def munet_module_autouse(request):
-    _cd_to_test_dir(request, "module")
+def module_autouse(request):
+    # _cd_to_test_dir(request, "module")
+    cwd = os.getcwd()
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    logging.debug("conftest: module: changing cwd from %s to %s", cwd, sdir)
+    os.chdir(sdir)
+
+    yield
+
+    os.chdir(cwd)
 
 
 @pytest.fixture(scope="module")
@@ -152,8 +160,16 @@ async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
 
 
 @pytest.fixture(autouse=True, scope="function")
-def munet_func_autoreuse(request):
-    _cd_to_test_dir(request, "function")
+def function_autouse(request):
+    # u_cd_to_test_dir(request, "function")
+    cwd = os.getcwd()
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    logging.debug("conftest: function: changing cwd from %s to %s", cwd, sdir)
+    os.chdir(sdir)
+
+    yield
+
+    os.chdir(cwd)
 
 
 @pytest.fixture(scope="function")

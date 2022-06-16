@@ -21,7 +21,6 @@
 "Testing use of pexect/REPL in munet."
 import logging
 import os
-import signal
 import time
 
 import pytest

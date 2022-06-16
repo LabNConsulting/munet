@@ -22,6 +22,8 @@
 
 import ctypes  # pylint: disable=C0415
 import ctypes.util  # pylint: disable=C0415
+import os
+import sys
 
 
 libc = None
@@ -33,6 +35,22 @@ def _load_libc():
         return
     lcpath = ctypes.util.find_library("c")
     libc = ctypes.CDLL(lcpath, use_errno=True)
+
+
+def pidfd_open(pid, flags=0):
+    if sys.version_info[0] > 3 or (
+        sys.version_info[0] == 3 and sys.version_info[1] > 8
+    ):
+        return os.pidfd_open(pid, flags)  # pylint: disable=no-member
+
+    if not libc:
+        _load_libc()
+
+    fd = libc.pidfd_open(int(pid), int(flags))
+    if fd == -1:
+        raise OSError(ctypes.get_errno())
+
+    return fd
 
 
 def setns(fd, nstype):
