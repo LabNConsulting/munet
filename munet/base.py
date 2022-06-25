@@ -1628,6 +1628,7 @@ class BaseMunet(LinuxNamespace):
         self.links = {}
         self.macs = {}
         self.rmacs = {}
+        self.isolated = isolated
 
         self.cli_server = None
         self.cli_sockpath = None

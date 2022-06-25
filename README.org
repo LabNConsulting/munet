@@ -442,6 +442,13 @@ module: labn-munet-config
     container topology {
       description "The topology munet should create.";
 
+      leaf ipv6-enable {
+        type boolean;
+        default false;
+        description
+          "Controls if IPv6 is enabled or disabled.";
+      }
+
       leaf networks-autonumber {
         type boolean;
         description

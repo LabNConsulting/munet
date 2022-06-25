@@ -58,9 +58,12 @@ def make_ip_network(net, inc):
 
 def get_ip_network(c, brid):
     ip = c.get("ip")
-    if ip and ip != "auto":
+    if ip and str(ip) != "auto":
         try:
-            return ipaddress.ip_interface(ip)
+            ifip = ipaddress.ip_interface(ip)
+            if ifip.ip == ifip.network.network_address:
+                return ifip.network
+            return ifip
         except ValueError:
             return ipaddress.ip_network(ip)
     return make_ip_network("10.0.0.0/24", brid)
@@ -102,13 +105,13 @@ class L3Bridge(Bridge):
 
         self.ip_interface = get_ip_network(self.config, self.id)
         if hasattr(self.ip_interface, "network"):
-            self.ip_network = self.ip_interface.network
             self.ip_address = self.ip_interface.ip
+            self.ip_network = self.ip_interface.network
+            self.cmd_raises(f"ip addr add {self.ip_interface} dev {name}")
         else:
+            self.ip_address = None
             self.ip_network = self.ip_interface
-            self.ip_address = self.ip_network.network_address
 
-        self.cmd_raises(f"ip addr add {self.ip_interface} dev {name}")
         self.logger.debug("%s: set network address to %s", self, self.ip_interface)
 
         self.is_nat = self.config.get("nat", False)
@@ -170,6 +173,10 @@ class L3Node(LinuxNamespace):
         # -----------------------
         # Setup node's networking
         # -----------------------
+        if not self.unet.config.get("ipv6-enabled", False):
+            # Disable IPv6
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
 
@@ -918,6 +925,11 @@ class Munet(BaseMunet):
         }
 
         cli.add_cli_config(self, cdict)
+
+        if self.isolated and not self.config.get("ipv6-enabled", False):
+            # Disable IPv6
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
     @property
     def autonumber(self):
