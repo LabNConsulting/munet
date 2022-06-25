@@ -2,7 +2,7 @@
 #
 # October 1 2021, Christian Hopps <chopps@labn.net>
 #
-# Copyright (c) 1, LabN Consulting, L.L.C.
+# Copyright (c) 2021-2022, LabN Consulting, L.L.C.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -37,6 +37,10 @@ from .base import _async_get_exec_path
 from .base import _get_exec_path
 from .base import cmd_error
 from .base import get_exec_path_host
+from .config import config_subst
+from .config import config_to_dict_with_key
+from .config import find_matching_net_config
+from .config import merge_kind_config
 
 
 def get_loopback_ips(c, nid):
@@ -173,7 +177,7 @@ class L3Node(LinuxNamespace):
         # -----------------------
         # Setup node's networking
         # -----------------------
-        if not self.unet.config.get("ipv6-enabled", False):
+        if not self.unet.ipv6_enable:
             # Disable IPv6
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
@@ -837,16 +841,23 @@ class Munet(BaseMunet):
     Munet.
     """
 
-    def __init__(self, rundir=None, pytestconfig=None, **kwargs):
+    def __init__(self, rundir=None, config=None, pytestconfig=None, **kwargs):
         super().__init__(**kwargs)
 
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.set_cwd(self.rundir)
 
-        self.config = {}
-        self.config_pathname = ""
-        self.config_dirname = ""
+        if not config:
+            config = {}
+        self.config = config
+        if "config_pathname" in config:
+            self.config_pathname = os.path.realpath(config["config_pathname"])
+            self.config_dirname = os.path.dirname(self.config_pathname)
+        else:
+            self.config_pathname = ""
+            self.config_dirname = ""
+
         self.pytest_config = pytestconfig
 
         # Save the namespace pid
@@ -926,20 +937,98 @@ class Munet(BaseMunet):
 
         cli.add_cli_config(self, cdict)
 
-        if self.isolated and not self.config.get("ipv6-enabled", False):
+        if "cli" in config:
+            cli.add_cli_config(self, config["cli"])
+
+        if "topology" not in self.config:
+            self.config["topology"] = {}
+
+        self.topoconf = self.config["topology"]
+        self.ipv6_enable = self.topoconf.get("ipv6-enable", False)
+
+        if self.isolated and not self.ipv6_enable:
             # Disable IPv6
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
+        self._build_topology(kwargs.get("logger"))
+
+    def _build_topology(self, logger):
+        # Allow for all networks to be auto-numbered
+        topoconf = self.topoconf
+        autonumber = self.autonumber
+
+        kinds = self.config.get("kinds", {})
+
+        for name, conf in config_to_dict_with_key(topoconf, "networks", "name").items():
+            if kind := conf.get("kind"):
+                if kconf := kinds[kind]:
+                    conf = merge_kind_config(kconf, conf)
+            conf = config_subst(conf, name=name, rundir=self.rundir)
+            if "ip" not in conf and autonumber:
+                conf["ip"] = "auto"
+            topoconf["networks"][name] = conf
+            self.add_network(name, conf, logger=logger)
+
+        for name, conf in config_to_dict_with_key(topoconf, "nodes", "name").items():
+            config_to_dict_with_key(
+                conf, "env", "name"
+            )  # convert list of env objects to dict
+
+            if kind := conf.get("kind"):
+                if kconf := kinds[kind]:
+                    conf = merge_kind_config(kconf, conf)
+
+            conf = config_subst(conf, name=name, rundir=self.rundir)
+            topoconf["nodes"][name] = conf
+            self.add_l3_node(name, conf, logger=logger)
+
+        # Go through all connections and name them so they are sane to the user
+        # otherwise when we do p2p links the names/ords skip around based oddly
+        for name, node in self.hosts.items():
+            nconf = node.config
+            if "connections" not in nconf:
+                continue
+            nconns = []
+            for cconf in nconf["connections"]:
+                # Replace string only with a dictionary
+                if isinstance(cconf, str):
+                    cconf = cconf.split(":", 1)
+                    cconf = {"to": cconf[0]}
+                    if len(cconf) == 2:
+                        cconf["name"] = cconf[1]
+                # Allocate a name if not already assigned
+                if "name" not in cconf:
+                    cconf["name"] = node.get_next_intf_name()
+                nconns.append(cconf)
+            nconf["connections"] = nconns
+
+        for name, node in self.hosts.items():
+            nconf = node.config
+            if "connections" not in nconf:
+                continue
+            for cconf in nconf["connections"]:
+                # Eventually can add support for unconnected intf here.
+                if "to" not in cconf:
+                    continue
+                to = cconf["to"]
+                if to in self.switches:
+                    switch = self.switches[to]
+                    swconf = find_matching_net_config(name, cconf, switch.config)
+                    self.add_native_link(switch, node, swconf, cconf)
+                elif cconf["name"] not in node.intfs:
+                    # Only add the p2p interface if not already there.
+                    other = self.hosts[to]
+                    oconf = find_matching_net_config(name, cconf, other.config)
+                    self.add_native_link(node, other, cconf, oconf)
+
     @property
     def autonumber(self):
-        return self.config.get("topology", {}).get("networks-autonumber")
+        return self.topoconf.get("networks-autonumber", False)
 
     @autonumber.setter
     def autonumber(self, value):
-        if not self.config.get("topology"):
-            self.config["topology"] = {}
-        self.config["topology"]["networks-autonumber"] = bool(value)
+        self.topoconf["networks-autonumber"] = bool(value)
 
     def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
