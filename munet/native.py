@@ -376,12 +376,12 @@ class L3Node(LinuxNamespace):
         outopt = self.unet.pytest_config.getoption("--stdout")
         outopt = outopt if outopt is not None else ""
         if outopt == "all" or self.name in outopt.split(","):
-            self.run_in_window(f"tail -F {stdout.name}")
+            self.run_in_window(f"tail -F {stdout.name}", title=f"O:{self.name}")
 
         erropt = self.unet.pytest_config.getoption("--stderr")
         erropt = erropt if erropt is not None else ""
         if erropt == "all" or self.name in erropt.split(","):
-            self.run_in_window(f"tail -F {stderr.name}")
+            self.run_in_window(f"tail -F {stderr.name}", title=f"E:{self.name}")
 
     def pytest_hook_open_shell(self):
         if not self.unet or not self.unet.pytest_config:
@@ -1104,6 +1104,7 @@ class Munet(BaseMunet):
                 self.run_in_window(
                     f"tshark -s 1508 -i {pcap} -P -w capture-{pcap}.pcap",
                     background=True,
+                    title=f"cap:{pcap}",
                 )
 
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
