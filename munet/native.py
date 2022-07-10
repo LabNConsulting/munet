@@ -691,6 +691,8 @@ class L3ContainerNode(L3Node):
         # Update capabilities
         cmds += [f"--cap-add={x}" for x in self.config.get("cap-add", [])]
         cmds += [f"--cap-drop={x}" for x in self.config.get("cap-drop", [])]
+        # cmds += [f"--expose={x.split(':')[0]}" for x in self.config.get("ports", [])]
+        cmds += [f"--publish={x}" for x in self.config.get("ports", [])]
 
         # Add extra flags from user:
         if "podman" in self.config:

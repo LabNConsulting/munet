@@ -48,7 +48,7 @@ def pytest_addoption(parser):
     )
     parser.addoption(
         "--pcap",
-        metavar="NODE[,NODE...]",
+        metavar="NET[,NET...]",
         help="Comma-separated list of networks to capture packets on, or 'all'",
     )
 
