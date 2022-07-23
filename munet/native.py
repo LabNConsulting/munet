@@ -301,6 +301,9 @@ class L3Node(LinuxNamespace):
                 shell_cmd = "/bin/bash"
             if cmd.find("\n") == -1:
                 cmd += "\n"
+            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmd = cmd.replace("%RUNDIR%", self.rundir)
+            cmd = cmd.replace("%NAME%", self.name)
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(f"#!{shell_cmd}\n")
@@ -310,6 +313,9 @@ class L3Node(LinuxNamespace):
             cmds = [cmdpath]
         else:
             cmds = shlex.split(cmd)
+            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
+            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
+            cmds = [x.replace("%NAME%", self.name) for x in cmds]
 
         stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
         stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
@@ -713,6 +719,9 @@ class L3ContainerNode(L3Node):
             assert isinstance(cmd, str)
             # make cmd \n terminated for script
             cmd = cmd.rstrip()
+            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmd = cmd.replace("%RUNDIR%", self.rundir)
+            cmd = cmd.replace("%NAME%", self.name)
             if cmd[-1] != "\n":
                 cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
@@ -735,6 +744,10 @@ class L3ContainerNode(L3Node):
                     cmds.extend(shlex.split(cmd))
                 else:
                     cmds.extend(cmd)
+
+            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
+            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
+            cmds = [x.replace("%NAME%", self.name) for x in cmds]
 
         stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
         stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
