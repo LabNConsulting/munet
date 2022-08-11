@@ -919,6 +919,8 @@ class InterfaceMixin:
         rate :: (int or str) bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
         """
+        del ifname # unused
+
         netem_args = ""
 
         def get_number(c, v, d=None):
@@ -987,18 +989,6 @@ class InterfaceMixin:
             tbf_args += f" limit {limit} burst {burst}"
         else:
             tbf_args += f" limit {limit} burst {burst}"
-
-        count = 1
-        selector = f"root handle {count}:"
-        if netem_args:
-            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} netem {netem_args}")
-            count += 1
-            selector = f"parent {count-1}: handle {count}"
-        # Place rate limit after delay otherwise limit/burst too complex
-        if tbf_args:
-            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} tbf {tbf_args}")
-
-        self.cmd_raises(f"tc qdisc show dev {ifname}")
 
         return netem_args, tbf_args
 
