@@ -89,7 +89,9 @@ async def async_main(args, unet):
 def main(*args):
     ap = argparse.ArgumentParser(args)
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
-    ap.add_argument("--kinds-config", help="kinds config file (yaml, toml, json, ...)")
+    ap.add_argument(
+        "-k", "--kinds-config", help="kinds config file (yaml, toml, json, ...)"
+    )
     ap.add_argument(
         "--host",
         action="store_true",
