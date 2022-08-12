@@ -33,11 +33,13 @@ from .native import Munet
 
 
 def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
+
+    if not search:
+        search = [os.getcwd()]
+    elif isinstance(search, str):
+        search = [search]
+
     if not pathname:
-        if not search:
-            search = [os.getcwd()]
-        elif isinstance(search, str):
-            search = [search]
         for d in search:
             logf(
                 "%s",
@@ -53,7 +55,24 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
             break
         else:
             raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
+    else:
+        if not os.path.exists(pathname):
+            if pathname[0] == "/":
+                # if we have an absolute path, raise an error
+                raise FileNotFoundError(pathname)
+
+            # look in the places we know about
+            for d in search:
+                if os.path.exists(os.path.join(d, pathname)):
+                    pathname = os.path.join(d, pathname)
+                    logf("%s", 'Found "{}"'.format(pathname))
+                    break
+                continue
+            else:
+                raise FileNotFoundError(pathname + " in " + f"{search}")
+
     _, ext = pathname.rsplit(".", 1)
+
     if ext == "json":
         config = json.load(open(pathname, encoding="utf-8"))
     elif ext == "toml":
@@ -166,8 +185,16 @@ def load_kinds(args):
 
         args_config = args.kinds_config if args else None
         config = get_config(args_config, "kinds", search)
+
+        if config is not None:
+            if os.path.exists(config["config_pathname"]):
+                logging.info("Loaded kinds config %s",  config["config_pathname"])
+
         return config_to_dict_with_key(config, "kinds", "name")
-    except FileNotFoundError:
+    except FileNotFoundError as error:
+        # if we have kinds in args but the file doesn't exist, raise the error
+        if args_config is not None:
+            raise error
         return {}
     finally:
         if args:
