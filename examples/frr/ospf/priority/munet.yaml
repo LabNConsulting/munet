@@ -1,0 +1,44 @@
+version: 1
+kinds:
+  - name: frr
+    cmd: |
+      chown frr:frr -R /var/run/frr
+      chown frr:frr -R /var/log/frr
+      /usr/lib/frr/watchfrr -d zebra ospfd staticd
+    volumes:
+      - "./%NAME%/etc.frr:/etc/frr"
+      - "%RUNDIR%/%NAME%/var.log.frr:/var/log/frr"
+      - "%RUNDIR%/%NAME%/var.run.frr:/var/run/frr"
+    cap-add:
+      - SYS_ADMIN
+      - AUDIT_WRITE
+    merge: ["volumes"]
+topology:
+  networks:
+    - name: net1
+      ip: 10.0.1.254/24
+  nodes:
+    - name: r1
+      kind: frr
+      connections: ["net1"]
+    - name: r2
+      kind: frr
+      connections: ["net1"]
+    - name: r3
+      kind: frr
+      connections: ["net1"]
+    - name: r4
+      kind: frr
+      connections: ["net1"]
+cli:
+  commands:
+    - name: ""
+      exec: "vtysh -c '{}'"
+      format: "[ROUTER ...] COMMAND"
+      help: "execute vtysh COMMAND on the router[s]"
+      kinds: ["frr"]
+    - name: "vtysh"
+      exec: "/usr/bin/vtysh"
+      format: "vtysh ROUTER [ROUTER ...]"
+      new-window: true
+      kinds: ["frr"]
