@@ -1,0 +1,20 @@
+frr version 8.3-dev
+frr defaults traditional
+hostname r1
+log file /var/log/frr/frr.log
+no ipv6 forwarding
+service integrated-vtysh-config
+!
+interface eth0
+ ip address 10.0.1.1/24
+ ip ospf area 0.0.0.0
+exit
+!
+interface lo
+ ip address 172.16.0.1/32
+exit
+!
+router ospf
+ ospf router-id 172.16.0.1
+exit
+!
