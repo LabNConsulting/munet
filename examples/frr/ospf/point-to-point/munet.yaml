@@ -14,23 +14,17 @@ kinds:
       - AUDIT_WRITE
     merge: ["volumes"]
 topology:
-  networks:
-    - name: net1
-      ip: 10.0.1.254/24
-    - name: net2
-      ip: 10.0.2.254/24
-    - name: net3
-      ip: 10.0.3.254/24
+  networks-autonumber: true
   nodes:
     - name: r1
       kind: frr
-      connections: ["net1", "net2"]
+      connections: ["r2", "r3"]
     - name: r2
       kind: frr
-      connections: ["net1", "net3"]
+      connections: ["r1", "r3"]
     - name: r3
       kind: frr
-      connections: ["net2", "net3"]
+      connections: ["r1", "r2"]
 cli:
   commands:
     - name: ""
