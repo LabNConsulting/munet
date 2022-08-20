@@ -27,9 +27,6 @@ topology:
     - name: r3
       kind: frr
       connections: ["net1"]
-    - name: r4
-      kind: frr
-      connections: ["net1"]
 cli:
   commands:
     - name: ""
