@@ -299,7 +299,7 @@ class L3Node(LinuxNamespace):
         if shell_cmd:
             if not isinstance(shell_cmd, str):
                 shell_cmd = "/bin/bash"
-            if cmd.find("\n") == -1:
+            if cmd[-1] != "\n":
                 cmd += "\n"
             cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
             cmd = cmd.replace("%RUNDIR%", self.rundir)
