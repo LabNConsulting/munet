@@ -29,6 +29,7 @@ pytest-cov = "^3.0.0"
 black = "^22.6.0"
 pytest-xdist = "^2.5.0"
 pylint = "^2.14.5"
+isort = "^5.10.1"
 
 [tool.poetry.extras]
 ci = ["jsonschema", "pexpect", "pylint", "toml"]

@@ -552,7 +552,7 @@ validate = ["jsonschema"]
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "30d1d34dc13118cd5e48ecc35e005c401ffefd8010ad5d4b0159d4b62a589325"
+content-hash = "e3e4c2e9d1241e206e183bff0433d3fe2fbebcccfa3c8842cd814bc0f4aa3332"
 
 [metadata.files]
 astroid = [
