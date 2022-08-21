@@ -4,7 +4,10 @@ kinds:
     cmd: |
       chown frr:frr -R /var/run/frr
       chown frr:frr -R /var/log/frr
-      /usr/lib/frr/watchfrr -d zebra ospfd staticd
+      /usr/lib/frr/frrinit.sh start
+      tail -F /var/log/frr/frr.log
+    cleanup_cmd: |
+      /usr/lib/frr/frrinit.sh stop
     volumes:
       - "./%NAME%/etc.frr:/etc/frr"
       - "%RUNDIR%/%NAME%/var.log.frr:/var/log/frr"
@@ -18,13 +21,25 @@ topology:
   nodes:
     - name: r1
       kind: frr
-      connections: ["r2", "r3"]
+      connections:
+        - to: "r2"
+          name: r1r2
+        - to: "r3"
+          name: r1r3
     - name: r2
       kind: frr
-      connections: ["r1", "r3"]
+      connections:
+        - to: "r1"
+          name: r2r1
+        - to: "r3"
+          name: r2r3
     - name: r3
       kind: frr
-      connections: ["r1", "r2"]
+      connections:
+        - to: "r1"
+          name: r3r1
+        - to: "r2"
+          name: r3r2
 cli:
   commands:
     - name: ""
