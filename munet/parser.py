@@ -188,7 +188,7 @@ def load_kinds(args):
 
         if config is not None:
             if os.path.exists(config["config_pathname"]):
-                logging.info("Loaded kinds config %s",  config["config_pathname"])
+                logging.info("Loaded kinds config %s", config["config_pathname"])
 
         return config_to_dict_with_key(config, "kinds", "name")
     except FileNotFoundError as error:

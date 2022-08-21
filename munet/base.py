@@ -919,7 +919,7 @@ class InterfaceMixin:
         rate :: (int or str) bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
         """
-        del ifname # unused
+        del ifname  # unused
 
         netem_args = ""
 
