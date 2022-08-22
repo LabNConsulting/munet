@@ -161,10 +161,11 @@ class L3Node(LinuxNamespace):
         config = self.config
 
         self.cmd_p = None
-        self.container_id = ""
+        self.container_id = None
         self.id = int(config["id"]) if "id" in config else self._get_next_ord()
         assert unet is not None
         self.unet = unet
+        self.cleanup_called = False
 
         self.intf_tc_count = 0
 
@@ -287,6 +288,12 @@ class L3Node(LinuxNamespace):
         )
 
         shell_cmd = self.config.get("shell", "/bin/bash")
+        if not isinstance(shell_cmd, str):
+            if shell_cmd:
+                shell_cmd = "/bin/bash"
+            else:
+                shell_cmd = ""
+
         cmd = self.config.get("cmd", "").strip()
         if not cmd:
             return None
@@ -297,13 +304,11 @@ class L3Node(LinuxNamespace):
                 await kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
 
         if shell_cmd:
-            if not isinstance(shell_cmd, str):
-                shell_cmd = "/bin/bash"
-            if cmd[-1] != "\n":
-                cmd += "\n"
+            cmd = cmd.rstrip()
             cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
             cmd = cmd.replace("%RUNDIR%", self.rundir)
             cmd = cmd.replace("%NAME%", self.name)
+            cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(f"#!{shell_cmd}\n")
@@ -337,6 +342,63 @@ class L3Node(LinuxNamespace):
         self.pytest_hook_run_cmd(stdout, stderr)
 
         return self.cmd_p
+
+    async def _async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node"""
+        self.cleanup_called = True
+
+        cmd = self.config.get("cleanup_cmd", "").strip()
+        if not cmd:
+            return
+
+        # shell_cmd is a union and can be boolean or string
+        shell_cmd = self.config.get("shell", "/bin/bash")
+        if not isinstance(shell_cmd, str):
+            if shell_cmd:
+                shell_cmd = "/bin/bash"
+            else:
+                shell_cmd = ""
+
+        # If we have a shell_cmd then we create a cleanup_cmds file in run_cmd
+        # and volume mounted it
+        if shell_cmd:
+            # Create cleanup cmd file
+            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmd = cmd.replace("%RUNDIR%", self.rundir)
+            cmd = cmd.replace("%NAME%", self.name)
+            cmd += "\n"
+
+            # Write out our cleanup cmd file at this time too.
+            cmdpath = os.path.join(self.rundir, "cleanup_cmd.shebang")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(f"#!{shell_cmd}\n")
+                cmdfile.write(cmd)
+                cmdfile.flush()
+            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+
+            if self.container_id:
+                cmds = ["/tmp/cleanup_cmds.shebang"]
+            else:
+                cmds = [cmdpath]
+        else:
+            cmds = []
+            if isinstance(cmd, str):
+                cmds.extend(shlex.split(cmd))
+            else:
+                cmds.extend(cmd)
+            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
+            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
+            cmds = [x.replace("%NAME%", self.name) for x in cmds]
+
+        rc, o, e = await self.async_cmd_status(cmds)
+        if not rc and (o or e):
+            self.logger.info("async_cleanup_cmd: %s", cmd_error(rc, o, e))
+
+        return rc
+
+    async def async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node"""
+        return await self._async_cleanup_cmd()
 
     def cmd_completed(self, future):
         self.logger.debug("%s: cmd completed called", self)
@@ -433,6 +495,8 @@ class L3Node(LinuxNamespace):
         else:
             self.logger.debug("%s: L3Node sub-class async_delete", self)
         await self.async_cleanup_proc(self.cmd_p)
+        if not self.cleanup_called:
+            await self.async_cleanup_cmd()
         await super().async_delete()
 
 
@@ -705,7 +769,27 @@ class L3ContainerNode(L3Node):
             for x in self.config["podman"].get("extra-args", []):
                 cmds.append(x.strip())
 
+        # shell_cmd is a union and can be boolean or string
         shell_cmd = self.config.get("shell", "/bin/bash")
+        if not isinstance(shell_cmd, str):
+            if shell_cmd:
+                shell_cmd = "/bin/bash"
+            else:
+                shell_cmd = ""
+
+        # Create cleanup cmd file
+        cleanup_cmd = self.config.get("cleanup_cmd", "").strip()
+        if shell_cmd and cleanup_cmd:
+            # Will write the file contents out when the command is run
+            cleanup_cmdpath = os.path.join(self.rundir, "cleanup_cmd.shebang")
+            await self.async_cmd_raises_host(f"touch {cleanup_cmdpath}")
+            await self.async_cmd_raises_host(f"chmod 755 {cleanup_cmdpath}")
+            cmds += [
+                # How can we override this?
+                # u'--entrypoint=""',
+                f"--volume={cleanup_cmdpath}:/tmp/cleanup_cmds.shebang",
+            ]
+
         cmd = self.config.get("cmd", "").strip()
 
         # See if we have a custom update for this `kind`
@@ -713,17 +797,15 @@ class L3ContainerNode(L3Node):
             if kind in kind_run_cmd_update:
                 cmds, cmd = await kind_run_cmd_update[kind](self, shell_cmd, cmds, cmd)
 
+        # Create running command file
         if shell_cmd and cmd:
-            if not isinstance(shell_cmd, str):
-                shell_cmd = "/bin/bash"
             assert isinstance(cmd, str)
             # make cmd \n terminated for script
             cmd = cmd.rstrip()
             cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
             cmd = cmd.replace("%RUNDIR%", self.rundir)
             cmd = cmd.replace("%NAME%", self.name)
-            if cmd[-1] != "\n":
-                cmd += "\n"
+            cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(f"#!{shell_cmd}\n")
@@ -738,6 +820,7 @@ class L3ContainerNode(L3Node):
                 "/tmp/cmds.shebang",
             ]
         else:
+            # `cmd` is a direct run (no shell) cmd
             cmds.append(image)
             if cmd:
                 if isinstance(cmd, str):
@@ -803,11 +886,23 @@ class L3ContainerNode(L3Node):
 
         return self.cmd_p
 
+    async def async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node"""
+
+        self.cleanup_called = True
+
+        if not self.container_id:
+            self.logger.warning("async_cleanup_cmd: container no longer running")
+            return
+
+        return await self._async_cleanup_cmd()
+
     def cmd_completed(self, future):
         self.logger.debug("%s: cmd completed called", self)
         try:
             n = future.result()
             self.logger.debug("%s: node contianer cmd completed result: %s", self, n)
+            self.container_id = None
         except asyncio.CancelledError as error:
             # Should we stop the container if we have one?
             self.logger.debug(
@@ -823,6 +918,8 @@ class L3ContainerNode(L3Node):
             self.logger.debug("%s: L3ContainerNode delete", self)
 
         if contid := self.container_id:
+            await self.async_cleanup_cmd()
+
             o = ""
             e = ""
             if self.cmd_p:
@@ -847,6 +944,9 @@ class L3ContainerNode(L3Node):
             else:
                 # It's gone
                 self.cmd_p = None
+
+            # keeps us from cleaning up twice
+            self.container_id = None
 
         await super().async_delete()
 

@@ -1467,7 +1467,16 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     unshare.clone_flag_string(self.uflags),
                 )
                 fd = unshare.pidfd_open(self.ppid)
-                unshare.setns(fd, self.uflags)
+                try:
+                    unshare.setns(fd, self.uflags)
+                except OSError as error:
+                    self.logger.error(
+                        "%s: error restoring namespaces %s: %s",
+                        self,
+                        unshare.clone_flag_string(self.uflags),
+                        error,
+                    )
+                    raise
                 os.close(fd)
             else:
                 while self.p_ns_fds:

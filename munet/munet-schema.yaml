@@ -17,7 +17,10 @@ $defs:
           type: string
       cmd:
         type: string
-        description: shell commands to execute
+        description: shell commands to execute on node create
+      cleanup_cmd:
+        type: string
+        description: shell commands to execute on node delete
       connections:
         type: array
         items:
