@@ -22,11 +22,20 @@
 
 import ctypes  # pylint: disable=C0415
 import ctypes.util  # pylint: disable=C0415
+import errno
 import os
 import sys
 
 
 libc = None
+
+
+def raise_oserror(enum):
+    s = errno.errorcode[enum] if enum in errno.errorcode else str(enum)
+    error = OSError(s)
+    error.errno = enum
+    error.strerror = s
+    raise error
 
 
 def _load_libc():
@@ -48,7 +57,7 @@ def pidfd_open(pid, flags=0):
 
     fd = libc.pidfd_open(int(pid), int(flags))
     if fd == -1:
-        raise OSError(ctypes.get_errno())
+        raise_oserror(ctypes.get_errno())
 
     return fd
 
@@ -59,7 +68,7 @@ def setns(fd, nstype):
         _load_libc()
 
     if libc.setns(int(fd), int(nstype)) == -1:
-        raise OSError(ctypes.get_errno())
+        raise_oserror(ctypes.get_errno())
 
 
 def unshare(flags):
@@ -68,7 +77,7 @@ def unshare(flags):
         _load_libc()
 
     if libc.unshare(int(flags)) == -1:
-        raise OSError(ctypes.get_errno())
+        raise_oserror(ctypes.get_errno())
 
 
 CLONE_NEWTIME = 0x00000080
