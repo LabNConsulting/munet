@@ -67,9 +67,8 @@ def main(*args):
         envcfg[k] = envcfg[k].replace("%RUNDIR%", rundir)
 
     ecmd = "/usr/bin/nsenter"
-    eargs = [ecmd, "-aF", "-t", pid] + args.shellcmd
+    eargs = [ecmd, "-F", "-t", pid, "-m", "-n", "-p"] + args.shellcmd
     return os.execvpe(ecmd, eargs, {**env, **envcfg})
-
 
 if __name__ == "__main__":
     exit_status = main()
