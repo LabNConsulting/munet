@@ -23,6 +23,7 @@ import asyncio
 import datetime
 import logging
 import os
+import platform
 import re
 import readline
 import shlex
@@ -1042,7 +1043,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         time=False,
         user=False,
         unshare_inline=False,
-        unshare_func_test=None,
         set_hostname=True,
         private_mounts=None,
         logger=None,
@@ -1138,8 +1138,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         self.ppid = os.getppid()
         if unshare_inline:
+            try:
+                kversion = [int(x) for x in platform.release().split("-")[0].split(".")]
+                kvok = kversion[0] > 5 or (kversion[0] == 5 and kversion[1] >= 8)
+            except ValueError:
+                kvok = False
             if (
-                unshare_func_test
+                not kvok
                 or sys.version_info[0] < 3
                 or (sys.version_info[0] == 3 and sys.version_info[1] < 9)
             ):
@@ -1466,17 +1471,22 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     self,
                     unshare.clone_flag_string(self.uflags),
                 )
-                fd = unshare.pidfd_open(self.ppid)
-                try:
-                    unshare.setns(fd, self.uflags)
-                except OSError as error:
-                    self.logger.error(
-                        "%s: error restoring namespaces %s: %s",
-                        self,
-                        unshare.clone_flag_string(self.uflags),
-                        error,
-                    )
-                    raise
+                # fd = unshare.pidfd_open(self.ppid)
+                fd = self.ppid_fd
+                retry = 3
+                for i in range(0, retry):
+                    try:
+                        unshare.setns(fd, self.uflags)
+                    except OSError as error:
+                        self.logger.warning(
+                            "%s: could not reset to old namespace fd %s: %s",
+                            self,
+                            fd,
+                            error,
+                        )
+                        if i == retry - 1:
+                            raise
+                        time_mod.sleep(1)
                 os.close(fd)
             else:
                 while self.p_ns_fds:
