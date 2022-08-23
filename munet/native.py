@@ -36,6 +36,7 @@ from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
 from .base import cmd_error
+from .base import commander
 from .base import get_exec_path_host
 from .config import config_subst
 from .config import config_to_dict_with_key
@@ -171,6 +172,12 @@ class L3Node(LinuxNamespace):
 
         if not name:
             name = "r{}".format(self.id)
+
+        # Clear and create rundir early
+        self.rundir = os.path.join(unet.rundir, name)
+        commander.cmd_raises(f"rm -rf {self.rundir}")
+        commander.cmd_raises(f"mkdir -p {self.rundir}")
+
         super().__init__(name=name, **kwargs)
 
         self.mount_volumes()
@@ -198,9 +205,6 @@ class L3Node(LinuxNamespace):
         # Setup node's rundir
         # -------------------
 
-        self.rundir = os.path.join(unet.rundir, name)
-        self.cmd_raises_host(f"rm -rf {self.rundir}")
-        self.cmd_raises_host(f"mkdir -p {self.rundir}")
         # Not host path based, but we assume same
         self.set_cwd(self.rundir)
 

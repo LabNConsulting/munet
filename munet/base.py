@@ -1310,11 +1310,11 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
     def bind_mount(self, outer, inner):
         self.logger.debug("Bind mounting %s on %s", outer, inner)
-        if self.test_host("-f", outer):
+        if commander.test_host("-f", outer):
             self.cmd_raises(f"mkdir -p {os.path.dirname(inner)} && touch {inner}")
         else:
-            if not self.test_host("-e", outer):
-                self.cmd_raises(f"mkdir -p {outer}")
+            if not commander.test_host("-e", outer):
+                commander.cmd_raises_host(f"mkdir -p {outer}")
             self.cmd_raises(f"mkdir -p {inner}")
         self.cmd_raises("mount --rbind {} {} ".format(outer, inner))
 
