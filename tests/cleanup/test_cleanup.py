@@ -24,6 +24,7 @@ import os
 
 import pytest
 
+
 # All tests are coroutines
 # pytestmark = pytest.mark.asyncio
 
@@ -51,7 +52,8 @@ def savepaths_fixture(unet):
     yield
 
 
-def test_containers_up(unet, savepaths):
+def test_containers_mounts_present(unet, savepaths):
     del savepaths
-    output = unet.cmd_raises("podman ps")
-    logging.info("Containers:\n%s\n\n", output)
+    hs1 = unet.hosts["hs1"]
+    assert unet.path_exists(f"{hs1.rundir}/sock")
+    assert hs1.path_exists("/tmp/sock")
