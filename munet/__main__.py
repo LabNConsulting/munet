@@ -100,7 +100,9 @@ def main(*args):
     ap.add_argument("--unshare-inline", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
-        "--no-cleanup", action="store_true", help="Do not cleanup previous runs"
+        "--no-cleanup",
+        action="store_true",
+        help="Do not kill previous running processes",
     )
     ap.add_argument(
         "--no-cli", action="store_true", help="Do not run the interactive CLI"

@@ -288,9 +288,10 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
             {"host": h, "unet": unet, "user_input": ucmd},
         )
     ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
-    ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
     if host is None or host is unet:
+        ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
         return ucmd
+    ucmd = ucmd.replace("%RUNDIR%", os.path.join(unet.rundir, host))
     return ucmd.replace("%NAME%", host)
 
 

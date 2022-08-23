@@ -19,6 +19,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 "A module that defines common configuration utility functions."
+import logging
+
 from collections.abc import Iterable
 from copy import deepcopy
 
@@ -79,6 +81,12 @@ def config_to_dict_with_key(c, ck, k):
 
 def config_subst(config, **kwargs):
     if isinstance(config, str):
+        if "%RUNDIR%/%NAME%" in config:
+            config = config.replace("%RUNDIR%/%NAME%", "%RUNDIR%")
+            logging.warning(
+                "config '%RUNDIR%/%NAME%' should be changed to '%RUNDIR%' only, "
+                "converting automatically for now."
+            )
         for name, value in kwargs.items():
             config = config.replace(f"%{name.upper()}%", value)
     elif isinstance(config, Iterable):

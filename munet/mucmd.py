@@ -22,6 +22,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 
@@ -47,15 +48,16 @@ def main(*args):
 
     # If args.node is not a node it's part of shellcmd
     if args.node and args.node not in nodes:
-        args.shellcmd[0:0] = [args.node]
+        if args.node != ".":
+            args.shellcmd[0:0] = [args.node]
         args.node = None
 
     if args.node:
         name = args.node
-        pidpath = os.path.join(rundir, f"{args.node}/nspid")
+        rundir = os.path.join(rundir, name)
     else:
         name = "munet"
-        pidpath = os.path.join(rundir, "nspid")
+    pidpath = os.path.join(rundir, "nspid")
     pid = open(pidpath, encoding="ascii").read().strip()
 
     env = {**os.environ}
@@ -67,7 +69,19 @@ def main(*args):
         envcfg[k] = envcfg[k].replace("%RUNDIR%", rundir)
 
     ecmd = "/usr/bin/nsenter"
-    eargs = [ecmd, "-aF", "-t", pid] + args.shellcmd
+    eargs = [ecmd, "-F"]
+
+    output = subprocess.check_output(["/usr/bin/nsenter", "--help"], encoding="utf-8")
+    if " -a," in output:
+        eargs.append("-a")
+    else:
+        # -U doesn't work
+        for flag in ["-u", "-i", "-m", "-n", "-p", "-C", "-T"]:
+            if f" {flag}," in output:
+                eargs.append(flag)
+    eargs.extend(["-t", pid])
+    eargs += args.shellcmd
+    print(eargs)
     return os.execvpe(ecmd, eargs, {**env, **envcfg})
 
 

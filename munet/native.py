@@ -199,6 +199,7 @@ class L3Node(LinuxNamespace):
         # -------------------
 
         self.rundir = os.path.join(unet.rundir, name)
+        self.cmd_raises_host(f"rm -rf {self.rundir}")
         self.cmd_raises_host(f"mkdir -p {self.rundir}")
         # Not host path based, but we assume same
         self.set_cwd(self.rundir)
@@ -1035,14 +1036,14 @@ class Munet(BaseMunet):
                 },
                 {
                     "name": "stdout",
-                    "exec": "tail -F %RUNDIR%/%NAME%/cmd.out",
+                    "exec": "tail -F %RUNDIR%/cmd.out",
                     "format": "stdout HOST [HOST ...]",
                     "help": "tail -f on the stdout of the cmd for this node",
                     "new-window": True,
                 },
                 {
                     "name": "stderr",
-                    "exec": "tail -F %RUNDIR%/%NAME%/cmd.err",
+                    "exec": "tail -F %RUNDIR%/cmd.err",
                     "format": "stdout HOST [HOST ...]",
                     "help": "tail -f on the stdout of the cmd for this node",
                     "new-window": True,
@@ -1094,7 +1095,7 @@ class Munet(BaseMunet):
                 if kconf := kinds[kind]:
                     conf = merge_kind_config(kconf, conf)
 
-            conf = config_subst(conf, name=name, rundir=self.rundir)
+            conf = config_subst(conf, name=name, rundir=os.path.join(self.rundir, name))
             topoconf["nodes"][name] = conf
             self.add_l3_node(name, conf, logger=logger)
 
