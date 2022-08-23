@@ -47,7 +47,7 @@ def fixture_stdargs(rundir):
         "poetry",
         "run",
         "munet",
-        "--no-cleanup",
+        "--no-kill",
         "--no-cli",
         "--no-wait",
         f"--rundir={rundir}",

@@ -90,6 +90,12 @@ def main(*args):
     ap = argparse.ArgumentParser(args)
     ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
     ap.add_argument(
+        "-C",
+        "--cleanup",
+        action="store_true",
+        help="Remove the entire rundir (not just node subdirs) prior to running.",
+    )
+    ap.add_argument(
         "-k", "--kinds-config", help="kinds config file (yaml, toml, json, ...)"
     )
     ap.add_argument(
@@ -100,7 +106,7 @@ def main(*args):
     ap.add_argument("--unshare-inline", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
-        "--no-cleanup",
+        "--no-kill",
         action="store_true",
         help="Do not kill previous running processes",
     )
@@ -123,9 +129,21 @@ def main(*args):
     args = ap.parse_args()
 
     rundir = args.rundir if args.rundir else "/tmp/unet-" + os.environ["USER"]
-    subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
     args.rundir = rundir
 
+    if args.cleanup:
+        if os.path.exists(rundir):
+            if not os.path.exists(f"{rundir}/config.json"):
+                logging.critical(
+                    'unsafe: won\'t clean up rundir "%s" as '
+                    "previous config.json not present",
+                    rundir,
+                )
+                sys.exit(1)
+            else:
+                subprocess.run(["/usr/bin/rm", "-rf", rundir], check=True)
+
+    subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
     os.environ["MUNET_RUNDIR"] = rundir
 
     parser.setup_logging(args)
@@ -138,7 +156,7 @@ def main(*args):
         logger.critical("No nodes defined in config file")
         return 1
 
-    if not args.no_cleanup:
+    if not args.no_kill:
         cleanup_previous()
 
     status = 4
