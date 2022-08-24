@@ -126,7 +126,16 @@ def main(*args):
         help="Do not run any node commands",
     )
     ap.add_argument("-v", "--verbose", action="store_true", help="be verbose")
+    ap.add_argument(
+        "-V", "--version", action="store_true", help="print the verison number and exit"
+    )
     args = ap.parse_args()
+
+    if args.version:
+        from importlib import metadata  # pylint: disable=C0415
+
+        print(metadata.version("munet"))
+        sys.exit(0)
 
     rundir = args.rundir if args.rundir else "/tmp/unet-" + os.environ["USER"]
     args.rundir = rundir
