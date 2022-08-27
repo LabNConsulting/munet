@@ -1248,7 +1248,10 @@ class Munet(BaseMunet):
             pause = bool(self.pytest_config.getoption("--pause-at-end"))
             pause = pause or bool(self.pytest_config.getoption("--pause"))
         if pause:
-            await async_pause_test("Before MUNET delete")
+            try:
+                await async_pause_test("Before MUNET delete")
+            except KeyboardInterrupt:
+                print("^C...continuing")
 
         await super().async_delete()
 

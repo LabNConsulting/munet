@@ -45,7 +45,11 @@ async def async_pause_test(desc=""):
     while True:
         if desc:
             print(f"\n== PAUSING: {desc} ==")
-        user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
+        try:
+            user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
+        except EOFError:
+            print("^D...continuing")
+            break
         user = user.strip()
         if user == "cli":
             await async_cli(BaseMunet.g_unet)
