@@ -26,6 +26,7 @@ import os
 import random
 import re
 import shlex
+import socket
 import subprocess
 
 from . import cli
@@ -73,6 +74,27 @@ def get_ip_network(c, brid):
         except ValueError:
             return ipaddress.ip_network(ip)
     return make_ip_network("10.0.0.0/24", brid)
+
+
+def parse_pciaddr(devaddr):
+    comp = re.match(
+        "(?:([0-9A-Fa-f]{4}):)?([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}).([0-7])", devaddr
+    ).groups()
+    if comp[0] is None:
+        comp[0] = "0000"
+    return [int(x, 16) for x in comp]
+
+
+def read_int_value(path):
+    return int(open(path, encoding="ascii").read())
+
+
+def read_str_value(path):
+    return open(path, encoding="ascii").read().strip()
+
+
+def read_sym_basename(path):
+    return os.path.basename(os.readlink(path))
 
 
 async def to_thread(func):
@@ -170,6 +192,8 @@ class L3Node(LinuxNamespace):
         self.cleanup_called = False
 
         self.host_intfs = {}
+        self.phy_intfs = {}
+        self.phy_odrivers = {}
 
         self.intf_tc_count = 0
 
@@ -255,16 +279,38 @@ class L3Node(LinuxNamespace):
         repl = await self.shell_spawn(
             concmd,
             prompt,
-            expects,
-            sends,
-            logfile=logfile,
+            expects=expects,
+            sends=sends,
             use_pty=use_pty,
-            logfile_read=logfile_read,
-            logfile_send=logfile_send,
+            logfile=logfile,
+            logfile_read=None,  # logfile_read,
+            logfile_send=None,  # logfile_send,
             noecho=noecho,
             trace=trace,
         )
         return repl
+
+    async def monitor(
+        self,
+        sockpath,
+        prompt=r"\(qemu\) ",
+        # prompt=r"(^|\r\n)\(qemu\) ",
+    ):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(sockpath)
+
+        lfname = os.path.join(self.rundir, "monitor-log.txt")
+        logfile = open(lfname, "a+", encoding="utf-8")
+        logfile.write("-- start logging for: '{}' --\n".format(sock))
+
+        p = self.spawn(sock, prompt, logfile=logfile)
+        from .base import ShellWrapper  # pylint: disable=C0415
+
+        # ShellWrapper (REPLWrapper) unfortunately uses string match not regex
+        # for the prompt
+        p.send("\n")
+        prompt = "(qemu) "
+        return ShellWrapper(p, prompt, None, noecho=False)
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
@@ -440,10 +486,10 @@ class L3Node(LinuxNamespace):
         ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
-        self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
-
-        if hasattr(switch, "is_nat") and switch.is_nat:
-            self.cmd_raises(f"ip route add default via {switch.ip_address}")
+        if not self.is_vm:
+            self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+            if hasattr(switch, "is_nat") and switch.is_nat:
+                self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
     def pytest_hook_run_cmd(self, stdout, stderr):
         if not self.unet or not self.unet.pytest_config:
@@ -454,10 +500,11 @@ class L3Node(LinuxNamespace):
         if outopt == "all" or self.name in outopt.split(","):
             self.run_in_window(f"tail -F {stdout.name}", title=f"O:{self.name}")
 
-        erropt = self.unet.pytest_config.getoption("--stderr")
-        erropt = erropt if erropt is not None else ""
-        if erropt == "all" or self.name in erropt.split(","):
-            self.run_in_window(f"tail -F {stderr.name}", title=f"E:{self.name}")
+        if stderr:
+            erropt = self.unet.pytest_config.getoption("--stderr")
+            erropt = erropt if erropt is not None else ""
+            if erropt == "all" or self.name in erropt.split(","):
+                self.run_in_window(f"tail -F {stderr.name}", title=f"E:{self.name}")
 
     def pytest_hook_open_shell(self):
         if not self.unet or not self.unet.pytest_config:
@@ -485,7 +532,7 @@ class L3Node(LinuxNamespace):
             ifname = cconf["name"]
             self.intf_addrs[ifname] = ipaddr
             self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
-            if "physical" not in cconf:
+            if "physical" not in cconf and not self.is_vm:
                 self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
         if oipaddr:
@@ -494,21 +541,30 @@ class L3Node(LinuxNamespace):
             self.logger.debug(
                 "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
             )
-            if "physical" not in occonf:
+            if "physical" not in occonf and not other.is_vm:
                 other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
-    def add_host_intf(self, hname, lname):
+    async def add_host_intf(self, hname, lname):
         self.host_intfs[hname] = lname
         self.unet.rootcmd.cmd_raises(f"ip link set {hname} down ")
         self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
         self.cmd_raises(f"ip link set {hname} name {lname}")
         self.cmd_raises(f"ip link set {lname} up")
 
-    def rem_host_intf(self, hname, lname):
+    async def rem_host_intf(self, hname):
+        lname = self.host_intfs[hname]
         self.cmd_raises(f"ip link set {lname} down")
         self.cmd_raises(f"ip link set {lname} name {hname}")
         self.cmd_raises(f"ip link set {hname} netns 1")
         del self.host_intfs[hname]
+
+    async def add_phy_intf(self, devaddr, lname):
+        # raise NotImplementedError("add_phy_intf")
+        raise Exception("add_phy_intf")
+
+    async def rem_phy_intf(self, devaddr):
+        # raise NotImplementedError("rem_phy_intf")
+        raise Exception("rem_phy_intf")
 
     async def _async_delete(self):
         if type(self) == L3Node:  # pylint: disable=C0123
@@ -526,9 +582,12 @@ class L3Node(LinuxNamespace):
             await self.async_cleanup_cmd()
 
         # remove any hostintf interfaces
-        names = list((a, b) for a, b in self.host_intfs.items())
-        for pname, lname in names:
-            self.rem_host_intf(pname, lname)
+        for hname in list(self.host_intfs):
+            await self.rem_host_intf(hname)
+
+        # remove any hostintf interfaces
+        for devaddr in list(self.phy_intfs):
+            await self.rem_phy_intf(devaddr)
 
         # delete the LinuxNamespace/InterfaceMixin
         await super()._async_delete()
@@ -744,7 +803,6 @@ class L3ContainerNode(L3Node):
 
     async def run_cmd(self):
         """Run the configured commands for this node"""
-
         self.logger.debug("%s: starting container", self.name)
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
@@ -990,6 +1048,503 @@ class L3ContainerNode(L3Node):
         await super()._async_delete()
 
 
+class L3QemuVM(L3Node):
+    """
+    An container (podman) based L3Node.
+    """
+
+    def __init__(self, name, config, **kwargs):
+        """Create a Container Node."""
+        self.cont_exec_paths = {}
+        self.launch_p = None
+        self.qemu_config = config["qemu"]
+        self.extra_mounts = []
+        assert self.qemu_config
+        self.conrepl = None
+        self.monrepl = None
+        self.use_console = False
+        self.tapfds = {}
+        self.tapnames = {}
+        self.tapmacs = {}
+
+        super().__init__(name=name, config=config, **kwargs)
+
+        self.sockdir = os.path.join(self.rundir, "s")
+        self.bind_mount(self.sockdir, "/tmp/qemu-sock")
+
+        self.qemu_config = config_subst(
+            self.qemu_config,
+            name=self.name,
+            rundir=os.path.join(self.rundir, self.name),
+            configdir=self.unet.config_dirname,
+        )
+
+    @property
+    def is_vm(self):
+        return True
+
+    async def moncmd(self):
+        "Uses internal REPL to send cmmand to qemu monitor and get reply"
+
+    async def run_cmd(self):
+        """Run the configured commands for this node inside VM"""
+
+        self.logger.debug(
+            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
+        )
+
+        shell_cmd = self.config.get("shell", "/bin/bash")
+        if not isinstance(shell_cmd, str):
+            if shell_cmd:
+                shell_cmd = "/bin/bash"
+            else:
+                shell_cmd = ""
+
+        cmd = self.config.get("cmd", "").strip()
+        if not cmd:
+            return None
+
+        # See if we have a custom update for this `kind`
+        if kind := self.config.get("kind", None):
+            if kind in kind_run_cmd_update:
+                await kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
+
+        if shell_cmd:
+            cmd = cmd.rstrip()
+            cmd = f"#!{shell_cmd}\n" + cmd
+            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmd = cmd.replace("%RUNDIR%", self.rundir)
+            cmd = cmd.replace("%NAME%", self.name)
+            cmd += "\n"
+
+            # Write a copy to the rundir
+            cmdpath = os.path.join(self.rundir, "cmd.shebang")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(cmd)
+            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+
+            # Now write a copy inside the VM
+            self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF\n")
+            self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
+            cmds = "/tmp/cmd.shebang"
+        else:
+            cmds = cmds.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmds = cmds.replace("%RUNDIR%", self.rundir)
+            cmds = cmds.replace("%NAME%", self.name)
+
+        class future_proc:
+            """Treat awaitable minimally as a proc"""
+
+            def __init__(self, aw):
+                self.aw = aw
+                # XXX would be nice to have a real value here
+                self.returncode = 0
+
+            async def wait(self):
+                return await self.aw
+
+        self.cmd_p = future_proc(
+            self.conrepl.run_command(cmds, timeout=120, async_=True)
+        )
+        # output =
+        # stdout = open(os.path.join(self.rundir, "cmd.out"), "w")
+        # stdout.write(output)
+        # stdout.flush()
+        # self.pytest_hook_run_cmd(stdout, None)
+
+        return self.cmd_p
+
+    async def add_host_intf(self, hname, lname):
+        # L3QemuVM needs it's own add_host_intf for macvtap, We need to create the tap
+        # in the host then move that interface so that the ifindex/devfile are
+        # different.
+        self.host_intfs[hname] = lname
+
+        index = self.unet.tapcount
+        self.unet.tapcount = self.unet.tapcount + 1
+
+        tapname = f"tap{index}"
+        self.tapnames[hname] = tapname
+
+        mac = f"02:00:0a:00:0{index}:0{self.id}"
+        self.tapmacs[hname] = mac
+
+        self.unet.rootcmd.cmd_raises(
+            f"ip link add link {hname} name {tapname} type macvtap"
+        )
+        self.unet.rootcmd.cmd_raises(f"ip link set {tapname} address {mac} up")
+        ifindex = self.unet.rootcmd.cmd_raises(
+            f"cat /sys/class/net/{tapname}/ifindex"
+        ).strip()
+        # self.unet.rootcmd.cmd_raises(f"ip link set {tapname} netns {self.pid}")
+
+        tapfile = f"/dev/tap{ifindex}"
+        fd = os.open(tapfile, os.O_RDWR)
+        self.tapfds[hname] = fd
+        self.logger.info(
+            "%s: Add host intf: created macvtap interface %s (%s) on %s fd %s",
+            self,
+            tapname,
+            tapfile,
+            hname,
+            fd,
+        )
+
+    async def rem_host_intf(self, hname):
+        tapname = self.tapnames[hname]
+        self.unet.rootcmd.cmd_raises(f"ip link set {tapname} down")
+        self.unet.rootcmd.cmd_raises(f"ip link delete {tapname} type macvtap")
+        del self.tapnames[hname]
+        del self.host_intfs[hname]
+
+    async def add_phy_intf(self, devaddr, lname):
+        self.phy_intfs[devaddr] = lname
+
+        _, _, off, fun = parse_pciaddr(devaddr)
+        doffset = off * 8 + fun
+
+        index = self.unet.tapcount
+        self.unet.tapcount = self.unet.tapcount + 1
+
+        is_virtual = self.unet.rootcmd.path_exists(
+            f"/sys/bus/pci/devices/{devaddr}/physfn"
+        )
+        if is_virtual:
+            pfname = self.unet.rootcmd.cmd_raises(
+                f"ls -1 /sys/bus/pci/devices/{devaddr}/physfn/net"
+            ).strip()
+            pdevaddr = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/physfn")
+            _, _, poff, pfun = parse_pciaddr(pdevaddr)
+            poffset = poff * 8 + pfun
+
+            offset = read_int_value(
+                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_offset"
+            )
+            stride = read_int_value(
+                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_stride"
+            )
+            vf = (doffset - offset - poffset) // stride
+            mac = f"02:00:bb:00:0{index}:0{self.id}"
+            # Some devices require the parent to be up (e.g., ixbge)
+            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} up")
+            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} vf {vf} mac {mac}")
+            self.unet.rootcmd.cmd_status(f"ip link set {pfname} vf {vf} trust on")
+            self.tapmacs[devaddr] = mac
+
+        self.logger.info("Adding physical PCI device %s as %s", devaddr, lname)
+
+        # Get interface name and set to down if present
+        ec, ifname, _ = self.unet.rootcmd.cmd_status(
+            f"ls /sys/bus/pci/devices/{devaddr}/net/", warn=False
+        )
+        ifname = ifname.strip()
+        if not ec and ifname:
+            # XXX Should only do this is the device is up, and then likewise return it
+            # up on exit self.phy_intfs_hostname[devaddr] = ifname
+            self.logger.info(
+                "Setting physical PCI device %s named %s down", devaddr, ifname
+            )
+            self.unet.rootcmd.cmd_status(
+                f"ip link set {ifname} down 2> /dev/null || true"
+            )
+
+        # Get the current bound driver, and unbind
+        try:
+            driver = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/driver")
+            driver = driver.strip()
+        except Exception:
+            driver = ""
+        if driver:
+            if driver == "vfio-pci":
+                self.logger.info(
+                    "Physical PCI device %s already bound to vfio-pci", devaddr
+                )
+                return
+            self.logger.info(
+                "Unbinding physical PCI device %s from driver %s", devaddr, driver
+            )
+            self.phy_odrivers[devaddr] = driver
+            self.unet.rootcmd.cmd_raises(
+                f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/unbind"
+            )
+
+        # Add the device vendor and device id to vfio-pci in case it's the first time
+        vendor = read_str_value(f"/sys/bus/pci/devices/{devaddr}/vendor")
+        devid = read_str_value(f"/sys/bus/pci/devices/{devaddr}/device")
+        self.logger.info("Adding device IDs %s:%s to vfio-pci", vendor, devid)
+        ec, _, _ = self.unet.rootcmd.cmd_status(
+            f"echo {vendor} {devid} > /sys/bus/pci/drivers/vfio-pci/new_id", warn=False
+        )
+
+        if not self.unet.rootcmd.path_exists(f"/sys/bus/pci/driver/vfio-pci/{devaddr}"):
+            # Bind to vfio-pci if wasn't added with new_id
+            self.logger.info("Binding physical PCI device %s to vfio-pci", devaddr)
+            ec, _, _ = self.unet.rootcmd.cmd_status(
+                f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/bind"
+            )
+
+    async def rem_phy_intf(self, devaddr):
+        lname = self.phy_intfs.get(devaddr, "")
+        if lname:
+            del self.phy_intfs[devaddr]
+
+        # ifname = self.phy_intfs_hostname.get(devaddr, "")
+        # if ifname
+        #     del self.phy_intfs_hostname[devaddr]
+
+        driver = self.phy_odrivers.get(devaddr, "")
+        if not driver:
+            self.logger.info(
+                "Physical PCI device %s was bound to vfio-pci on entry", devaddr
+            )
+            return
+
+        self.logger.info(
+            "Unbinding physical PCI device %s from driver vfio-pci", devaddr
+        )
+        self.unet.rootcmd.cmd_status(
+            f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/unbind"
+        )
+
+        self.logger.info("Binding physical PCI device %s to driver %s", devaddr, driver)
+        ec, _, _ = self.unet.rootcmd.cmd_status(
+            f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/bind"
+        )
+        if not ec:
+            del self.phy_odrivers[devaddr]
+
+    async def create_tap(self, index, ifname):
+        mac = f"02:00:0a:00:0{index}:0{self.id}"
+        nic = "tap,model=virtio-net-pci"
+        # qemu -net nic,model=virtio,addr=1a:46:0b:ca:bc:7b -net tap,fd=3 3<>/dev/tap11
+        self.cmd_raises(f"ip address flush dev {ifname}")
+        self.cmd_raises(f"ip tuntap add tap{index} mode tap")
+        self.cmd_raises(f"ip link add name br{index} type bridge")
+        self.cmd_raises(f"ip link set dev {ifname} master br{index}")
+        self.cmd_raises(f"ip link set dev tap{index} master br{index}")
+        self.cmd_raises(f"ip link set dev tap{index} up")
+        self.cmd_raises(f"ip link set dev {ifname} up")
+        self.cmd_raises(f"ip link set dev br{index} up")
+        nic += f",ifname=tap{index},mac={mac},script=no,downscript=no"
+        return "-nic", nic
+
+    async def renumber_interfaces(self):
+        """Re-number the interfaces.
+
+        After VM comes up need to renumber the interfaces now on the inside.
+        """
+        self.logger.info("Renumbering interfaces")
+        con = self.conrepl
+        con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
+        for ifname, ifaddr in self.intf_addrs.items():
+            con.cmd_raises(f"ip link set {ifname} up")
+            con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
+
+            # # XXX
+            # if hasattr(switch, "is_nat") and switch.is_nat:
+            #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+
+    async def launch(self):
+        "Launch qemu"
+        self.logger.info("%s: Launch Qemu", self)
+
+        qc = self.qemu_config
+        args = [get_exec_path_host("qemu-system-x86_64"), "-nodefaults", "-boot", "c"]
+
+        if qc.get("kvm"):
+            args += ["-accel", "kvm", "-cpu", "host"]
+
+        if ncpu := qc.get("ncpu"):
+            args += ["-smp", f"{ncpu},sockets=1,cores={ncpu},threads=1"]
+
+        args.extend(["-m", str(qc.get("memory", "512M"))])
+
+        if "kernel" in qc:
+            args.extend(["-kernel", qc["kernel"]])
+        if "initrd" in qc:
+            args.extend(["-initrd", qc["initrd"]])
+
+        args.append("-append")
+        root = qc.get("root", "/dev/ram0")
+        append = f"root={root} rw console=ttyS0 console=ttyS1 console=ttyS2"
+        if "cmdline-extra" in qc:
+            append += f" {qc['cmdline-extra']}"
+        args.append(append)
+
+        if "extra-args" in qc:
+            if isinstance(qc["extra-args"], list):
+                args.extend(qc["extra-args"])
+            else:
+                args.extend(shlex.split(qc["extra-args"]))
+
+        # Walk the list of connections in order so we attach them the same way
+        pass_fds = []
+        nnics = 0
+        pciaddr = 3
+        for index, conn in enumerate(self.config["connections"]):
+            devaddr = conn.get("physical", "")
+            hostintf = conn.get("hostintf", "")
+            if devaddr:
+                # if devaddr in self.tapmacs:
+                #     mac = f",mac={self.tapmacs[devaddr]}"
+                # else:
+                #     mac = ""
+                args += ["-device", f"vfio-pci,host={devaddr},addr={pciaddr}"]
+            elif hostintf:
+                fd = self.tapfds[hostintf]
+                mac = self.tapmacs[hostintf]
+                args += [
+                    "-nic",
+                    f"tap,model=virtio-net-pci,mac={mac},fd={fd},addr={pciaddr}",
+                ]
+                pass_fds.append(fd)
+                nnics += 1
+            elif not hostintf:
+                tapargs = await self.create_tap(index, conn["name"])
+                tapargs[-1] += f",addr={pciaddr}"
+                args += tapargs
+                nnics += 1
+            pciaddr += 1
+        if not nnics:
+            args += ["-nic", "none"]
+
+        args += [
+            "-serial",
+            "stdio",
+            "-serial",
+            "unix:/tmp/qemu-sock/_console,server,nowait",
+            "-serial",
+            "unix:/tmp/qemu-sock/console,server,nowait",
+            "-monitor",
+            "unix:/tmp/qemu-sock/_monitor,server,nowait",
+            "-monitor",
+            "unix:/tmp/qemu-sock/monitor,server,nowait",
+            "-gdb",
+            "unix:/tmp/qemu-sock/gdbserver,server,nowait",
+            "-nographic",
+        ]
+
+        #
+        # Launch Qemu
+        #
+
+        stdout = open(os.path.join(self.rundir, "qemu.out"), "wb")
+        stderr = open(os.path.join(self.rundir, "qemu.err"), "wb")
+        self.launch_p = await self.async_popen(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            pass_fds=pass_fds,
+            # We don't need this here b/c we are only ever running podman and that's all
+            # we need to kill for cleanup
+            start_new_session=True,  # allows us to signal all children to exit
+        )
+
+        # We've passed these on, so don't need these open here anymore.
+        for fd in pass_fds:
+            os.close(fd)
+
+        self.logger.debug("%s: async_popen => %s", self, self.launch_p.pid)
+
+        #
+        # Connect to the console socket, retrying
+        #
+
+        timeout = Timeout(30)
+        sockpath = os.path.join(self.sockdir, "_console")
+        connected = False
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        while self.launch_p.returncode is None and not timeout.is_expired():
+            try:
+                sock.connect(sockpath)
+                connected = True
+                break
+            except Exception as error:
+                self.logger.debug("%s: trying to open console socket: %s", self, error)
+            elapsed = int(timeout.elapsed())
+            if elapsed <= 3:
+                await asyncio.sleep(0.25)
+            else:
+                self.logger.info(
+                    "%s: launch (qemu) taking more than %ss", self, elapsed
+                )
+                await asyncio.sleep(1)
+
+        if connected:
+            pass
+        elif self.launch_p.returncode is not None:
+            self.logger.warning(
+                "%s: launch (qemu) exited quickly (%ss) rc: %s",
+                self,
+                timeout.elapsed(),
+                self.launch_p.returncode,
+            )
+            raise Exception("Qemu launch exited early")
+        elif timeout.is_expired():
+            self.logger.critical(
+                "%s: timeout (%ss) waiting for qemu to start",
+                self,
+                timeout.elapsed(),
+            )
+            assert not timeout.is_expired()
+
+        self.conrepl = await self.console(sock, user="root", use_pty=False, trace=True)
+        self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
+
+        # Have standard commands begin to use the console
+        self.use_console = True
+
+        await self.renumber_interfaces()
+
+        self.pytest_hook_open_shell()
+
+        return self.launch_p
+
+    def launch_completed(self, future):
+        self.logger.debug("%s: launch (qemu) completed called", self)
+        try:
+            n = future.result()
+            self.logger.debug("%s: node launch (qemu) completed result: %s", self, n)
+            self.container_id = None
+        except asyncio.CancelledError as error:
+            self.logger.debug(
+                "%s: node launch (qemu) cmd wait() canceled: %s", future, error
+            )
+
+    async def cleanup_qemu(self):
+        "Launch qemu"
+        if self.launch_p:
+            await self.async_cleanup_proc(self.launch_p)
+
+    async def async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node"""
+
+        self.cleanup_called = True
+
+        if not self.launch_p:
+            self.logger.warning("async_cleanup_cmd: qemu no longer running")
+            return
+
+        return await self._async_cleanup_cmd()
+
+    async def _async_delete(self):
+        if type(self) == L3QemuVM:  # pylint: disable=C0123
+            self.logger.info("%s: deleting", self)
+        else:
+            self.logger.debug("%s: L3QemuVM _async_delete", self)
+
+        try:
+            if not self.launch_p:
+                self.logger.warning("async_delete: qemu is not running")
+            else:
+                await self.cleanup_qemu()
+        except Exception as error:
+            self.logger.warning("%s: failued to cleanup qemu process: %s", self, error)
+
+        await super()._async_delete()
+
+
 class Munet(BaseMunet):
     """
     Munet.
@@ -999,6 +1554,7 @@ class Munet(BaseMunet):
         super().__init__(**kwargs)
 
         self.built = False
+        self.tapcount = 0
 
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
@@ -1127,6 +1683,10 @@ class Munet(BaseMunet):
         topoconf = self.topoconf
         autonumber = self.autonumber
 
+        # ---------------------------------------------
+        # Merge Kinds and perform variable substitution
+        # ---------------------------------------------
+
         kinds = self.config.get("kinds", {})
 
         for name, conf in config_to_dict_with_key(topoconf, "networks", "name").items():
@@ -1151,6 +1711,10 @@ class Munet(BaseMunet):
             conf = config_subst(conf, name=name, rundir=os.path.join(self.rundir, name))
             topoconf["nodes"][name] = conf
             self.add_l3_node(name, conf, logger=logger)
+
+        # ------------------
+        # Create connections
+        # ------------------
 
         # Go through all connections and name them so they are sane to the user
         # otherwise when we do p2p links the names/ords skip around based oddly
@@ -1184,12 +1748,12 @@ class Munet(BaseMunet):
                 if to in self.switches:
                     switch = self.switches[to]
                     swconf = find_matching_net_config(name, cconf, switch.config)
-                    self.add_native_link(switch, node, swconf, cconf)
+                    await self.add_native_link(switch, node, swconf, cconf)
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.
                     other = self.hosts[to]
                     oconf = find_matching_net_config(name, cconf, other.config)
-                    self.add_native_link(node, other, cconf, oconf)
+                    await self.add_native_link(node, other, cconf, oconf)
 
     @property
     def autonumber(self):
@@ -1199,7 +1763,7 @@ class Munet(BaseMunet):
     def autonumber(self, value):
         self.topoconf["networks-autonumber"] = bool(value)
 
-    def add_native_link(self, node1, node2, c1=None, c2=None):
+    async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
         isp2p = False
 
@@ -1229,9 +1793,10 @@ class Munet(BaseMunet):
         do_add_link = True
         for n, c in ((node1, c1), (node2, c2)):
             if "hostintf" in c:
-                n.add_host_intf(c["hostintf"], c["name"])
+                await n.add_host_intf(c["hostintf"], c["name"])
                 do_add_link = False
             elif "physical" in c:
+                await n.add_phy_intf(c["physical"], c["name"])
                 do_add_link = False
         if do_add_link:
             assert "hostintf" not in c1
@@ -1245,9 +1810,9 @@ class Munet(BaseMunet):
         else:
             node2.set_lan_addr(node1, c2)
 
-        if "physical" not in c1:
+        if "physical" not in c1 and not node1.is_vm:
             node1.set_intf_constraints(if1, **c1)
-        if "physical" not in c2:
+        if "physical" not in c2 and not node2.is_vm:
             node2.set_intf_constraints(if2, **c2)
 
     def add_l3_node(self, name, config=None, **kwargs):
@@ -1255,6 +1820,8 @@ class Munet(BaseMunet):
 
         if config and config.get("image"):
             cls = L3ContainerNode
+        elif config and config.get("qemu"):
+            cls = L3QemuVM
         else:
             cls = L3Node
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
@@ -1269,6 +1836,9 @@ class Munet(BaseMunet):
 
     async def run(self):
         tasks = []
+
+        launch_nodes = [x for x in self.hosts.values() if hasattr(x, "launch")]
+        launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
 
         run_nodes = [x for x in self.hosts.values() if hasattr(x, "run_cmd")]
         run_nodes = [
@@ -1290,6 +1860,16 @@ class Munet(BaseMunet):
                     title=f"cap:{pcap}",
                 )
 
+        # launch first
+        await asyncio.gather(*[x.launch() for x in launch_nodes])
+        for node in launch_nodes:
+            task = asyncio.create_task(
+                node.launch_p.wait(), name=f"Node-{node.name}-launch"
+            )
+            task.add_done_callback(node.launch_completed)
+            tasks.append(task)
+
+        # the run
         await asyncio.gather(*[x.run_cmd() for x in run_nodes])
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
@@ -1317,6 +1897,8 @@ class Munet(BaseMunet):
                 print("^C...continuing")
             except Exception as error:
                 self.logger.error("\n...continuing after error: %s", error)
+
+        # XXX should we cancel launch and run tasks?
 
         await super()._async_delete()
 
