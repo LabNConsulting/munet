@@ -23,6 +23,7 @@ import logging
 
 from collections.abc import Iterable
 from copy import deepcopy
+from typing import overload
 
 
 def find_with_kv(lst, k, v):
@@ -79,7 +80,17 @@ def config_to_dict_with_key(c, ck, k):
     return c[ck]
 
 
-def config_subst(config, **kwargs):
+@overload
+def config_subst(config: str, **kwargs) -> str:
+    ...
+
+
+@overload
+def config_subst(config: Iterable, **kwargs) -> Iterable:
+    ...
+
+
+def config_subst(config: Iterable, **kwargs) -> Iterable:
     if isinstance(config, str):
         if "%RUNDIR%/%NAME%" in config:
             config = config.replace("%RUNDIR%/%NAME%", "%RUNDIR%")

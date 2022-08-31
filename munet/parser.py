@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 "A module that implements the standalone parser."
+import asyncio
 import importlib.resources
 import json
 import logging
@@ -41,14 +42,11 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
 
     if not pathname:
         for d in search:
-            logf(
-                "%s",
-                'searching in "{}" for "{}".{{yaml, toml, json}}'.format(d, basename),
-            )
+            logf("%s", f'searching in "{d}" for "{basename}".{{yaml, toml, json}}')
             for ext in ("yaml", "toml", "json"):
                 pathname = os.path.join(d, basename + "." + ext)
                 if os.path.exists(pathname):
-                    logf("%s", 'Found "{}"'.format(pathname))
+                    logf("%s", f'Found "{pathname}"')
                     break
             else:
                 continue
@@ -65,7 +63,7 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
             for d in search:
                 if os.path.exists(os.path.join(d, pathname)):
                     pathname = os.path.join(d, pathname)
-                    logf("%s", 'Found "{}"'.format(pathname))
+                    logf("%s", f'Found "{pathname}"')
                     break
                 continue
             else:
@@ -178,12 +176,12 @@ def load_kinds(args):
     if args:
         os.chdir(args.rundir)
 
+    args_config = args.kinds_config if args else None
     try:
         search = [old]
         with importlib.resources.path("munet", "kinds.yaml") as datapath:
             search.append(str(datapath.parent))
 
-        args_config = args.kinds_config if args else None
         config = get_config(args_config, "kinds", search)
 
         if config is not None:
@@ -201,7 +199,9 @@ def load_kinds(args):
             os.chdir(old)
 
 
-def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfig=None):
+async def async_build_topology(
+    config=None, logger=None, rundir=None, args=None, pytestconfig=None
+):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
@@ -223,6 +223,12 @@ def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfi
         unshare_inline=args.unshare_inline if args else True,
         logger=logger,
     )
+    try:
+        await unet._async_build(logger)  # pylint: disable=W0212
+    except Exception as error:
+        logging.critical("Failure building munet topology: %s", error, exc_info=True)
+        await unet.async_delete()
+        raise
 
     topoconf = config.get("topology")
     if not topoconf:
@@ -236,3 +242,7 @@ def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfi
         json.dump(unet.config, f, indent=2)
 
     return unet
+
+
+def build_topology(config=None, logger=None, rundir=None, args=None, pytestconfig=None):
+    return asyncio.run(async_build_topology(config, logger, rundir, args, pytestconfig))

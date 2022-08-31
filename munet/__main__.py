@@ -62,8 +62,13 @@ async def run_and_wait(args, unet):
     await task
 
 
-async def async_main(args, unet):
+async def async_main(args, config):
     status = 3
+
+    # Setup the namespaces and network addressing.
+    unet = await parser.async_build_topology(config, rundir=args.rundir, args=args)
+    logger.info("Topology up: rundir: %s", unet.rundir)
+
     try:
         status = await run_and_wait(args, unet)
     except KeyboardInterrupt:
@@ -156,6 +161,7 @@ def main(*args):
     os.environ["MUNET_RUNDIR"] = rundir
 
     parser.setup_logging(args)
+
     global logger  # pylint: disable=W0603
     logger = logging.getLogger("main")
 
@@ -169,17 +175,12 @@ def main(*args):
         cleanup_previous()
 
     status = 4
-    unet = None
     try:
         if args.validate_only:
             return parser.validate_config(config, logger, args)
 
-        # Setup the namespaces and network addressing.
-        unet = parser.build_topology(config, rundir=args.rundir, args=args)
-        logger.info("Topology up: rundir: %s", unet.rundir)
-
         # Executes the cmd for each node.
-        status = asyncio.run(async_main(args, unet))
+        status = asyncio.run(async_main(args, config))
     except KeyboardInterrupt:
         logger.info("Exiting, received KeyboardInterrupt in main")
     except Exception as error:

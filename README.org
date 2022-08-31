@@ -55,6 +55,8 @@ module: labn-munet-config
   |  |  +--rw to                    string
   |  |  +--rw ip?                   string
   |  |  +--rw name?                 string
+  |  |  +--rw hostintf?             string
+  |  |  +--rw physical?             string
   |  |  +--rw remote-name?          string
   |  |  +--rw delay?                uint64
   |  |  +--rw jitter?               uint64
@@ -98,6 +100,8 @@ module: labn-munet-config
   |     |  +--rw to                    string
   |     |  +--rw ip?                   string
   |     |  +--rw name?                 string
+  |     |  +--rw hostintf?             string
+  |     |  +--rw physical?             string
   |     |  +--rw remote-name?          string
   |     |  +--rw delay?                uint64
   |     |  +--rw jitter?               uint64
@@ -264,6 +268,14 @@ module: labn-munet-config
         leaf name {
           type string;
           description "Name for the connection (interface name).";
+        }
+        leaf hostintf {
+          type string;
+          description "Host interface name for wired connections";
+        }
+        leaf physical {
+          type string;
+          description "Physical interface name for wired connections";
         }
         leaf remote-name {
           type string;

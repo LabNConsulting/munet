@@ -857,8 +857,27 @@ class Commander:  # pylint: disable=R0904
         "Calls self.async_delete within an exec loop"
         asyncio.run(self.async_delete())
 
-    async def async_delete(self):
+    async def _async_delete(self):
+        """Delete this objects resources.
+
+        This is the actual implementation of the resource cleanup, each class
+        should cleanup it's own resources, generally catching and reporting,
+        but not reraising any exceptions for it's own cleanup, then it should
+        invoke `super()._async_delete() without catching any exceptions raised
+        therein. See other examples in `base.py` or `native.py`
+        """
         self.logger.info("%s: deleted", self)
+
+    async def async_delete(self):
+        """Delete the Commander (or derived object)
+
+        The actual implementation for any class should be in `_async_delete`
+        new derived classes should look at the documentation for that function.
+        """
+        try:
+            await self._async_delete()
+        except Exception as error:
+            self.logger.error("%s: error while deleting: %s", self, error)
 
 
 class InterfaceMixin:
@@ -1454,7 +1473,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
             )
         return None
 
-    async def async_delete(self):
+    async def _async_delete(self):
         if type(self) == LinuxNamespace:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
         else:
@@ -1517,7 +1536,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         self.set_pre_cmd(["/bin/false"])
 
-        await super().async_delete()
+        await super()._async_delete()
 
 
 class SharedNamespace(Commander):
@@ -1593,7 +1612,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         self.logger.debug("%s: Created, Running", self)
 
-    async def async_delete(self):
+    async def _async_delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
         if type(self) == Bridge:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
@@ -1620,8 +1639,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
                 self.name,
                 cmd_error(rc, o, e),
             )
-
-        await super().async_delete()
+        await super()._async_delete()
 
 
 class BaseMunet(LinuxNamespace):
@@ -1740,9 +1758,9 @@ class BaseMunet(LinuxNamespace):
             rifname = "i1{:x}".format(host.pid)
 
             if len(if1) > 16:
-                logging.error('"%s" len %s > 16', if1, len(if1))
+                self.logger.error('"%s" len %s > 16', if1, len(if1))
             elif len(if2) > 16:
-                logging.error('"%s" len %s > 16', if2, len(if2))
+                self.logger.error('"%s" len %s > 16', if2, len(if2))
             assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
@@ -1811,7 +1829,7 @@ class BaseMunet(LinuxNamespace):
     def _delete_links(self):
         return asyncio.gather(*[self._delete_link(x) for x in self.links])
 
-    async def async_delete(self):
+    async def _async_delete(self):
         """Delete the munet topology."""
         if type(self) == BaseMunet:  # pylint: disable=C0123
             self.logger.info("%s: deleting.", self)
@@ -1839,17 +1857,30 @@ class BaseMunet(LinuxNamespace):
         self.hosts = {}
         self.switches = {}
 
-        if self.cli_server:
-            self.cli_server.cancel()
-            self.cli_server = None
-        if self.cli_sockpath:
-            await self.async_cmd_status("rm -rf " + os.path.dirname(self.cli_sockpath))
-            self.cli_sockpath = None
-        if self.cli_histfile:
-            readline.write_history_file(self.cli_histfile)
-            self.cli_histfile = None
+        try:
+            if self.cli_server:
+                self.cli_server.cancel()
+                self.cli_server = None
+            if self.cli_sockpath:
+                await self.async_cmd_status(
+                    "rm -rf " + os.path.dirname(self.cli_sockpath)
+                )
+                self.cli_sockpath = None
+        except Exception as error:
+            self.logger.error(
+                "%s: error cli server or sockpaths: %s", self, error, exc_info=True
+            )
 
-        await super().async_delete()
+        try:
+            if self.cli_histfile:
+                readline.write_history_file(self.cli_histfile)
+                self.cli_histfile = None
+        except Exception as error:
+            self.logger.error(
+                "%s: error saving history file: %s", self, error, exc_info=True
+            )
+
+        await super()._async_delete()
 
 
 BaseMunet.g_unet = None

@@ -824,6 +824,8 @@ async def async_cli(
             await cli_client(sockpath, prompt)
         else:
             await local_cli(unet, sys.stdout, prompt, histfile, background)
+    except KeyboardInterrupt:
+        print("\n...^C exiting CLI")
     except EOFError:
         pass
     except Exception as ex:

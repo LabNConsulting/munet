@@ -123,12 +123,11 @@ def pytest_configure(config):
         b = config.getoption(winopt)
         if b and xdist_no_windows:
             pytest.exit(
-                "{} use requires byobu/TMUX/XTerm under dist {}".format(
-                    winopt, os.environ["PYTEST_XDIST_MODE"]
-                )
+                f"{winopt} use requires byobu/TMUX/XTerm "
+                f"under dist {os.environ['PYTEST_XDIST_MODE']}"
             )
         elif b and not is_xdist and not have_windows:
-            pytest.exit("{} use requires byobu/TMUX/SCREEN/XTerm".format(winopt))
+            pytest.exit(f"{winopt} use requires byobu/TMUX/SCREEN/XTerm")
 
 
 def pytest_runtest_makereport(item, call):
@@ -136,9 +135,11 @@ def pytest_runtest_makereport(item, call):
 
     isatty = sys.stdout.isatty()
     pause = bool(item.config.getoption("--pause"))
+    skipped = False
     if call.excinfo is None:
         error = False
     elif call.excinfo.typename == "Skipped":
+        skipped = True
         error = False
         pause = False
     else:
@@ -169,11 +170,22 @@ def pytest_runtest_makereport(item, call):
             cli(BaseMunet.g_unet)
 
     if pause:
-        if call.when == "setup":
-            pause_test(f"before test '{item.nodeid}'")
-        elif call.when == "teardown":
+        if skipped:
+            item.skip_more_pause = True
+        elif hasattr(item, "skip_more_pause"):
+            pass
+        elif call.when == "setup":
+            if error:
+                item.skip_more_pause = True
+            else:
+                pause_test(f"before test '{item.nodeid}'")
+        # check for a result to try and catch setup (or module setup) failure
+        # e.g., after a module level fixture fails, we do not want to pause on every
+        # skipped test.
+        elif call.when == "teardown" and call.result:
             pause_test(f"after test '{item.nodeid}'")
         elif error:
+            item.skip_more_pause = True
             print(f"\nPAUSE-ON-ERROR: {call.excinfo.typename}")
             print(f"PAUSE-ON-ERROR:\ntest {modname}/{item.name} failed: {exval}")
             if hasattr(exval, "stdout") and exval.stdout:

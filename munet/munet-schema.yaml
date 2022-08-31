@@ -30,6 +30,10 @@ $defs:
               type: string
             to:
               type: string
+            hostintf:
+              type: string
+            physical:
+              type: string
             ip:
               type: string
             remote-name:

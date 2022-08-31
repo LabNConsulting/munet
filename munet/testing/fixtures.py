@@ -37,7 +37,7 @@ from munet.base import Bridge
 from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
 from munet.native import L3Node
-from munet.parser import build_topology
+from munet.parser import async_build_topology
 from munet.parser import get_config
 from munet.testing.util import async_pause_test
 from munet.testing.util import pause_test
@@ -136,9 +136,18 @@ def rundir_module():
 @pytest.fixture(scope="module")
 async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
     # Reset the class variables so auto number is predictable
-    _unet = build_topology(rundir=rundir_module, pytestconfig=pytestconfig)
-    tasks = await _unet.run()
-    logging.debug("conftest: containers running")
+    try:
+        _unet = await async_build_topology(
+            rundir=rundir_module, pytestconfig=pytestconfig
+        )
+        tasks = await _unet.run()
+        logging.debug("conftest: unet running")
+    except Exception as error:
+        logging.debug("conftest: unet build/run failed: %s", error)
+        pytest.skip(
+            f"conftest: unet build/run failed: {error}", allow_module_level=True
+        )
+        raise
 
     yield _unet
 
@@ -253,13 +262,13 @@ async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
         def test_example(unet_perfunc)
     """
     if hasattr(request, "param"):
-        _unet = build_topology(
+        _unet = await async_build_topology(
             config=get_config(basename=request.param),
             rundir=rundir,
             pytestconfig=pytestconfig,
         )
     else:
-        _unet = build_topology(rundir=rundir, pytestconfig=pytestconfig)
+        _unet = await async_build_topology(rundir=rundir, pytestconfig=pytestconfig)
     tasks = await _unet.run()
     logging.debug("conftest: containers running")
 

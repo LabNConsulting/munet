@@ -31,6 +31,7 @@ import subprocess
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
+from .base import Commander
 from .base import LinuxNamespace
 from .base import Timeout
 from .base import _async_get_exec_path
@@ -126,11 +127,11 @@ class L3Bridge(Bridge):
                 f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
             )
 
-    async def async_delete(self):
+    async def _async_delete(self):
         if type(self) == L3Bridge:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
         else:
-            self.logger.debug("%s: L3Bridge sub-class async_delete", self)
+            self.logger.debug("%s: L3Bridge sub-class _async_delete", self)
 
         if self.config.get("nat", False):
             self.cmd_status(
@@ -138,7 +139,7 @@ class L3Bridge(Bridge):
                 f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
             )
 
-        await super().async_delete()
+        await super()._async_delete()
 
 
 class L3Node(LinuxNamespace):
@@ -167,6 +168,8 @@ class L3Node(LinuxNamespace):
         assert unet is not None
         self.unet = unet
         self.cleanup_called = False
+
+        self.host_intfs = {}
 
         self.intf_tc_count = 0
 
@@ -482,7 +485,8 @@ class L3Node(LinuxNamespace):
             ifname = cconf["name"]
             self.intf_addrs[ifname] = ipaddr
             self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
-            self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+            if "physical" not in cconf:
+                self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
         if oipaddr:
             oifname = occonf["name"]
@@ -490,19 +494,44 @@ class L3Node(LinuxNamespace):
             self.logger.debug(
                 "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
             )
-            other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
+            if "physical" not in occonf:
+                other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
-    async def async_delete(self):
+    def add_host_intf(self, hname, lname):
+        self.host_intfs[hname] = lname
+        self.unet.rootcmd.cmd_raises(f"ip link set {hname} down ")
+        self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
+        self.cmd_raises(f"ip link set {hname} name {lname}")
+        self.cmd_raises(f"ip link set {lname} up")
+
+    def rem_host_intf(self, hname, lname):
+        self.cmd_raises(f"ip link set {lname} down")
+        self.cmd_raises(f"ip link set {lname} name {hname}")
+        self.cmd_raises(f"ip link set {hname} netns 1")
+        del self.host_intfs[hname]
+
+    async def _async_delete(self):
         if type(self) == L3Node:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
             self.logger.info("%s: deleting", self)
         else:
-            self.logger.debug("%s: L3Node sub-class async_delete", self)
+            self.logger.debug("%s: L3Node sub-class _async_delete", self)
+
+        # First terminate any still running "cmd:"
         await self.async_cleanup_proc(self.cmd_p)
+
+        # Next call users "cleanup_cmd:"
         if not self.cleanup_called:
             await self.async_cleanup_cmd()
-        await super().async_delete()
+
+        # remove any hostintf interfaces
+        names = list((a, b) for a, b in self.host_intfs.items())
+        for pname, lname in names:
+            self.rem_host_intf(pname, lname)
+
+        # delete the LinuxNamespace/InterfaceMixin
+        await super()._async_delete()
 
 
 class L3ContainerNode(L3Node):
@@ -914,7 +943,7 @@ class L3ContainerNode(L3Node):
                 "%s: node container cmd wait() canceled: %s", future, error
             )
 
-    async def async_delete(self):
+    async def _async_delete(self):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
@@ -923,7 +952,12 @@ class L3ContainerNode(L3Node):
             self.logger.debug("%s: L3ContainerNode delete", self)
 
         if contid := self.container_id:
-            await self.async_cleanup_cmd()
+            try:
+                await self.async_cleanup_cmd()
+            except Exception as error:
+                self.logger.error(
+                    "%s: error saving history file: %s", self, error, exc_info=True
+                )
 
             o = ""
             e = ""
@@ -953,7 +987,7 @@ class L3ContainerNode(L3Node):
             # keeps us from cleaning up twice
             self.container_id = None
 
-        await super().async_delete()
+        await super()._async_delete()
 
 
 class Munet(BaseMunet):
@@ -963,6 +997,8 @@ class Munet(BaseMunet):
 
     def __init__(self, rundir=None, config=None, pytestconfig=None, **kwargs):
         super().__init__(**kwargs)
+
+        self.built = False
 
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
@@ -979,6 +1015,15 @@ class Munet(BaseMunet):
             self.config_dirname = ""
 
         self.pytest_config = pytestconfig
+
+        # We need some way to actually get back to the root namespace
+        if not self.isolated:
+            self.rootcmd = commander
+        else:
+            self.rootcmd = Commander("host")
+            self.rootcmd.set_pre_cmd(
+                ["/usr/bin/nsenter", *self.a_flags, "-t", "1", "-F"]
+            )
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
@@ -1071,9 +1116,13 @@ class Munet(BaseMunet):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
-        self._build_topology(kwargs.get("logger"))
+    async def _async_build(self, logger=None):
+        """Build the topology based on config"""
 
-    def _build_topology(self, logger):
+        if self.built:
+            self.logger.warning("%s: is already built", self)
+            return
+
         # Allow for all networks to be auto-numbered
         topoconf = self.topoconf
         autonumber = self.autonumber
@@ -1113,10 +1162,10 @@ class Munet(BaseMunet):
             for cconf in nconf["connections"]:
                 # Replace string only with a dictionary
                 if isinstance(cconf, str):
-                    cconf = cconf.split(":", 1)
-                    cconf = {"to": cconf[0]}
-                    if len(cconf) == 2:
-                        cconf["name"] = cconf[1]
+                    splitconf = cconf.split(":", 1)
+                    cconf = {"to": splitconf[0]}
+                    if len(splitconf) == 2:
+                        cconf["name"] = splitconf[1]
                 # Allocate a name if not already assigned
                 if "name" not in cconf:
                     cconf["name"] = node.get_next_intf_name()
@@ -1177,15 +1226,29 @@ class Munet(BaseMunet):
             c2["name"] = node2.get_next_intf_name()
         if2 = c2["name"]
 
-        super().add_link(node1, node2, if1, if2)
+        do_add_link = True
+        for n, c in ((node1, c1), (node2, c2)):
+            if "hostintf" in c:
+                n.add_host_intf(c["hostintf"], c["name"])
+                do_add_link = False
+            elif "physical" in c:
+                do_add_link = False
+        if do_add_link:
+            assert "hostintf" not in c1
+            assert "hostintf" not in c2
+            assert "physical" not in c1
+            assert "physical" not in c2
+            super().add_link(node1, node2, if1, if2)
 
         if isp2p:
             node1.set_p2p_addr(node2, c1, c2)
         else:
             node2.set_lan_addr(node1, c2)
 
-        node1.set_intf_constraints(if1, **c1)
-        node2.set_intf_constraints(if2, **c2)
+        if "physical" not in c1:
+            node1.set_intf_constraints(if1, **c1)
+        if "physical" not in c2:
+            node2.set_intf_constraints(if2, **c2)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
@@ -1234,7 +1297,7 @@ class Munet(BaseMunet):
             tasks.append(task)
         return tasks
 
-    async def async_delete(self):
+    async def _async_delete(self):
         from munet.testing.util import async_pause_test  # pylint: disable=C0415
 
         if type(self) == Munet:  # pylint: disable=C0123
@@ -1252,8 +1315,10 @@ class Munet(BaseMunet):
                 await async_pause_test("Before MUNET delete")
             except KeyboardInterrupt:
                 print("^C...continuing")
+            except Exception as error:
+                self.logger.error("\n...continuing after error: %s", error)
 
-        await super().async_delete()
+        await super()._async_delete()
 
 
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
