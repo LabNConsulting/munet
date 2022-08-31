@@ -58,8 +58,8 @@ async def test_basic_ping(rundir):
     r3 = unet.add_l3_node("r3")
 
     sw1 = unet.add_network("sw1", {"ip": "auto"})
-    unet.add_native_link(sw1, r1)
-    unet.add_native_link(sw1, r2)
+    await unet.add_native_link(sw1, r1)
+    await unet.add_native_link(sw1, r2)
 
     #
     # L3 API w/ delay constraint
@@ -68,7 +68,7 @@ async def test_basic_ping(rundir):
     ci1 = {"name": ifname, "delay": 80000}
     ci2 = {"name": ifname, "delay": 40000}
     exp_avg = (ci1["delay"] + ci2["delay"]) / 1000
-    unet.add_native_link(r2, r3, ci1, ci2)
+    await unet.add_native_link(r2, r3, ci1, ci2)
 
     avg = await ping_average_rtt(r2, r3, ifname)
     logging.info("ping average RTT: %s", avg)
@@ -93,7 +93,7 @@ async def test_basic_ping(rundir):
     ifname = "p2p2"
     ci1 = {"name": ifname, "delay": 1, "loss": 30, "loss-correlation": 0}
     ci2 = {"name": ifname}
-    unet.add_native_link(r2, r3, ci1, ci2)
+    await unet.add_native_link(r2, r3, ci1, ci2)
 
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)

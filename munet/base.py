@@ -28,6 +28,7 @@ import re
 import readline
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,7 @@ from munet import unshare
 try:
     import pexpect
 
+    from pexpect.fdpexpect import fdspawn
     from pexpect.popen_spawn import PopenSpawn
     from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
     from pexpect.replwrap import PEXPECT_PROMPT
@@ -221,6 +223,10 @@ class Commander:  # pylint: disable=R0904
         super().__init__()
 
     @property
+    def is_vm(self):
+        return False
+
+    @property
     def is_container(self):
         return False
 
@@ -388,6 +394,7 @@ class Commander:  # pylint: disable=R0904
         expects=(),
         sends=(),
         use_pty=False,
+        logfile=None,
         logfile_read=None,
         logfile_send=None,
         trace=None,
@@ -414,16 +421,33 @@ class Commander:  # pylint: disable=R0904
             subprocess.CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
-        p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
-        p.logfile_read = logfile_read
-        p.logfile_send = logfile_send
+
+        if isinstance(cmd, socket.socket):
+            defaults = {}
+            defaults.update(kwargs)
+            if "encoding" not in defaults:
+                defaults["encoding"] = "utf-8"
+                if "codec_errors" not in defaults:
+                    defaults["codec_errors"] = "ignore"
+            p = fdspawn(cmd, **defaults)
+            ac = "*socket*"
+        else:
+            p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
+
+        if logfile:
+            p.logfile = logfile
+        if logfile_read:
+            p.logfile_read = logfile_read
+        if logfile_send:
+            p.logfile_send = logfile_send
 
         # for spawned shells (i.e., a direct command an not a console)
         # this is wrong and will cause 2 prompts
         if not use_pty:
             p.echo = False
             p.isalive = lambda: p.proc.poll() is None
-            p.close = p.wait
+            if not hasattr(p, "close"):
+                p.close = p.wait
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
@@ -496,8 +520,6 @@ class Commander:  # pylint: disable=R0904
         sends=(),
         noecho=False,
         use_pty=False,
-        logfile_read=None,
-        logfile_send=None,
         **kwargs,
     ):
         """
@@ -516,7 +538,12 @@ class Commander:  # pylint: disable=R0904
         """
         prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
         p = self.spawn(
-            cmd, prompt, expects, sends, use_pty, logfile_read, logfile_send, **kwargs
+            cmd,
+            prompt,
+            expects=expects,
+            sends=sends,
+            use_pty=use_pty,
+            **kwargs,
         )
 
         ps1 = PEXPECT_PROMPT
