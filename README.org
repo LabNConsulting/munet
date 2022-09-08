@@ -253,6 +253,39 @@ module: labn-munet-config
         type string;
         description "Shell command[s] to execute when deleting the node.";
       }
+      leaf image {
+        type string;
+        description "Container image specification.";
+      }
+      container qemu {
+        description "Specify parameters for Qemu VM node";
+        leaf kerenel {
+          type string;
+          description "path to kernel image (e.g,. bzImage) to boot";
+        }
+        leaf initrd {
+          type string;
+          description "path to initrd image (e.g,. rootfs.ext2) to boot";
+        }
+        leaf memory {
+          type string;
+          default "512M";
+          description "ammount of memory for VM.";
+        }
+        leaf root {
+          type string;
+          default "/dev/ram0";
+          description "root file system passed in cmdline as root=<value>";
+        }
+        leaf cmdline-extra {
+          type string;
+          description "string to add to the kernel cmdline (qemu -append)";
+        }
+        leaf extra-args {
+          type string;
+          description "extra qemu args passed when launching";
+        }
+      }
       list connections {
         key to;
         description "Connections to other networks or nodes from this node";
@@ -299,10 +332,6 @@ module: labn-munet-config
           type string;
           description "Environment variable value.";
         }
-      }
-      leaf image {
-        type string;
-        description "Container image specification.";
       }
       leaf init {
         type union {
