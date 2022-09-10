@@ -46,9 +46,9 @@ try:
     from pexpect.replwrap import PEXPECT_PROMPT
     from pexpect.replwrap import REPLWrapper
 
-    have_repl_wrapper = True
+    have_pexpect = True
 except ImportError:
-    have_repl_wrapper = False
+    have_pexpect = False
 
 
 root_hostname = subprocess.check_output("hostname")
@@ -404,7 +404,7 @@ class Commander:  # pylint: disable=R0904
         Create a spawned send/expect process.
 
         Args:
-            cmd - list of args to exec/popen with
+            cmd - list of args to exec/popen with, or an already open socket
             spawned_re - what to look for to know when done, `spawn` returns when seen
             expects - a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
@@ -423,6 +423,7 @@ class Commander:  # pylint: disable=R0904
         """
 
         if isinstance(cmd, socket.socket):
+            assert not use_pty
             defaults = {}
             defaults.update(kwargs)
             if "encoding" not in defaults:
@@ -451,14 +452,12 @@ class Commander:  # pylint: disable=R0904
             p.isalive = lambda: p.proc.poll() is None
             if not hasattr(p, "close"):
                 p.close = p.wait
+        else:
+            if not p.getecho():
+                p.setecho(True)
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
-        self.logger.debug("%s: debug timeout STOPPED", self)
-        index = p.expect([pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
-        self.logger.debug("%s: got deubg quick index: '%s'", self, index)
-
-        self.logger.debug("%s: quick check for spawned_re: %s", self, spawned_re)
         index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
         if index == 0:
             assert p.match is not None
@@ -521,7 +520,6 @@ class Commander:  # pylint: disable=R0904
         prompt,
         expects=(),
         sends=(),
-        noecho=False,
         use_pty=False,
         **kwargs,
     ):
@@ -529,7 +527,7 @@ class Commander:  # pylint: disable=R0904
         Create a shell REPL (read-eval-print-loop).
 
         Args:
-            cmd - shell and list of args to popen with
+            cmd - shell and list of args to popen with, or an already open socket
             prompt - the REPL prompt to look for, the function returns when seen
             expects - a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
@@ -537,9 +535,12 @@ class Commander:  # pylint: disable=R0904
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+
             **kwargs - kwargs passed on the _spawn.
         """
         prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
+
+        assert not isinstance(cmd, socket.socket) or not use_pty
         p = self.spawn(
             cmd,
             prompt,
@@ -557,9 +558,12 @@ class Commander:  # pylint: disable=R0904
         ps2p = ps2[:5] + "${UNSET_V}" + ps2[5:]
 
         pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
-        p.send(pchg)
         return ShellWrapper(
-            p, ps1, None, extra_init_cmd="export PAGER=cat", noecho=noecho
+            p,
+            ps1,
+            prompt_change=pchg,
+            echo_is_off=not use_pty,
+            extra_init_cmd="export PAGER=cat",
         )
 
     def popen(self, cmd, **kwargs):
@@ -1916,23 +1920,161 @@ class BaseMunet(LinuxNamespace):
 BaseMunet.g_unet = None
 
 
-#
-# Extra Functional REPLWrapper from pexpect
-#
-if have_repl_wrapper:
+if have_pexpect:
 
-    class ShellWrapper(REPLWrapper):
+    class ShellWrapper:
         """
-        REPLWrapper - a read-execute-print-loop interface
+        Create a wrapper around a read-eval-print-loop interface
+
+        Args:
+            child - an expect based child.
+            prompt - the REPL prompt to look for at the end of commands.
+            prompt_change - command to send to child to set the `prompt`.
+            echo_is_off - True if echo of sent command is disabled in the child.
+            extra_init_cmd - command to send after standard initializing the shell.
         """
 
         def __init__(
-            self, cmd_or_spawn, orig_prompt, prompt_change, noecho=False, **kwargs
+            self, child, prompt, prompt_change, echo_is_off=False, extra_init_cmd=None
         ):
-            self.noecho = noecho
-            super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
+            self.count = 0
+            self.child = child
+            self.echo_is_off = echo_is_off
 
-        def cmd_status(self, cmd, timeout=-1):
+            self.prompt = prompt
+            if prompt_change is not None:
+                self.cmd_raises(prompt_change, timeout=2)
+
+            if extra_init_cmd:
+                self.cmd_raises(extra_init_cmd)
+
+        def _pre_cmd_status(self, cmd, warn, match_cmd, use_subshell):
+            self.count += 1
+            sentinel = f"#{self.count}#([0-9]{{1,3}})###\r?\n"
+            raw_sentinel = rf"\043{self.count}\043$?\043\043\043\n"
+
+            cmd = cmd.rstrip()
+            if use_subshell:
+                cmd = f'({cmd})\nprintf "{raw_sentinel}"'
+            else:
+                cmd = f'{cmd}\nprintf "{raw_sentinel}"'
+
+            logging.debug("ShellWrapper: sending cmd: '%s'", cmd)
+            self.child.sendline(cmd)
+
+            if not self.echo_is_off:
+                logging.debug(
+                    "ShellWrapper: expecting raw sentinel: '%s'", raw_sentinel + '"'
+                )
+                idx = self.child.expect_exact([raw_sentinel + '"', pexpect.TIMEOUT])
+                if idx == 1:
+                    errtxt = (
+                        "ShellWrapper: TIMEOUT raw sentinel:\n"
+                        f"before: '{self.child.before}'\n"
+                        f"after: '{self.child.after}'\n"
+                        f"buffer:'{self.child.buffer}'"
+                    )
+                    if match_cmd:
+                        logging.error("%s", errtxt)
+                        raise Exception(errtxt)
+                    if warn:
+                        logging.warning("%s", errtxt)
+                else:
+                    logging.debug(
+                        "ShellWrapper: got raw sentinel: before: %s", self.child.before
+                    )
+
+            return sentinel
+
+        def _post_cmd_status(self):
+            logging.debug(
+                "ShellWrapper: got sentinel: before: '%s'",
+                self.child.before,
+            )
+            output = self.child.before.replace("\r\n", "\n")
+            rc = int(self.child.match.group(1))
+            logging.debug("ShellWrapper: consuming prompt: '%s'", self.prompt)
+            self.child.expect_exact(self.prompt, timeout=1)
+            output = self.child.before.replace("\r\n", "\n")
+
+            return rc, output
+
+        async def async_cmd_status(
+            self, cmd, timeout=-1, warn=True, match_cmd=True, use_subshell=False
+        ):
+            """Execute a shell command asynchronously.
+
+            Returns status and (strip/cleaned \r) output
+            """
+            sentinel = self._pre_cmd_status(cmd, warn, match_cmd, use_subshell)
+            logging.debug("ShellWrapper: expecting sentinel: '%s'", sentinel)
+            await self.child.expect(sentinel, timeout=timeout, async_=True)
+            return self._post_cmd_status()
+
+        async def async_cmd_raises(self, cmd, timeout=-1):
+            """Execute a shell command asynchronously.
+
+            Returns (strip/cleaned \r) ouptut
+            Raises CalledProcessError on non-zero exit status
+            """
+            rc, output = await self.async_cmd_status(cmd, timeout)
+            if rc:
+                error = subprocess.CalledProcessError(rc, cmd)
+                error.stdout = output
+                raise error
+            return output
+
+        def cmd_status(
+            self, cmd, timeout=-1, warn=True, match_cmd=True, use_subshell=False
+        ):
+            """Execute a shell command.
+
+            Returns status and (strip/cleaned \r) output
+            """
+            sentinel = self._pre_cmd_status(cmd, warn, match_cmd, use_subshell)
+            logging.debug("ShellWrapper: expecting sentinel: '%s'", sentinel)
+            self.child.expect(sentinel, timeout=timeout)
+            return self._post_cmd_status()
+
+        def cmd_raises(self, cmd, timeout=-1):
+            """Execute a shell command.
+
+            Returns (strip/cleaned \r) ouptut
+            Raises CalledProcessError on non-zero exit status
+            """
+            rc, output = self.cmd_status(cmd, timeout)
+            if rc:
+                error = subprocess.CalledProcessError(rc, cmd)
+                error.stdout = output
+                raise error
+            return output
+
+    class NonShellWrapper(REPLWrapper):
+        """
+        Create a wrapper around a read-eval-print-loop interface
+
+        Args:
+            child - an expect based child.
+            prompt - the REPL prompt to look for at the end of commands.
+            prompt_change - command to send to child to set the `prompt`.
+            echo_is_off - True if echo of sent command is disabled in the child.
+            extra_init_cmd - command to send after standard initializing the shell.
+        """
+
+        def __init__(
+            self,
+            cmd_or_spawn,
+            prompt,
+            prompt_change,
+            echo_is_off=False,
+            extra_init_cmd=None,
+        ):
+            self.echo_is_off = echo_is_off
+            super().__init__(
+                cmd_or_spawn, prompt, prompt_change, extra_init_cmd=extra_init_cmd
+            )
+
+        def cmd_status(self, cmd, timeout=-1, match_cmd=True):
             """Execute a shell command
 
             Returns status and (strip/cleaned \r) output
@@ -1941,35 +2083,17 @@ if have_repl_wrapper:
             output = output.replace("\r\n", "\n")
             idx = output.find(cmd)
             if idx == -1:
-                if not self.noecho:
-                    logging.warning(
-                        "Didn't find command ('%s') in expected output ('%s')",
-                        cmd,
-                        output,
+                if not self.echo_is_off:
+                    errtxt = (
+                        f"Didn't find command ('{cmd}') in expected output ('{output}')"
                     )
-            else:
-                # Remove up to and including the command from the output stream
-                output = output[idx + len(cmd) :].strip()
-
-            scmd = "echo $?"
-            rcstr = self.run_command(scmd)
-            rcstr = rcstr.replace("\r\n", "\n")
-            idx = rcstr.find(scmd)
-            if idx == -1:
-                if self.noecho:
-                    logging.warning(
-                        "Didn't find status ('%s') in expected output ('%s')",
-                        scmd,
-                        rcstr,
-                    )
-                try:
-                    rc = int(rcstr)
-                except Exception:
-                    rc = 255
-            else:
-                rcstr = rcstr[idx + len(scmd) :].strip()
-                rc = int(rcstr)
-            return rc, output.replace("\r", "").strip()
+                    if match_cmd:
+                        logging.error("%s", errtxt)
+                        raise Exception(errtxt)
+                    logging.warning("%s", errtxt)
+                return 255, ""
+            # Remove up to and including the command from the output stream
+            return 0, output[idx + len(cmd) :].strip()
 
         def cmd_raises(self, cmd, timeout=-1):
             """Execute a shell command.
