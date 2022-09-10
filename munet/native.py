@@ -253,7 +253,6 @@ class L3Node(LinuxNamespace):
         user=None,
         password=None,
         use_pty=False,
-        noecho=False,
         trace=True,
     ):
         lfname = os.path.join(self.rundir, "console-log.txt")
@@ -283,9 +282,8 @@ class L3Node(LinuxNamespace):
             sends=sends,
             use_pty=use_pty,
             logfile=logfile,
-            logfile_read=None,  # logfile_read,
-            logfile_send=None,  # logfile_send,
-            noecho=noecho,
+            logfile_read=logfile_read,
+            logfile_send=logfile_send,
             trace=trace,
         )
         return repl
@@ -1060,6 +1058,7 @@ class L3QemuVM(L3Node):
         self.qemu_config = config["qemu"]
         self.extra_mounts = []
         assert self.qemu_config
+        self.cmdrepl = None
         self.conrepl = None
         self.monrepl = None
         self.use_console = False
@@ -1124,8 +1123,8 @@ class L3QemuVM(L3Node):
             self.cmd_raises_host(f"chmod 755 {cmdpath}")
 
             # Now write a copy inside the VM
-            self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF\n")
-            self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
+            self.cmdrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
+            self.cmdrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
             cmds = "/tmp/cmd.shebang"
         else:
             cmds = cmds.replace("%CONFIGDIR%", self.unet.config_dirname)
@@ -1336,13 +1335,63 @@ class L3QemuVM(L3Node):
         self.logger.info("Renumbering interfaces")
         con = self.conrepl
         con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
-        for ifname, ifaddr in self.intf_addrs.items():
+        for ifname in sorted(self.intf_addrs):
+            ifaddr = self.intf_addrs[ifname]
             con.cmd_raises(f"ip link set {ifname} up")
             con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
 
             # # XXX
             # if hasattr(switch, "is_nat") and switch.is_nat:
             #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+
+    async def _opencons(self, *cnames):
+        "Open consoles based on socket file names"
+
+        timeout = Timeout(30)
+        cons = []
+        for cname in cnames:
+            sockpath = os.path.join(self.sockdir, cname)
+            connected = False
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            while self.launch_p.returncode is None and not timeout.is_expired():
+                try:
+                    sock.connect(sockpath)
+                    connected = True
+                    break
+                except Exception as error:
+                    self.logger.debug(
+                        "%s: trying to open console socket: %s", self, error
+                    )
+                elapsed = int(timeout.elapsed())
+                if elapsed <= 3:
+                    await asyncio.sleep(0.25)
+                else:
+                    self.logger.info(
+                        "%s: launch (qemu) taking more than %ss", self, elapsed
+                    )
+                    await asyncio.sleep(1)
+
+            if connected:
+                cons.append(
+                    await self.console(sock, user="root", use_pty=False, trace=True)
+                )
+            elif self.launch_p.returncode is not None:
+                self.logger.warning(
+                    "%s: launch (qemu) exited quickly (%ss) rc: %s",
+                    self,
+                    timeout.elapsed(),
+                    self.launch_p.returncode,
+                )
+                raise Exception("Qemu launch exited early")
+            elif timeout.is_expired():
+                self.logger.critical(
+                    "%s: timeout (%ss) waiting for qemu to start",
+                    self,
+                    timeout.elapsed(),
+                )
+                assert not timeout.is_expired()
+
+        return cons
 
     async def launch(self):
         "Launch qemu"
@@ -1366,7 +1415,9 @@ class L3QemuVM(L3Node):
 
         args.append("-append")
         root = qc.get("root", "/dev/ram0")
-        append = f"root={root} rw console=ttyS0 console=ttyS1 console=ttyS2"
+        append = (
+            f"root={root} rw console=ttyS0 console=ttyS1 console=ttyS2 console=ttyS3"
+        )
         if "cmdline-extra" in qc:
             append += f" {qc['cmdline-extra']}"
         args.append(append)
@@ -1412,6 +1463,8 @@ class L3QemuVM(L3Node):
             "-serial",
             "stdio",
             "-serial",
+            "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
+            "-serial",
             "unix:/tmp/qemu-sock/_console,server,nowait",
             "-serial",
             "unix:/tmp/qemu-sock/console,server,nowait",
@@ -1450,46 +1503,9 @@ class L3QemuVM(L3Node):
         #
         # Connect to the console socket, retrying
         #
-
-        timeout = Timeout(30)
-        sockpath = os.path.join(self.sockdir, "_console")
-        connected = False
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        while self.launch_p.returncode is None and not timeout.is_expired():
-            try:
-                sock.connect(sockpath)
-                connected = True
-                break
-            except Exception as error:
-                self.logger.debug("%s: trying to open console socket: %s", self, error)
-            elapsed = int(timeout.elapsed())
-            if elapsed <= 3:
-                await asyncio.sleep(0.25)
-            else:
-                self.logger.info(
-                    "%s: launch (qemu) taking more than %ss", self, elapsed
-                )
-                await asyncio.sleep(1)
-
-        if connected:
-            pass
-        elif self.launch_p.returncode is not None:
-            self.logger.warning(
-                "%s: launch (qemu) exited quickly (%ss) rc: %s",
-                self,
-                timeout.elapsed(),
-                self.launch_p.returncode,
-            )
-            raise Exception("Qemu launch exited early")
-        elif timeout.is_expired():
-            self.logger.critical(
-                "%s: timeout (%ss) waiting for qemu to start",
-                self,
-                timeout.elapsed(),
-            )
-            assert not timeout.is_expired()
-
-        self.conrepl = await self.console(sock, user="root", use_pty=False, trace=True)
+        cons = await self._opencons("_cmdcon", "_console")
+        self.cmdrepl = cons[0]
+        self.conrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
         # Have standard commands begin to use the console

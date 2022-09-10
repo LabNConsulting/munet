@@ -50,12 +50,25 @@ async def test_spawn(unet, host, mode, shellcmd):
         repl = await _test_repl(unet, host, [shellcmd, "-si"], use_pty=False)
 
     try:
-        output = repl.run_command("env")
-        logging.info("'env' output: %s", output)
-        output = repl.run_command("ls /sys")
-        logging.info("'ls /sys' output: %s", output)
-        output = repl.run_command("echo $?")
-        logging.info("'echo $?' output: %s", output)
+        output = repl.cmd_raises("unset HISTFILE")
+        assert not output.strip()
+
+        os.environ["TEST_SHELL"] = shellcmd
+        output = repl.cmd_raises("env | grep TEST_SHELL")
+        logging.info("'env | grep TEST_SHELL' output: %s", output)
+        assert output == f"SHELL={shellcmd}"
+
+        expected = (
+            "block\nbus\nclass\ndev\ndevices\nfirmware\nfs\nkernel\nmodule\npower\n"
+        )
+        rc, output = repl.cmd_status("ls -1 /sys")
+        output = ouptut.replace("hypervisor\n", "")
+        logging.info("'ls -1 /sys' rc: %s output: %s", rc, output)
+        assert output == expected
+
+        if shellcmd == "/bin/bash":
+            output = repl.cmd_raises("!!")
+            logging.info("'!!' output: %s", output)
     finally:
         # this is required for setns() restoration to work for non-pty (piped) bash
         if mode != "pty":

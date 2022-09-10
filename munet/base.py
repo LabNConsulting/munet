@@ -46,9 +46,9 @@ try:
     from pexpect.replwrap import PEXPECT_PROMPT
     from pexpect.replwrap import REPLWrapper
 
-    have_repl_wrapper = True
+    have_pexpect = True
 except ImportError:
-    have_repl_wrapper = False
+    have_pexpect = False
 
 
 root_hostname = subprocess.check_output("hostname")
@@ -404,7 +404,7 @@ class Commander:  # pylint: disable=R0904
         Create a spawned send/expect process.
 
         Args:
-            cmd - list of args to exec/popen with
+            cmd - list of args to exec/popen with, or an already open socket
             spawned_re - what to look for to know when done, `spawn` returns when seen
             expects - a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
@@ -423,6 +423,7 @@ class Commander:  # pylint: disable=R0904
         """
 
         if isinstance(cmd, socket.socket):
+            assert not use_pty
             defaults = {}
             defaults.update(kwargs)
             if "encoding" not in defaults:
@@ -451,14 +452,12 @@ class Commander:  # pylint: disable=R0904
             p.isalive = lambda: p.proc.poll() is None
             if not hasattr(p, "close"):
                 p.close = p.wait
+        else:
+            if not p.getecho():
+                p.setecho(True)
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
-        self.logger.debug("%s: debug timeout STOPPED", self)
-        index = p.expect([pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
-        self.logger.debug("%s: got deubg quick index: '%s'", self, index)
-
-        self.logger.debug("%s: quick check for spawned_re: %s", self, spawned_re)
         index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
         if index == 0:
             assert p.match is not None
@@ -521,7 +520,6 @@ class Commander:  # pylint: disable=R0904
         prompt,
         expects=(),
         sends=(),
-        noecho=False,
         use_pty=False,
         **kwargs,
     ):
@@ -529,7 +527,7 @@ class Commander:  # pylint: disable=R0904
         Create a shell REPL (read-eval-print-loop).
 
         Args:
-            cmd - shell and list of args to popen with
+            cmd - shell and list of args to popen with, or an already open socket
             prompt - the REPL prompt to look for, the function returns when seen
             expects - a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
@@ -537,9 +535,12 @@ class Commander:  # pylint: disable=R0904
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+
             **kwargs - kwargs passed on the _spawn.
         """
         prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
+
+        assert not isinstance(cmd, socket.socket) or not use_pty
         p = self.spawn(
             cmd,
             prompt,
@@ -556,11 +557,10 @@ class Commander:  # pylint: disable=R0904
         ps1p = ps1[:5] + "${UNSET_V}" + ps1[5:]
         ps2p = ps2[:5] + "${UNSET_V}" + ps2[5:]
 
+        extra = "PAGER=cat; export PAGER; TERM=dumb; unset HISTFILE; set +o emacs +o vi"
         pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
         p.send(pchg)
-        return ShellWrapper(
-            p, ps1, None, extra_init_cmd="export PAGER=cat", noecho=noecho
-        )
+        return ShellWrapper(p, ps1, None, extra_init_cmd=extra, will_echo=will_echo)
 
     def popen(self, cmd, **kwargs):
         """
@@ -1916,10 +1916,7 @@ class BaseMunet(LinuxNamespace):
 BaseMunet.g_unet = None
 
 
-#
-# Extra Functional REPLWrapper from pexpect
-#
-if have_repl_wrapper:
+if have_pexpect:
 
     class ShellWrapper(REPLWrapper):
         """
