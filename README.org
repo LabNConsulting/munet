@@ -251,7 +251,13 @@ module: labn-munet-config
       }
       leaf cleanup_cmd {
         type string;
-        description "Shell command[s] to execute when deleting the node.";
+        description
+          "Shell command[s] to execute when deleting the node.
+
+           NOTE: With container nodes, the cleanup_cmd will be run
+           prior to the `cmd` being killed, so that the container is
+           present. For Qemu/VM nodes the cleanup command is run prior
+           to the VM being brought down.";
       }
       leaf image {
         type string;
