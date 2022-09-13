@@ -57,6 +57,10 @@ root_hostname = subprocess.check_output("hostname")
 os.environ["MUNET_PID"] = str(os.getpid())
 
 
+class MunetError(Exception):
+    "A generic munet error"
+
+
 class Timeout:
     """An object to passively monitor for timeouts."""
 
@@ -151,6 +155,10 @@ def convert_number(value) -> int:
     return int(rate) * base ** (index + 1)
 
 
+def is_file_like(fo):
+    return isinstance(fo, int) or hasattr(fo, "fileno")
+
+
 def get_tc_bits_value(user_value):
     value = convert_number(user_value) / 1000
     return f"{value:03f}kbit"
@@ -209,7 +217,9 @@ class Commander:  # pylint: disable=R0904
     def __init__(self, name, logger=None, **kwargs):
         """Create a Commander."""
         del kwargs  # deal with lint warning
+
         self.name = name
+        self.deleting = False
         self.last = None
         self.exec_paths = {}
         self.pre_cmd = []
@@ -355,7 +365,33 @@ class Commander:  # pylint: disable=R0904
         p = subprocess.Popen(acmd, **kwargs)
         return p, acmd
 
-    def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, **kwargs):
+    def _fdspawn(self, fo, **kwargs):
+        defaults = {}
+        defaults.update(kwargs)
+
+        if "echo" in defaults:
+            del defaults["echo"]
+
+        if "encoding" not in defaults:
+            defaults["encoding"] = "utf-8"
+            if "codec_errors" not in defaults:
+                defaults["codec_errors"] = "ignore"
+        encoding = defaults["encoding"]
+
+        self.logger.debug("%s: _fdspawn(%s, kwargs: %s)", self, fo, defaults)
+
+        p = fdspawn(fo, **defaults)
+
+        # We don't have TTY like conversions of LF to CRLF
+        p.crlf = os.linesep.encode(encoding)
+
+        # we own the socket now detach the file descriptor to keep it from closing
+        if hasattr(fo, "detach"):
+            fo.detach()
+
+        return p
+
+    def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, echo=False, **kwargs):
         pre_cmd, cmd, defaults = self._get_sub_args(cmd, {}, **kwargs)
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         if "shell" in defaults:
@@ -384,7 +420,7 @@ class Commander:  # pylint: disable=R0904
         if not use_pty:
             p = PopenSpawn(actual_cmd, **defaults)
         else:
-            p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], **defaults)
+            p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], echo=echo, **defaults)
         return p, actual_cmd
 
     def spawn(
@@ -422,19 +458,10 @@ class Commander:  # pylint: disable=R0904
                 raises a CalledProcessError to indicate the failure.
         """
 
-        if isinstance(cmd, socket.socket):
+        if is_file_like(cmd):
             assert not use_pty
-            defaults = {}
-            defaults.update(kwargs)
-            if "encoding" not in defaults:
-                defaults["encoding"] = "utf-8"
-                if "codec_errors" not in defaults:
-                    defaults["codec_errors"] = "ignore"
-            p = fdspawn(cmd, **defaults)
-            # we own the socket now detach the file descriptor to keep it from closing
-            if hasattr(cmd, "detach"):
-                cmd.detach()
             ac = "*socket*"
+            p = self._fdspawn(cmd, **kwargs)
         else:
             p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
 
@@ -452,9 +479,6 @@ class Commander:  # pylint: disable=R0904
             p.isalive = lambda: p.proc.poll() is None
             if not hasattr(p, "close"):
                 p.close = p.wait
-        else:
-            if not p.getecho():
-                p.setecho(True)
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
@@ -521,6 +545,7 @@ class Commander:  # pylint: disable=R0904
         expects=(),
         sends=(),
         use_pty=False,
+        will_echo=False,
         **kwargs,
     ):
         """
@@ -535,20 +560,24 @@ class Commander:  # pylint: disable=R0904
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+            will_echo - bash is buggy in that it echo's to non-tty unlike any other
+                        sh/ksh, set this value to true if running back
 
             **kwargs - kwargs passed on the _spawn.
         """
         prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
 
-        assert not isinstance(cmd, socket.socket) or not use_pty
+        assert not is_file_like(cmd) or not use_pty
         p = self.spawn(
             cmd,
             prompt,
             expects=expects,
             sends=sends,
             use_pty=use_pty,
+            echo=False,
             **kwargs,
         )
+        assert not p.echo
 
         ps1 = PEXPECT_PROMPT
         ps2 = PEXPECT_CONTINUATION_PROMPT
@@ -905,6 +934,7 @@ class Commander:  # pylint: disable=R0904
         new derived classes should look at the documentation for that function.
         """
         try:
+            self.deleting = True
             await self._async_delete()
         except Exception as error:
             self.logger.error("%s: error while deleting: %s", self, error)
@@ -1866,12 +1896,15 @@ class BaseMunet(LinuxNamespace):
         else:
             self.logger.debug("%s: BaseMunet sub-class deleting.", self)
 
+        self.logger.debug("Deleting links")
         try:
             await self._delete_links()
         except Exception as error:
             self.logger.error(
                 "%s: error deleting links: %s", self, error, exc_info=True
             )
+
+        self.logger.debug("Deleting hosts and bridges")
         try:
             # Delete hosts and switches, wait for them all to complete
             # even if there is an exception.
@@ -1924,9 +1957,11 @@ if have_pexpect:
         """
 
         def __init__(
-            self, cmd_or_spawn, orig_prompt, prompt_change, noecho=False, **kwargs
+            self, cmd_or_spawn, orig_prompt, prompt_change, will_echo=False, **kwargs
         ):
-            self.noecho = noecho
+            self.echo = will_echo
+            # REPLWrapper expect a non-echoing child or will create one if given a
+            # command string
             super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
 
         def cmd_status(self, cmd, timeout=-1):
@@ -1936,36 +1971,49 @@ if have_pexpect:
             """
             output = self.run_command(cmd, timeout, async_=False)
             output = output.replace("\r\n", "\n")
-            idx = output.find(cmd)
-            if idx == -1:
-                if not self.noecho:
+            if self.echo:
+                # remove the command
+                idx = output.find(cmd)
+                if idx == -1:
                     logging.warning(
                         "Didn't find command ('%s') in expected output ('%s')",
                         cmd,
                         output,
                     )
-            else:
-                # Remove up to and including the command from the output stream
-                output = output[idx + len(cmd) :].strip()
+                else:
+                    # Remove up to and including the command from the output stream
+                    output = output[idx + len(cmd) :].strip()
 
             scmd = "echo $?"
             rcstr = self.run_command(scmd)
             rcstr = rcstr.replace("\r\n", "\n")
-            idx = rcstr.find(scmd)
-            if idx == -1:
-                if self.noecho:
-                    logging.warning(
-                        "Didn't find status ('%s') in expected output ('%s')",
-                        scmd,
-                        rcstr,
-                    )
-                try:
-                    rc = int(rcstr)
-                except Exception:
-                    rc = 255
-            else:
-                rcstr = rcstr[idx + len(scmd) :].strip()
+            if self.echo:
+                # remove the command
+                idx = rcstr.find(scmd)
+                if idx == -1:
+                    if self.echo:
+                        logging.warning(
+                            "Didn't find status ('%s') in expected output ('%s')",
+                            scmd,
+                            rcstr,
+                        )
+                    try:
+                        rc = int(rcstr)
+                    except Exception:
+                        rc = 255
+                else:
+                    rcstr = rcstr[idx + len(scmd) :].strip()
+            try:
                 rc = int(rcstr)
+            except ValueError as error:
+                logging.error(
+                    "%s: error with expected status output: %s: %s",
+                    self,
+                    error,
+                    rcstr,
+                    exc_info=True,
+                )
+                rc = 255
             return rc, output.replace("\r", "").strip()
 
         def cmd_raises(self, cmd, timeout=-1):

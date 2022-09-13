@@ -20,6 +20,7 @@
 #
 "A module that defines objects for standalone use."
 import asyncio
+import errno
 import ipaddress
 import logging
 import os
@@ -34,6 +35,7 @@ from .base import BaseMunet
 from .base import Bridge
 from .base import Commander
 from .base import LinuxNamespace
+from .base import MunetError
 from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
@@ -44,6 +46,10 @@ from .config import config_subst
 from .config import config_to_dict_with_key
 from .config import find_matching_net_config
 from .config import merge_kind_config
+
+
+class L3ContainerNotRunningError(MunetError):
+    "Exception if no running container exists"
 
 
 def get_loopback_ips(c, nid):
@@ -253,17 +259,34 @@ class L3Node(LinuxNamespace):
         user=None,
         password=None,
         use_pty=False,
+        will_echo=False,
+        logfile_prefix="console",
         trace=True,
     ):
-        lfname = os.path.join(self.rundir, "console-log.txt")
+        """
+        Create a REPL (read-eval-print-loop) driving a console.
+
+        Args:
+            concmd - string or list to popen with, or an already open socket
+            prompt - the REPL prompt to look for, the function returns when seen
+            user - user name to log in with
+            password - password to log in with
+            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+            will_echo - bash is buggy in that it echo's to non-tty unlike any other
+                        sh/ksh, set this value to true if running back
+            trace - trace the send/expect sequence
+            **kwargs - kwargs passed on the _spawn.
+        """
+
+        lfname = os.path.join(self.rundir, f"{logfile_prefix}-log.txt")
         logfile = open(lfname, "a+", encoding="utf-8")
         logfile.write("-- start logging for: '{}' --\n".format(concmd))
 
-        lfname = os.path.join(self.rundir, "console-read-log.txt")
+        lfname = os.path.join(self.rundir, f"{logfile_prefix}-read-log.txt")
         logfile_read = open(lfname, "a+", encoding="utf-8")
         logfile_read.write("-- start read logging for: '{}' --\n".format(concmd))
 
-        lfname = os.path.join(self.rundir, "console-send-log.txt")
+        lfname = os.path.join(self.rundir, f"{logfile_prefix}-send-log.txt")
         logfile_send = open(lfname, "a+", encoding="utf-8")
         logfile_send.write("-- start send logging for: '{}' --\n".format(concmd))
 
@@ -281,6 +304,7 @@ class L3Node(LinuxNamespace):
             expects=expects,
             sends=sends,
             use_pty=use_pty,
+            will_echo=will_echo,
             logfile=logfile,
             logfile_read=logfile_read,
             logfile_send=logfile_send,
@@ -292,7 +316,6 @@ class L3Node(LinuxNamespace):
         self,
         sockpath,
         prompt=r"\(qemu\) ",
-        # prompt=r"(^|\r\n)\(qemu\) ",
     ):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.connect(sockpath)
@@ -301,14 +324,18 @@ class L3Node(LinuxNamespace):
         logfile = open(lfname, "a+", encoding="utf-8")
         logfile.write("-- start logging for: '{}' --\n".format(sock))
 
-        p = self.spawn(sock, prompt, logfile=logfile)
+        lfname = os.path.join(self.rundir, "monitor-read-log.txt")
+        logfile_read = open(lfname, "a+", encoding="utf-8")
+        logfile_read.write("-- start read logging for: '{}' --\n".format(sock))
+
+        p = self.spawn(sock, prompt, logfile=logfile, logfile_read=logfile_read)
         from .base import ShellWrapper  # pylint: disable=C0415
 
         # ShellWrapper (REPLWrapper) unfortunately uses string match not regex
         # for the prompt
         p.send("\n")
         prompt = "(qemu) "
-        return ShellWrapper(p, prompt, None, noecho=False)
+        return ShellWrapper(p, prompt, None, will_echo=True)
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
@@ -396,7 +423,11 @@ class L3Node(LinuxNamespace):
         return self.cmd_p
 
     async def _async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node"""
+        """Run the configured cleanup commands for this node
+
+        This function is called by subclass' async_cleanup_cmd
+        """
+
         self.cleanup_called = True
 
         cmd = self.config.get("cleanup_cmd", "").strip()
@@ -460,11 +491,6 @@ class L3Node(LinuxNamespace):
         except asyncio.CancelledError:
             # Should we stop the container if we have one?
             self.logger.debug("%s: node cmd wait() canceled", future)
-
-    # def child_exit(self, pid):
-    #     """Called back when cmd finishes executing."""
-    #     if self.cmd_p && self.cmd_p.pid == pid:
-    #         self.container_id = None
 
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
@@ -573,11 +599,17 @@ class L3Node(LinuxNamespace):
             self.logger.debug("%s: L3Node sub-class _async_delete", self)
 
         # First terminate any still running "cmd:"
+        # XXX We need to take care of this in container/qemu before getting here.
         await self.async_cleanup_proc(self.cmd_p)
 
         # Next call users "cleanup_cmd:"
-        if not self.cleanup_called:
-            await self.async_cleanup_cmd()
+        try:
+            if not self.cleanup_called:
+                await self.async_cleanup_cmd()
+        except Exception as error:
+            self.logger.warning(
+                "Got an error during delete from async_cleanup_cmd: %s", error
+            )
 
         # remove any hostintf interfaces
         for hname in list(self.host_intfs):
@@ -642,29 +674,21 @@ class L3ContainerNode(L3Node):
         return get_exec_path_host(binary)
 
     def _get_podman_precmd(self, cmd, sudo=False, tty=False):
+        if not self.cmd_p:
+            raise L3ContainerNotRunningError(f"{self}: cannot execute command: {cmd}")
+        assert self.container_id
+
         cmds = []
         if sudo:
             cmds.append(get_exec_path_host("sudo"))
         cmds.append(get_exec_path_host("podman"))
-        if self.container_id:
-            cmds.append("exec")
-            cmds.append(f"-eMUNET_RUNDIR={self.unet.rundir}")
-            cmds.append(f"-eMUNET_NODENAME={self.name}")
-            if tty:
-                cmds.append("-it")
-            cmds.append(self.container_id)
-        else:
-            cmds += [
-                "run",
-                "--rm",
-                "--init",
-                f"-eMUNET_RUNDIR={self.unet.rundir}",
-                f"-eMUNET_NODENAME={self.name}",
-                f"--net=ns:/proc/{self.pid}/ns/net",
-            ]
-            if tty:
-                cmds.append("-it")
-            cmds.append(self.container_image)
+        cmds.append("exec")
+        cmds.append(f"-eMUNET_RUNDIR={self.unet.rundir}")
+        cmds.append(f"-eMUNET_NODENAME={self.name}")
+        if tty:
+            cmds.append("-it")
+        cmds.append(self.container_id)
+
         if not isinstance(cmd, str):
             cmds += cmd
         else:
@@ -676,6 +700,28 @@ class L3ContainerNode(L3Node):
     def get_cmd_container(self, cmd, sudo=False, tty=False):
         # return " ".join(self._get_podman_precmd(cmd, sudo=sudo, tty=tty))
         return self._get_podman_precmd(cmd, sudo=sudo, tty=tty)
+
+    def _check_use_base(self, cmd):
+        """Check if we should call the base class cmd method.
+
+        This is only the case if we haven't tried to create the container yet.
+        """
+        if self.cmd_p:
+            return False
+        if self.container_id is None:
+            self.logger.debug(
+                "%s: Invoking base class cmd_/popen* function "
+                "b/c no container yet: cmd: %s",
+                self,
+                cmd,
+            )
+            return True
+        self.logger.debug(
+            "%s: No running cmd_p, invoking cmd_/popen* to raise exception: cmd: %s",
+            self,
+            cmd,
+        )
+        return False
 
     def popen(self, cmd, **kwargs):
         """
@@ -690,10 +736,12 @@ class L3ContainerNode(L3Node):
         Returns:
             a subprocess.Popen object.
         """
-        if not self.cmd_p:
+        if self._check_use_base(cmd):
             return super().popen(cmd, **kwargs)
-        # By default do not run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+
+        # By default run inside container
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
@@ -701,10 +749,12 @@ class L3ContainerNode(L3Node):
         return p
 
     async def async_popen(self, cmd, **kwargs):
-        if not self.cmd_p:
+        if self._check_use_base(cmd):
             return await super().async_popen(cmd, **kwargs)
-        # By default do not run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", True)
+
+        # By default run inside container
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
@@ -712,7 +762,7 @@ class L3ContainerNode(L3Node):
         return p
 
     def cmd_status(self, cmd, **kwargs):
-        if not self.cmd_p:
+        if self._check_use_base(cmd):
             return super().cmd_status(cmd, **kwargs)
         if tty := kwargs.get("tty", False):
             # tty always runs inside container (why?)
@@ -721,6 +771,7 @@ class L3ContainerNode(L3Node):
         else:
             # By default run inside container
             skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
@@ -728,7 +779,7 @@ class L3ContainerNode(L3Node):
         return self._cmd_status(cmds, **kwargs)
 
     async def async_cmd_status(self, cmd, **kwargs):
-        if not self.cmd_p:
+        if self._check_use_base(cmd):
             return await super().async_cmd_status(cmd, **kwargs)
         if tty := kwargs.get("tty", False):
             # tty always runs inside container (why?)
@@ -737,6 +788,7 @@ class L3ContainerNode(L3Node):
         else:
             # By default run inside container
             skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
         cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
@@ -805,8 +857,6 @@ class L3ContainerNode(L3Node):
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
-
-        image = self.container_image
 
         self.container_id = f"{self.name}-{os.getpid()}"
         cmds = [
@@ -906,12 +956,12 @@ class L3ContainerNode(L3Node):
                 # How can we override this?
                 # u'--entrypoint=""',
                 f"--volume={cmdpath}:/tmp/cmds.shebang",
-                image,
+                self.container_image,
                 "/tmp/cmds.shebang",
             ]
         else:
             # `cmd` is a direct run (no shell) cmd
-            cmds.append(image)
+            cmds.append(self.container_image)
             if cmd:
                 if isinstance(cmd, str):
                     cmds.extend(shlex.split(cmd))
@@ -932,6 +982,7 @@ class L3ContainerNode(L3Node):
             # We don't need this here b/c we are only ever running podman and that's all
             # we need to kill for cleanup
             # start_new_session=True,  # allows us to signal all children to exit
+            # Skip running with `podman exec` we are creating that ability here.
             skip_pre_cmd=True,
         )
 
@@ -981,23 +1032,34 @@ class L3ContainerNode(L3Node):
 
         self.cleanup_called = True
 
-        if not self.container_id:
+        if "cleanup_cmd" not in self.config:
+            return
+
+        if not self.cmd_p:
             self.logger.warning("async_cleanup_cmd: container no longer running")
             return
 
         return await self._async_cleanup_cmd()
 
     def cmd_completed(self, future):
-        self.logger.debug("%s: cmd completed called", self)
         try:
+            log = self.logger.debug if self.deleting else self.logger.warning
             n = future.result()
-            self.logger.debug("%s: node contianer cmd completed result: %s", self, n)
-            self.container_id = None
+            if self.deleting:
+                log("contianer `cmd:` result: %s", n)
+            else:
+                log(
+                    "contianer `cmd:` exited early, "
+                    "try adding `tail -f /dev/null` to `cmd:`, result: %s",
+                    n,
+                )
         except asyncio.CancelledError as error:
-            # Should we stop the container if we have one?
-            self.logger.debug(
-                "%s: node container cmd wait() canceled: %s", future, error
+            # Should we stop the container if we have one? or since we are canceled
+            # we know we will be deleting soon?
+            self.logger.warning(
+                "node container cmd wait() canceled: %s:%s", future, error
             )
+        self.cmd_p = None
 
     async def _async_delete(self):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
@@ -1009,10 +1071,11 @@ class L3ContainerNode(L3Node):
 
         if contid := self.container_id:
             try:
-                await self.async_cleanup_cmd()
+                if not self.cleanup_called:
+                    await self.async_cleanup_cmd()
             except Exception as error:
-                self.logger.error(
-                    "%s: error saving history file: %s", self, error, exc_info=True
+                self.logger.warning(
+                    "Got an error during delete from async_cleanup_cmd: %s", error
                 )
 
             o = ""
@@ -1028,6 +1091,10 @@ class L3ContainerNode(L3Node):
                         self,
                         cmd_error(rc, o, e),
                     )
+                else:
+                    # It's gone
+                    self.cmd_p = None
+
             # now remove the container
             rc, o, e = await self.async_cmd_status_host(
                 [get_exec_path_host("podman"), "rm", contid]
@@ -1036,10 +1103,6 @@ class L3ContainerNode(L3Node):
                 self.logger.warning(
                     "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
                 )
-            else:
-                # It's gone
-                self.cmd_p = None
-
             # keeps us from cleaning up twice
             self.container_id = None
 
@@ -1123,8 +1186,8 @@ class L3QemuVM(L3Node):
             self.cmd_raises_host(f"chmod 755 {cmdpath}")
 
             # Now write a copy inside the VM
-            self.cmdrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
-            self.cmdrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
+            self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
+            self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
             cmds = "/tmp/cmd.shebang"
         else:
             cmds = cmds.replace("%CONFIGDIR%", self.unet.config_dirname)
@@ -1143,7 +1206,9 @@ class L3QemuVM(L3Node):
                 return await self.aw
 
         self.cmd_p = future_proc(
-            self.conrepl.run_command(cmds, timeout=120, async_=True)
+            # We need our own console here b/c this is async and not returning
+            # immediately
+            self.cmdrepl.run_command(cmds, timeout=120, async_=True)
         )
         # output =
         # stdout = open(os.path.join(self.rundir, "cmd.out"), "w")
@@ -1358,10 +1423,14 @@ class L3QemuVM(L3Node):
                     sock.connect(sockpath)
                     connected = True
                     break
-                except Exception as error:
-                    self.logger.debug(
-                        "%s: trying to open console socket: %s", self, error
-                    )
+                except OSError as error:
+                    if error.errno == errno.ENOENT:
+                        self.logger.debug("waiting for console socket: %s", sockpath)
+                    else:
+                        self.logger.warning(
+                            "can't open console socket: %s", error.strerror
+                        )
+                        raise
                 elapsed = int(timeout.elapsed())
                 if elapsed <= 3:
                     await asyncio.sleep(0.25)
@@ -1373,7 +1442,14 @@ class L3QemuVM(L3Node):
 
             if connected:
                 cons.append(
-                    await self.console(sock, user="root", use_pty=False, trace=True)
+                    await self.console(
+                        sock,
+                        user="root",
+                        use_pty=False,
+                        logfile_prefix=cname,
+                        will_echo=True,
+                        trace=True,
+                    )
                 )
             elif self.launch_p.returncode is not None:
                 self.logger.warning(
@@ -1489,8 +1565,9 @@ class L3QemuVM(L3Node):
             stdout=stdout,
             stderr=stderr,
             pass_fds=pass_fds,
-            # We don't need this here b/c we are only ever running podman and that's all
+            # We don't need this here b/c we are only ever running qemu and that's all
             # we need to kill for cleanup
+            # XXX reconcile this
             start_new_session=True,  # allows us to signal all children to exit
         )
 
@@ -1508,6 +1585,12 @@ class L3QemuVM(L3Node):
         self.conrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
+        status = self.monrepl.cmd_status("info status")
+        self.logger.info("VM status: %s", status)
+
+        status = self.monrepl.cmd_status("info kvm")
+        self.logger.info("KVM status: %s", status)
+
         # Have standard commands begin to use the console
         self.use_console = True
 
@@ -1522,7 +1605,6 @@ class L3QemuVM(L3Node):
         try:
             n = future.result()
             self.logger.debug("%s: node launch (qemu) completed result: %s", self, n)
-            self.container_id = None
         except asyncio.CancelledError as error:
             self.logger.debug(
                 "%s: node launch (qemu) cmd wait() canceled: %s", future, error
@@ -1538,17 +1620,33 @@ class L3QemuVM(L3Node):
 
         self.cleanup_called = True
 
+        if "cleanup_cmd" not in self.config:
+            return
+
         if not self.launch_p:
             self.logger.warning("async_cleanup_cmd: qemu no longer running")
             return
 
-        return await self._async_cleanup_cmd()
+        raise NotImplementedError("Needs to be like run_cmd")
+        # return await self._async_cleanup_cmd()
 
     async def _async_delete(self):
         if type(self) == L3QemuVM:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
         else:
             self.logger.debug("%s: L3QemuVM _async_delete", self)
+
+        if self.cmd_p:
+            await self.async_cleanup_proc(self.cmd_p)
+            self.cmd_p = None
+
+        try:
+            if not self.cleanup_called:
+                await self.async_cleanup_cmd()
+        except Exception as error:
+            self.logger.warning(
+                "Got an error during delete from async_cleanup_cmd: %s", error
+            )
 
         try:
             if not self.launch_p:
@@ -1688,12 +1786,25 @@ class Munet(BaseMunet):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
+    def __del__(self):
+        "Catch case of build object but not async_deleted"
+        if hasattr(self, "built"):
+            if not self.deleting:
+                logging.critical(
+                    "Munet object deleted without calling `async_delete` for cleanup."
+                )
+        s = super()
+        if hasattr(s, "__del__"):
+            s.__del__(self)
+
     async def _async_build(self, logger=None):
         """Build the topology based on config"""
 
         if self.built:
             self.logger.warning("%s: is already built", self)
             return
+
+        self.built = True
 
         # Allow for all networks to be auto-numbered
         topoconf = self.topoconf
