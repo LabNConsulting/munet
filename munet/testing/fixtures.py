@@ -133,34 +133,53 @@ def rundir_module():
     return d
 
 
-@pytest.fixture(scope="module")
-async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
-    # Reset the class variables so auto number is predictable
+async def _unet_impl(_rundir, _pytestconfig, param=None):
     try:
         _unet = await async_build_topology(
-            rundir=rundir_module, pytestconfig=pytestconfig
+            config=get_config(basename=param) if param else None,
+            rundir=_rundir,
+            pytestconfig=_pytestconfig,
         )
-        tasks = await _unet.run()
-        logging.debug("conftest: unet running")
     except Exception as error:
-        logging.debug("conftest: unet build/run failed: %s", error)
+        logging.debug("unet fixture: unet build failed: %s", error, exc_info=True)
         pytest.skip(
-            f"conftest: unet build/run failed: {error}", allow_module_level=True
+            f"unet fixture: unet build failed: {error}", allow_module_level=True
         )
         raise
 
-    yield _unet
+    try:
+        tasks = await _unet.run()
+    except Exception as error:
+        logging.debug("unet fixture: unet run failed: %s", error, exc_info=True)
+        await _unet.async_delete()
+        pytest.skip(f"unet fixture: unet run failed: {error}", allow_module_level=True)
+        raise
 
-    # No one ever awaits these so cancel them
-    logging.debug("conftest: canceling container waits")
-    for task in tasks:
-        task.cancel()
+    logging.debug("unet fixture: containers running")
+
+    # Pytest is supposed to always return even if exceptions
+    try:
+        yield _unet
+    except Exception as error:
+        logging.error("unet fixture: yield unet unexpected exception: %s", error)
+
     await _unet.async_delete()
 
+    # No one ever awaits these so cancel them
+    logging.debug("unet fixture: cleanup")
+    for task in tasks:
+        task.cancel()
+
     # Reset the class variables so auto number is predictable
-    logging.debug("conftest: resetting ords to 1")
+    logging.debug("unet fixture: resetting ords to 1")
     L3Node.next_ord = 1
     Bridge.next_ord = 1
+
+
+@pytest.fixture(scope="module")
+async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
+    async for x in _unet_impl(rundir_module, pytestconfig):
+        yield x
 
 
 # =================
@@ -261,26 +280,6 @@ async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
         )
         def test_example(unet_perfunc)
     """
-    if hasattr(request, "param"):
-        _unet = await async_build_topology(
-            config=get_config(basename=request.param),
-            rundir=rundir,
-            pytestconfig=pytestconfig,
-        )
-    else:
-        _unet = await async_build_topology(rundir=rundir, pytestconfig=pytestconfig)
-    tasks = await _unet.run()
-    logging.debug("conftest: containers running")
-
-    yield _unet
-
-    # No one ever awaits these so cancel them
-    logging.debug("conftest: canceling container waits")
-    for task in tasks:
-        task.cancel()
-    await _unet.async_delete()
-
-    # Reset the class variables so auto number is predictable
-    logging.debug("conftest: resetting ords to 1")
-    L3Node.next_ord = 1
-    Bridge.next_ord = 1
+    param = request.param if hasattr(request, "param") else None
+    async for x in _unet_impl(rundir, pytestconfig, param):
+        yield x
