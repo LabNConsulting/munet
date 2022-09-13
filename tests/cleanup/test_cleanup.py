@@ -32,28 +32,19 @@ import pytest
 cleanup_paths = {}
 
 
-# Check existence of cleanup files after unet is deleted
-@pytest.fixture(autouse=True, scope="module")
-def module_test_cleanup():
-    yield
-    for path in cleanup_paths.values():
-        logging.info("Checking for: %s", path)
-        if "noclean" not in path:
-            assert os.path.exists(path)
-        else:
-            assert not os.path.exists(path)
+def test_cleanup_create(unet_perfunc):
+    unet = unet_perfunc
 
-
-# Record paths for all cleanup files
-@pytest.fixture(scope="module", name="savepaths")
-def savepaths_fixture(unet):
+    # Record paths for all cleanup files
     for host in unet.hosts:
         cleanup_paths[host] = os.path.join(unet.hosts[host].rundir, "cleanup-test")
-    yield
+        assert not os.path.exists(cleanup_paths[host])
 
 
-def test_containers_mounts_present(unet, savepaths):
-    del savepaths
-    hs1 = unet.hosts["hs1"]
-    assert unet.path_exists(f"{hs1.rundir}/sock")
-    assert hs1.path_exists("/tmp/sock")
+def test_munet_cleanup():
+    for path in cleanup_paths.values():
+        logging.debug("Checking for: %s", path)
+        if "noclean" in path:
+            assert not os.path.exists(path), f"Unexpected 'cleanup' file: {path}"
+        else:
+            assert os.path.exists(path), f"Missing 'cleanup' file: {path}"

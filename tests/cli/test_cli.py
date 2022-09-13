@@ -34,11 +34,6 @@ from munet import cmd_error
 pytestmark = pytest.mark.asyncio
 
 
-async def test_containers_up(unet):
-    output = unet.cmd_raises("podman ps")
-    logging.info("Containers:\n%s\n\n", output)
-
-
 async def check(p, cli_input, cli_output):
     o, e = await p.communicate(cli_input)
     rc = await p.wait()

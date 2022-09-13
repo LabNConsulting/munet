@@ -27,15 +27,7 @@ topology:
       cmd: "/usr/bin/tail -f /dev/null"
       cleanup_cmd: "/usr/bin/touch cleanup-test"
 
-    - name: hc1-noclean
-      connections: ["net0"]
-      image: docker.io/labn/docker-ci-test:20.04
-      cmd: "ls -l /tmp/rundir; /usr/bin/ip addr show"
-      cleanup_cmd: "/usr/bin/touch /tmp/rundir/cleanup-test"
-      volumes:
-        - "%RUNDIR%:/tmp/rundir"
-
-    - name: hc2
+    - name: hc1
       connections: ["net0"]
       image: docker.io/labn/docker-ci-test:20.04
       cmd: "/usr/bin/tail -f /dev/null"
@@ -43,16 +35,7 @@ topology:
       volumes:
         - "%RUNDIR%:/tmp/rundir"
 
-    - name: hc3-noclean
-      connections: ["net0"]
-      image: docker.io/labn/docker-ci-test:20.04
-      shell: false
-      cmd: "/usr/bin/ip addr show"
-      cleanup_cmd: "/usr/bin/touch /tmp/rundir/cleanup-test"
-      volumes:
-        - "%RUNDIR%:/tmp/rundir"
-
-    - name: hc4
+    - name: hc2
       connections: ["net0"]
       image: docker.io/labn/docker-ci-test:20.04
       shell: false

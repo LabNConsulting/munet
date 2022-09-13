@@ -35,7 +35,7 @@ async def test_basic_ping(unet_perfunc):
     unet = unet_perfunc
     other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
-    logging.info("ping r2 output: %s", o)
+    logging.debug("ping r2 output: %s", o)
 
 
 @pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
@@ -45,18 +45,18 @@ async def test_autonumber_ping(unet_perfunc):
     r2 = unet.hosts["r2"]
 
     for i in range(1, 4):
-        logging.info(
+        logging.debug(
             "r%s addrs: %s", i, await unet.hosts[f"r{i}"].async_cmd_raises("ip -o addr")
         )
 
     o = await r1.async_cmd_raises("ping -w1 -c1 10.0.1.2")
-    logging.info("r1 ping r2 (10.0.1.2) output: %s", o)
+    logging.debug("r1 ping r2 (10.0.1.2) output: %s", o)
 
     o = await r1.async_cmd_raises("ping -w1 -c1 192.168.10.3")
-    logging.info("r1 ping r3 (192.168.10.3) output: %s", o)
+    logging.debug("r1 ping r3 (192.168.10.3) output: %s", o)
 
     o = await r2.async_cmd_raises("ping -w1 -c1 10.254.1.0")
-    logging.info("r2 ping r1 p2p (10.254.1.0) output: %s", o)
+    logging.debug("r2 ping r1 p2p (10.254.1.0) output: %s", o)
 
     o = await r2.async_cmd_raises("ping -w1 -c1 10.254.2.1")
-    logging.info("r2 ping r3 p2p (10.254.2.1) output: %s", o)
+    logging.debug("r2 ping r3 p2p (10.254.2.1) output: %s", o)

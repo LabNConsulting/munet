@@ -30,45 +30,51 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-async def _test_repl(unet, hostname, cmd, use_pty):
+async def _test_repl(unet, hostname, cmd, use_pty, will_echo=False):
     host = unet.hosts[hostname]
     time.sleep(1)
-    repl = await host.console(cmd, user="root", use_pty=use_pty, trace=True)
+    repl = await host.console(
+        cmd, user="root", use_pty=use_pty, will_echo=will_echo, trace=True
+    )
     return repl
 
 
 @pytest.mark.parametrize("host", ["r1", "r2"])
 @pytest.mark.parametrize("mode", ["pty", "piped"])
-@pytest.mark.parametrize("shellcmd", ["/bin/bash", "/bin/dash", "/bin/ksh"])
+@pytest.mark.parametrize("shellcmd", ["/bin/bash", "/bin/dash", "/usr/bin/ksh"])
 async def test_spawn(unet, host, mode, shellcmd):
     if not os.path.exists(shellcmd):
         pytest.skip(f"{shellcmd} not installed skipping")
 
+    os.environ["TEST_SHELL"] = shellcmd
     if mode == "pty":
         repl = await _test_repl(unet, host, [shellcmd], use_pty=True)
     else:
         repl = await _test_repl(unet, host, [shellcmd, "-si"], use_pty=False)
 
     try:
-        output = repl.cmd_raises("unset HISTFILE")
+        rn = unet.hosts[host]
+        output = rn.cmd_raises("pwd ; ls -l /")
+        logging.debug("pwd and ls -l: %s", output)
+
+        output = repl.cmd_raises("unset HISTFILE LSCOLORS")
         assert not output.strip()
 
-        os.environ["TEST_SHELL"] = shellcmd
         output = repl.cmd_raises("env | grep TEST_SHELL")
-        logging.info("'env | grep TEST_SHELL' output: %s", output)
-        assert output == f"SHELL={shellcmd}"
+        logging.debug("'env | grep TEST_SHELL' output: %s", output)
+        assert output == f"TEST_SHELL={shellcmd}"
 
         expected = (
-            "block\nbus\nclass\ndev\ndevices\nfirmware\nfs\nkernel\nmodule\npower\n"
+            "block\nbus\nclass\ndev\ndevices\nfirmware\nfs\nkernel\nmodule\npower"
         )
-        rc, output = repl.cmd_status("ls -1 /sys")
-        output = ouptut.replace("hypervisor\n", "")
-        logging.info("'ls -1 /sys' rc: %s output: %s", rc, output)
+        rc, output = repl.cmd_status("ls --color=never -1 /sys")
+        output = output.replace("hypervisor\n", "")
+        logging.debug("'ls --color=never -1 /sys' rc: %s output: %s", rc, output)
         assert output == expected
 
         if shellcmd == "/bin/bash":
             output = repl.cmd_raises("!!")
-            logging.info("'!!' output: %s", output)
+            logging.debug("'!!' output: %s", output)
     finally:
         # this is required for setns() restoration to work for non-pty (piped) bash
         if mode != "pty":

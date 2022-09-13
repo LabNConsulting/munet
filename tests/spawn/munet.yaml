@@ -15,3 +15,4 @@ topology:
       connections:
         - to: mgmt0
           ip: 10.0.1.2/24
+      cmd: tail -f /dev/null

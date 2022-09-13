@@ -41,7 +41,7 @@ async def ping_average_rtt(r, other, oifname):
 
 async def ping_with_loss(r, other, oifname):
     oip = other.intf_addrs[oifname].ip
-    await r.async_cmd_status(f"ping -w1 -c1 {oip}")
+    await r.async_cmd_status(f"ping -w1 -c1 {oip}", warn=False)
     r, o, _ = await r.async_cmd_status(f"ping -i.01 -c300 {oip}")
     ms = r"(\d+) packets transmitted, (\d+) received"
     m = re.search(ms, o)
