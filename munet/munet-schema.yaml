@@ -170,6 +170,14 @@ properties:
     type: object
     description: "The topology specification"
     properties:
+      dns-network:
+        description: "network used for DNS addresses of hosts in hosts files."
+        type: string
+
+      ipv6-enable:
+        description: "Controls if IPv6 is enabled or disabled."
+        type: boolean
+
       networks-autonumber:
         description: "Whether to auto-number networks or not."
         type: boolean

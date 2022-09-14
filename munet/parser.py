@@ -115,24 +115,18 @@ def setup_logging(args):
         os.chdir(old)
 
 
-def write_hosts_files(unet, netname):
+def append_hosts_files(unet, netname):
+    if not netname:
+        return
+
     entries = []
-    if netname:
-        for name, node in unet.hosts.items():
-            ifname = node.get_ifname(netname)
-            if ifname in node.intf_addrs:
-                entries.append((name, node.intf_addrs[ifname].ip))
     for name, node in unet.hosts.items():
-        with open(os.path.join(node.rundir, "hosts.txt"), "w", encoding="ascii") as hf:
-            hf.write(
-                f"""127.0.0.1\tlocalhost {name}
-::1\tip6-localhost ip6-loopback
-fe00::0\tip6-localnet
-ff00::0\tip6-mcastprefix
-ff02::1\tip6-allnodes
-ff02::2\tip6-allrouters
-"""
-            )
+        ifname = node.get_ifname(netname)
+        if ifname in node.intf_addrs:
+            entries.append((name, node.intf_addrs[ifname].ip))
+    for name, node in unet.hosts.items():
+        with open(os.path.join(node.rundir, "hosts.txt"), "w+", encoding="ascii") as hf:
+            hf.write("\n")
             for e in entries:
                 hf.write(f"{e[1]}\t{e[0]}\n")
 
@@ -223,6 +217,7 @@ async def async_build_topology(
         unshare_inline=args.unshare_inline if args else True,
         logger=logger,
     )
+
     try:
         await unet._async_build(logger)  # pylint: disable=W0212
     except Exception as error:
@@ -234,8 +229,7 @@ async def async_build_topology(
     if not topoconf:
         return unet
 
-    # if "dns" in topoconf:
-    write_hosts_files(unet, topoconf.get("dns"))
+    append_hosts_files(unet, topoconf.get("dns-network"))
 
     # Write our current config to the run directory
     with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:

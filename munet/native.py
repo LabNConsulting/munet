@@ -245,9 +245,20 @@ class L3Node(LinuxNamespace):
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
 
+        # Create a hosts file to map our name
         hosts_file = os.path.join(self.rundir, "hosts.txt")
-        if os.path.exists(hosts_file):
-            self.bind_mount(hosts_file, "/etc/hosts")
+        if not os.path.exists(hosts_file):
+            with open(hosts_file, "w+", encoding="ascii") as hf:
+                hf.write(
+                    f"""127.0.0.1\tlocalhost {self.name}
+::1\tip6-localhost ip6-loopback
+fe00::0\tip6-localnet
+ff00::0\tip6-mcastprefix
+ff02::1\tip6-allnodes
+ff02::2\tip6-allrouters
+"""
+                )
+        self.bind_mount(hosts_file, "/etc/hosts")
 
         if not self.is_container:
             self.pytest_hook_open_shell()

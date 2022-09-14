@@ -506,6 +506,13 @@ module: labn-munet-config
     container topology {
       description "The topology munet should create.";
 
+      leaf dns-network {
+        type leafref {
+          path "../networks/name";
+        }
+        description "network used for DNS addresses of hosts in hosts files.";
+      }
+
       leaf ipv6-enable {
         type boolean;
         default false;
