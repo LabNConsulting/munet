@@ -331,11 +331,13 @@ ff02::2\tip6-allrouters
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.connect(sockpath)
 
-        lfname = os.path.join(self.rundir, "monitor-log.txt")
+        pfx = os.path.basename(sockpath)
+
+        lfname = os.path.join(self.rundir, f"{pfx}-log.txt")
         logfile = open(lfname, "a+", encoding="utf-8")
         logfile.write("-- start logging for: '{}' --\n".format(sock))
 
-        lfname = os.path.join(self.rundir, "monitor-read-log.txt")
+        lfname = os.path.join(self.rundir, f"{pfx}-read-log.txt")
         logfile_read = open(lfname, "a+", encoding="utf-8")
         logfile_read.write("-- start read logging for: '{}' --\n".format(sock))
 
@@ -1390,7 +1392,7 @@ class L3QemuVM(L3Node):
 
     async def create_tap(self, index, ifname):
         mac = f"02:00:0a:00:0{index}:0{self.id}"
-        nic = "tap,model=virtio-net-pci"
+        # nic = "tap,model=virtio-net-pci"
         # qemu -net nic,model=virtio,addr=1a:46:0b:ca:bc:7b -net tap,fd=3 3<>/dev/tap11
         self.cmd_raises(f"ip address flush dev {ifname}")
         self.cmd_raises(f"ip tuntap add tap{index} mode tap")
@@ -1400,8 +1402,12 @@ class L3QemuVM(L3Node):
         self.cmd_raises(f"ip link set dev tap{index} up")
         self.cmd_raises(f"ip link set dev {ifname} up")
         self.cmd_raises(f"ip link set dev br{index} up")
-        nic += f",ifname=tap{index},mac={mac},script=no,downscript=no"
-        return "-nic", nic
+        return [
+            "-netdev",
+            f"tap,id=n{index},ifname=tap{index},script=no,downscript=no",
+            "-device",
+            f"virtio-net-pci,netdev=n{index},mac={mac}",
+        ]
 
     async def renumber_interfaces(self):
         """Re-number the interfaces.
@@ -1485,7 +1491,8 @@ class L3QemuVM(L3Node):
         self.logger.info("%s: Launch Qemu", self)
 
         qc = self.qemu_config
-        args = [get_exec_path_host("qemu-system-x86_64"), "-nodefaults", "-boot", "c"]
+        bootd = "d" if "iso" in qc else "c"
+        args = [get_exec_path_host("qemu-system-x86_64"), "-nodefaults", "-boot", bootd]
 
         if qc.get("kvm"):
             args += ["-accel", "kvm", "-cpu", "host"]
@@ -1499,15 +1506,19 @@ class L3QemuVM(L3Node):
             args.extend(["-kernel", qc["kernel"]])
         if "initrd" in qc:
             args.extend(["-initrd", qc["initrd"]])
+        if "iso" in qc:
+            args.extend(["-cdrom", qc["iso"]])
 
-        args.append("-append")
-        root = qc.get("root", "/dev/ram0")
-        append = (
-            f"root={root} rw console=ttyS0 console=ttyS1 console=ttyS2 console=ttyS3"
-        )
-        if "cmdline-extra" in qc:
-            append += f" {qc['cmdline-extra']}"
-        args.append(append)
+        # we only have append if we have a kernel
+        if "kernel" in qc:
+            args.append("-append")
+            root = qc.get("root", "/dev/ram0")
+            # Only 1 serial console the other ports (ttyS[123] hvc[01]) should have
+            # gettys in inittab
+            append = f"root={root} rw console=ttyS0"
+            if "cmdline-extra" in qc:
+                append += f" {qc['cmdline-extra']}"
+            args.append(append)
 
         if "extra-args" in qc:
             if isinstance(qc["extra-args"], list):
@@ -1547,14 +1558,30 @@ class L3QemuVM(L3Node):
             args += ["-nic", "none"]
 
         args += [
+            # 4 serial ports (max)
             "-serial",
             "stdio",
             "-serial",
+            # All these serial/console ports require entries in inittab
+            # to have getty running on them, modify inittab
             "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
             "-serial",
             "unix:/tmp/qemu-sock/_console,server,nowait",
             "-serial",
             "unix:/tmp/qemu-sock/console,server,nowait",
+            # A 2 virtual consoles - /dev/hvc[01]
+            # Requires CONFIG_HVC_DRIVER=y CONFIG_VIRTIO_CONSOLE=y
+            "-device",
+            "virtio-serial",  # serial console bus
+            "-chardev",
+            "socket,path=/tmp/qemu-sock/vcon0,server=on,wait=off,id=vcon0",
+            "-chardev",
+            "socket,path=/tmp/qemu-sock/vcon1,server=on,wait=off,id=vcon1",
+            "-device",
+            "virtconsole,chardev=vcon0",
+            "-device",
+            "virtconsole,chardev=vcon1",
+            # 2 monitors
             "-monitor",
             "unix:/tmp/qemu-sock/_monitor,server,nowait",
             "-monitor",
@@ -1596,11 +1623,11 @@ class L3QemuVM(L3Node):
         self.conrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
-        status = self.monrepl.cmd_status("info status")
-        self.logger.info("VM status: %s", status)
-
-        status = self.monrepl.cmd_status("info kvm")
-        self.logger.info("KVM status: %s", status)
+        # the monitor output has super annoying ANSI escapes in it
+        output = self.monrepl.cmd_nostatus("info status")
+        self.logger.info("VM status: %s", output)
+        output = self.monrepl.cmd_nostatus("info kvm")
+        self.logger.info("KVM status: %s", output)
 
         # Have standard commands begin to use the console
         self.use_console = True

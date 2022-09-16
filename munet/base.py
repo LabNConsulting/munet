@@ -1963,10 +1963,10 @@ if have_pexpect:
             # command string
             super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
 
-        def cmd_status(self, cmd, timeout=-1):
+        def cmd_nostatus(self, cmd, timeout=-1):
             """Execute a shell command
 
-            Returns status and (strip/cleaned \r) output
+            Returns (strip/cleaned \r) output
             """
             output = self.run_command(cmd, timeout, async_=False)
             output = output.replace("\r\n", "\n")
@@ -1981,8 +1981,20 @@ if have_pexpect:
                     )
                 else:
                     # Remove up to and including the command from the output stream
-                    output = output[idx + len(cmd) :].strip()
+                    output = output[idx + len(cmd) :]
 
+            return output.replace("\r", "").strip()
+
+        def cmd_status(self, cmd, timeout=-1):
+            """Execute a shell command
+
+            Returns status and (strip/cleaned \r) output
+            """
+
+            # Run the command getting the output
+            output = self.cmd_nostatus(cmd, timeout)
+
+            # Now get the status
             scmd = "echo $?"
             rcstr = self.run_command(scmd)
             rcstr = rcstr.replace("\r\n", "\n")
@@ -2013,7 +2025,7 @@ if have_pexpect:
                     exc_info=True,
                 )
                 rc = 255
-            return rc, output.replace("\r", "").strip()
+            return rc, output
 
         def cmd_raises(self, cmd, timeout=-1):
             """Execute a shell command.
