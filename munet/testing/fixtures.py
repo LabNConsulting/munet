@@ -177,8 +177,9 @@ async def _unet_impl(_rundir, _pytestconfig, param=None):
 
 
 @pytest.fixture(scope="module")
-async def unet(rundir_module, pytestconfig):  # pylint: disable=W0621
-    async for x in _unet_impl(rundir_module, pytestconfig):
+async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
+    param = request.param if hasattr(request, "param") else None
+    async for x in _unet_impl(rundir_module, pytestconfig, param):
         yield x
 
 

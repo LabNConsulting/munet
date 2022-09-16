@@ -65,7 +65,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--pause-on-error",
         action="store_true",
-        help="Do not pause after (disables default when --shell or -vtysh given)",
+        help="Pause after (disables default when --shell or -vtysh given)",
     )
     parser.addoption(
         "--no-pause-on-error",
@@ -136,6 +136,7 @@ def pytest_runtest_makereport(item, call):
     isatty = sys.stdout.isatty()
     pause = bool(item.config.getoption("--pause"))
     skipped = False
+
     if call.excinfo is None:
         error = False
     elif call.excinfo.typename == "Skipped":
@@ -177,8 +178,7 @@ def pytest_runtest_makereport(item, call):
         elif call.when == "setup":
             if error:
                 item.skip_more_pause = True
-            else:
-                pause_test(f"before test '{item.nodeid}'")
+            pause_test(f"before test '{item.nodeid}'")
         # check for a result to try and catch setup (or module setup) failure
         # e.g., after a module level fixture fails, we do not want to pause on every
         # skipped test.

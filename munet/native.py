@@ -199,7 +199,9 @@ class L3Node(LinuxNamespace):
 
         self.host_intfs = {}
         self.phy_intfs = {}
+        self.phycount = 0
         self.phy_odrivers = {}
+        self.tapmacs = {}
 
         self.intf_tc_count = 0
 
@@ -596,12 +598,127 @@ ff02::2\tip6-allrouters
         del self.host_intfs[hname]
 
     async def add_phy_intf(self, devaddr, lname):
-        # raise NotImplementedError("add_phy_intf")
-        raise Exception("add_phy_intf")
+        """Add a physical inteface (i.e. mv it to vfio-pci driver
+
+        This is primarily useful for Qemu, but also for things like TREX or DPDK
+        """
+
+        self.phy_intfs[devaddr] = lname
+        index = len(self.phy_intfs)
+
+        _, _, off, fun = parse_pciaddr(devaddr)
+        doffset = off * 8 + fun
+
+        is_virtual = self.unet.rootcmd.path_exists(
+            f"/sys/bus/pci/devices/{devaddr}/physfn"
+        )
+        if is_virtual:
+            pfname = self.unet.rootcmd.cmd_raises(
+                f"ls -1 /sys/bus/pci/devices/{devaddr}/physfn/net"
+            ).strip()
+            pdevaddr = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/physfn")
+            _, _, poff, pfun = parse_pciaddr(pdevaddr)
+            poffset = poff * 8 + pfun
+
+            offset = read_int_value(
+                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_offset"
+            )
+            stride = read_int_value(
+                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_stride"
+            )
+            vf = (doffset - offset - poffset) // stride
+            mac = f"02:cc:cc:cc:{index:02x}:{self.id:02x}"
+            # Some devices require the parent to be up (e.g., ixbge)
+            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} up")
+            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} vf {vf} mac {mac}")
+            self.unet.rootcmd.cmd_status(f"ip link set {pfname} vf {vf} trust on")
+            self.tapmacs[devaddr] = mac
+
+        self.logger.info("Adding physical PCI device %s as %s", devaddr, lname)
+
+        # Get interface name and set to down if present
+        ec, ifname, _ = self.unet.rootcmd.cmd_status(
+            f"ls /sys/bus/pci/devices/{devaddr}/net/", warn=False
+        )
+        ifname = ifname.strip()
+        if not ec and ifname:
+            # XXX Should only do this is the device is up, and then likewise return it
+            # up on exit self.phy_intfs_hostname[devaddr] = ifname
+            self.logger.info(
+                "Setting physical PCI device %s named %s down", devaddr, ifname
+            )
+            self.unet.rootcmd.cmd_status(
+                f"ip link set {ifname} down 2> /dev/null || true"
+            )
+
+        # Get the current bound driver, and unbind
+        try:
+            driver = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/driver")
+            driver = driver.strip()
+        except Exception:
+            driver = ""
+        if driver:
+            if driver == "vfio-pci":
+                self.logger.info(
+                    "Physical PCI device %s already bound to vfio-pci", devaddr
+                )
+                return
+            self.logger.info(
+                "Unbinding physical PCI device %s from driver %s", devaddr, driver
+            )
+            self.phy_odrivers[devaddr] = driver
+            self.unet.rootcmd.cmd_raises(
+                f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/unbind"
+            )
+
+        # Add the device vendor and device id to vfio-pci in case it's the first time
+        vendor = read_str_value(f"/sys/bus/pci/devices/{devaddr}/vendor")
+        devid = read_str_value(f"/sys/bus/pci/devices/{devaddr}/device")
+        self.logger.info("Adding device IDs %s:%s to vfio-pci", vendor, devid)
+        ec, _, _ = self.unet.rootcmd.cmd_status(
+            f"echo {vendor} {devid} > /sys/bus/pci/drivers/vfio-pci/new_id", warn=False
+        )
+
+        if not self.unet.rootcmd.path_exists(f"/sys/bus/pci/driver/vfio-pci/{devaddr}"):
+            # Bind to vfio-pci if wasn't added with new_id
+            self.logger.info("Binding physical PCI device %s to vfio-pci", devaddr)
+            ec, _, _ = self.unet.rootcmd.cmd_status(
+                f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/bind"
+            )
 
     async def rem_phy_intf(self, devaddr):
-        # raise NotImplementedError("rem_phy_intf")
-        raise Exception("rem_phy_intf")
+        """Remove a physical inteface (i.e. mv it away from vfio-pci driver
+
+        This is primarily useful for Qemu, but also for things like TREX or DPDK
+        """
+        lname = self.phy_intfs.get(devaddr, "")
+        if lname:
+            del self.phy_intfs[devaddr]
+
+        # ifname = self.phy_intfs_hostname.get(devaddr, "")
+        # if ifname
+        #     del self.phy_intfs_hostname[devaddr]
+
+        driver = self.phy_odrivers.get(devaddr, "")
+        if not driver:
+            self.logger.info(
+                "Physical PCI device %s was bound to vfio-pci on entry", devaddr
+            )
+            return
+
+        self.logger.info(
+            "Unbinding physical PCI device %s from driver vfio-pci", devaddr
+        )
+        self.unet.rootcmd.cmd_status(
+            f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/unbind"
+        )
+
+        self.logger.info("Binding physical PCI device %s to driver %s", devaddr, driver)
+        ec, _, _ = self.unet.rootcmd.cmd_status(
+            f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/bind"
+        )
+        if not ec:
+            del self.phy_odrivers[devaddr]
 
     async def _async_delete(self):
         if type(self) == L3Node:  # pylint: disable=C0123
@@ -1140,7 +1257,6 @@ class L3QemuVM(L3Node):
         self.use_console = False
         self.tapfds = {}
         self.tapnames = {}
-        self.tapmacs = {}
 
         super().__init__(name=name, config=config, **kwargs)
 
@@ -1236,14 +1352,15 @@ class L3QemuVM(L3Node):
         # in the host then move that interface so that the ifindex/devfile are
         # different.
         self.host_intfs[hname] = lname
+        index = len(self.host_intfs)
 
-        index = self.unet.tapcount
+        tapindex = self.unet.tapcount
         self.unet.tapcount = self.unet.tapcount + 1
 
-        tapname = f"tap{index}"
+        tapname = f"tap{tapindex}"
         self.tapnames[hname] = tapname
 
-        mac = f"02:00:0a:00:0{index}:0{self.id}"
+        mac = f"02:bb:bb:bb:{index:02x}:{self.id:02x}"
         self.tapmacs[hname] = mac
 
         self.unet.rootcmd.cmd_raises(
@@ -1274,137 +1391,27 @@ class L3QemuVM(L3Node):
         del self.tapnames[hname]
         del self.host_intfs[hname]
 
-    async def add_phy_intf(self, devaddr, lname):
-        self.phy_intfs[devaddr] = lname
-
-        _, _, off, fun = parse_pciaddr(devaddr)
-        doffset = off * 8 + fun
-
-        index = self.unet.tapcount
-        self.unet.tapcount = self.unet.tapcount + 1
-
-        is_virtual = self.unet.rootcmd.path_exists(
-            f"/sys/bus/pci/devices/{devaddr}/physfn"
-        )
-        if is_virtual:
-            pfname = self.unet.rootcmd.cmd_raises(
-                f"ls -1 /sys/bus/pci/devices/{devaddr}/physfn/net"
-            ).strip()
-            pdevaddr = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/physfn")
-            _, _, poff, pfun = parse_pciaddr(pdevaddr)
-            poffset = poff * 8 + pfun
-
-            offset = read_int_value(
-                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_offset"
-            )
-            stride = read_int_value(
-                f"/sys/bus/pci/devices/{devaddr}/physfn/sriov_stride"
-            )
-            vf = (doffset - offset - poffset) // stride
-            mac = f"02:00:bb:00:0{index}:0{self.id}"
-            # Some devices require the parent to be up (e.g., ixbge)
-            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} up")
-            self.unet.rootcmd.cmd_raises(f"ip link set {pfname} vf {vf} mac {mac}")
-            self.unet.rootcmd.cmd_status(f"ip link set {pfname} vf {vf} trust on")
-            self.tapmacs[devaddr] = mac
-
-        self.logger.info("Adding physical PCI device %s as %s", devaddr, lname)
-
-        # Get interface name and set to down if present
-        ec, ifname, _ = self.unet.rootcmd.cmd_status(
-            f"ls /sys/bus/pci/devices/{devaddr}/net/", warn=False
-        )
-        ifname = ifname.strip()
-        if not ec and ifname:
-            # XXX Should only do this is the device is up, and then likewise return it
-            # up on exit self.phy_intfs_hostname[devaddr] = ifname
-            self.logger.info(
-                "Setting physical PCI device %s named %s down", devaddr, ifname
-            )
-            self.unet.rootcmd.cmd_status(
-                f"ip link set {ifname} down 2> /dev/null || true"
-            )
-
-        # Get the current bound driver, and unbind
-        try:
-            driver = read_sym_basename(f"/sys/bus/pci/devices/{devaddr}/driver")
-            driver = driver.strip()
-        except Exception:
-            driver = ""
-        if driver:
-            if driver == "vfio-pci":
-                self.logger.info(
-                    "Physical PCI device %s already bound to vfio-pci", devaddr
-                )
-                return
-            self.logger.info(
-                "Unbinding physical PCI device %s from driver %s", devaddr, driver
-            )
-            self.phy_odrivers[devaddr] = driver
-            self.unet.rootcmd.cmd_raises(
-                f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/unbind"
-            )
-
-        # Add the device vendor and device id to vfio-pci in case it's the first time
-        vendor = read_str_value(f"/sys/bus/pci/devices/{devaddr}/vendor")
-        devid = read_str_value(f"/sys/bus/pci/devices/{devaddr}/device")
-        self.logger.info("Adding device IDs %s:%s to vfio-pci", vendor, devid)
-        ec, _, _ = self.unet.rootcmd.cmd_status(
-            f"echo {vendor} {devid} > /sys/bus/pci/drivers/vfio-pci/new_id", warn=False
-        )
-
-        if not self.unet.rootcmd.path_exists(f"/sys/bus/pci/driver/vfio-pci/{devaddr}"):
-            # Bind to vfio-pci if wasn't added with new_id
-            self.logger.info("Binding physical PCI device %s to vfio-pci", devaddr)
-            ec, _, _ = self.unet.rootcmd.cmd_status(
-                f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/bind"
-            )
-
-    async def rem_phy_intf(self, devaddr):
-        lname = self.phy_intfs.get(devaddr, "")
-        if lname:
-            del self.phy_intfs[devaddr]
-
-        # ifname = self.phy_intfs_hostname.get(devaddr, "")
-        # if ifname
-        #     del self.phy_intfs_hostname[devaddr]
-
-        driver = self.phy_odrivers.get(devaddr, "")
-        if not driver:
-            self.logger.info(
-                "Physical PCI device %s was bound to vfio-pci on entry", devaddr
-            )
-            return
-
-        self.logger.info(
-            "Unbinding physical PCI device %s from driver vfio-pci", devaddr
-        )
-        self.unet.rootcmd.cmd_status(
-            f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/unbind"
-        )
-
-        self.logger.info("Binding physical PCI device %s to driver %s", devaddr, driver)
-        ec, _, _ = self.unet.rootcmd.cmd_status(
-            f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/bind"
-        )
-        if not ec:
-            del self.phy_odrivers[devaddr]
-
     async def create_tap(self, index, ifname):
-        mac = f"02:00:0a:00:0{index}:0{self.id}"
+        # XXX we shouldn't be doign a tap on a bridge with a veth
+        # we should just be using a tap created earlier which was connected to the
+        # bridge. Except we need to handle the case of p2p qemu <-> namespace
+        #
+        tapindex = self.unet.tapcount
+        self.unet.tapcount += 1
+        mac = f"02:aa:aa:aa:{index:02x}:{self.id:02x}"
         # nic = "tap,model=virtio-net-pci"
         # qemu -net nic,model=virtio,addr=1a:46:0b:ca:bc:7b -net tap,fd=3 3<>/dev/tap11
         self.cmd_raises(f"ip address flush dev {ifname}")
-        self.cmd_raises(f"ip tuntap add tap{index} mode tap")
+        self.cmd_raises(f"ip tuntap add tap{tapindex} mode tap")
         self.cmd_raises(f"ip link add name br{index} type bridge")
         self.cmd_raises(f"ip link set dev {ifname} master br{index}")
-        self.cmd_raises(f"ip link set dev tap{index} master br{index}")
-        self.cmd_raises(f"ip link set dev tap{index} up")
+        self.cmd_raises(f"ip link set dev tap{tapindex} master br{index}")
+        self.cmd_raises(f"ip link set dev tap{tapindex} up")
         self.cmd_raises(f"ip link set dev {ifname} up")
         self.cmd_raises(f"ip link set dev br{index} up")
         return [
             "-netdev",
-            f"tap,id=n{index},ifname=tap{index},script=no,downscript=no",
+            f"tap,id=n{index},ifname=tap{tapindex},script=no,downscript=no",
             "-device",
             f"virtio-net-pci,netdev=n{index},mac={mac}",
         ]
