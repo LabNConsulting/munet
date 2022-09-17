@@ -23,18 +23,20 @@ import subprocess
 
 import pytest
 
+
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
 
 
-async def test_cmd_raises(unet):
-    r1 = unet.hosts["r1"]
+@pytest.mark.parametrize("host", ["r1", "r2"])
+async def test_cmd_raises(unet, host):
+    host = unet.hosts[host]
 
-    o = r1.cmd_raises("echo Foobar")
+    o = host.cmd_raises("echo Foobar")
     assert o == "Foobar\n"
 
     try:
-        r1.cmd_raises("ls ajfipoasdjiopa", warn=False)
+        host.cmd_raises("ls ajfipoasdjiopa", warn=False)
     except subprocess.CalledProcessError as error:
         assert error.returncode == 2
         assert "No such file or directory" in error.stderr
@@ -42,7 +44,7 @@ async def test_cmd_raises(unet):
         assert False, "Failed to raise error"
 
     try:
-        await r1.async_cmd_raises("ls ajfipoasdjiopa", warn=False)
+        await host.async_cmd_raises("ls ajfipoasdjiopa", warn=False)
     except subprocess.CalledProcessError as error:
         assert error.returncode == 2
         assert "No such file or directory" in error.stderr
@@ -50,58 +52,77 @@ async def test_cmd_raises(unet):
         assert False, "Failed to raise error"
 
 
-async def test_cmd_status(unet):
-    r1 = unet.hosts["r1"]
+@pytest.mark.parametrize("host", ["r1", "r2"])
+async def test_cmd_status(unet, host):
+    host = unet.hosts[host]
 
-    rc, o, e = r1.cmd_status("echo Foobar")
+    rc, o, e = host.cmd_status("echo Foobar")
     assert o == "Foobar\n"
     assert e == ""
     assert rc == 0
 
-    rc, o, e = r1.cmd_status("ls ajfipoasdjiopa", warn=False)
+    rc, o, e = host.cmd_status("ls ajfipoasdjiopa", warn=False)
     assert rc == 2
     assert "No such file or directory" in e
     assert o == ""
 
-    rc, o, e = await r1.async_cmd_status("echo Foobar")
+    rc, o, e = await host.async_cmd_status("echo Foobar")
     assert o == "Foobar\n"
     assert e == ""
     assert rc == 0
 
-    rc, o, e = await r1.async_cmd_status("ls ajfipoasdjiopa", warn=False)
+    rc, o, e = await host.async_cmd_status("ls ajfipoasdjiopa", warn=False)
     assert rc == 2
     assert "No such file or directory" in e
     assert o == ""
 
 
-async def test_cmd_nostatus(unet):
-    r1 = unet.hosts["r1"]
+@pytest.mark.parametrize("host", ["r1", "r2"])
+async def test_cmd_nostatus(unet, host):
+    host = unet.hosts[host]
 
-    o = r1.cmd_nostatus("echo Foobar")
+    o = host.cmd_nostatus("echo Foobar")
     assert o == "Foobar\n"
 
-    o = r1.cmd_nostatus("echo Foobar", stderr=subprocess.STDOUT)
+    o = host.cmd_nostatus("echo Foobar", stderr=subprocess.STDOUT)
     assert o == "Foobar\n"
 
-    o, e = r1.cmd_nostatus("echo Foobar", stderr=subprocess.PIPE)
-    assert o == "Foobar\n"
-    assert e == ""
-
-    o = await r1.async_cmd_nostatus("echo Foobar")
-    assert o == "Foobar\n"
-
-    o = await r1.async_cmd_nostatus("echo Foobar", stderr=subprocess.STDOUT)
-    assert o == "Foobar\n"
-
-    o, e = await r1.async_cmd_nostatus("echo Foobar", stderr=subprocess.PIPE)
+    o, e = host.cmd_nostatus("echo Foobar", stderr=subprocess.PIPE)
     assert o == "Foobar\n"
     assert e == ""
 
+    o = host.cmd_nostatus("ls ajfipoasdjiopa", warn=False)
+    assert "No such file or directory" in o
 
-async def test_popen(unet):
-    r1 = unet.hosts["r1"]
+    o, e = host.cmd_nostatus("ls ajfipoasdjiopa", warn=False, stderr=subprocess.PIPE)
+    assert o == ""
+    assert "No such file or directory" in e
 
-    p = r1.popen("echo Foobar")
+    o = await host.async_cmd_nostatus("echo Foobar")
+    assert o == "Foobar\n"
+
+    o = await host.async_cmd_nostatus("echo Foobar", stderr=subprocess.STDOUT)
+    assert o == "Foobar\n"
+
+    o, e = await host.async_cmd_nostatus("echo Foobar", stderr=subprocess.PIPE)
+    assert o == "Foobar\n"
+    assert e == ""
+
+    o = await host.async_cmd_nostatus("ls ajfipoasdjiopa", warn=False)
+    assert "No such file or directory" in o
+
+    o, e = await host.async_cmd_nostatus(
+        "ls ajfipoasdjiopa", warn=False, stderr=subprocess.PIPE
+    )
+    assert o == ""
+    assert "No such file or directory" in e
+
+
+@pytest.mark.parametrize("host", ["r1", "r2"])
+async def test_popen(unet, host):
+    host = unet.hosts[host]
+
+    p = host.popen("echo Foobar")
     o, e = p.communicate()
     rc = p.wait()
     assert rc == 0
@@ -109,7 +130,7 @@ async def test_popen(unet):
     assert e == ""
 
     # XXX should really test this with real async actions
-    p = await r1.async_popen(["echo", "Foobar"])
+    p = await host.async_popen(["echo", "Foobar"])
     o, e = await p.communicate()
     rc = await p.wait()
     assert rc == 0
