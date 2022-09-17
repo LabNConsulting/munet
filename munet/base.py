@@ -712,6 +712,27 @@ class Commander:  # pylint: disable=R0904
             cmds = ["/bin/bash", "-c", cmd]
         return cmds
 
+    def cmd_nostatus(self, cmd, **kwargs):
+        """Run given command returning output[s]
+
+        if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
+        both stdout and stderr are returned, otherwise stderr is combined
+        with stdout and only stdout is returned.
+        """
+        #
+        # This method serves as the basis for all derived sync cmd variations, so to
+        # override sync cmd behavior simply override this function and *not* the other
+        # variations, unless you are changing only that variation's behavior
+        #
+        cmds = self.cmd_get_cmd_list(cmd)
+        if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
+            _, o, e = self._cmd_status(cmds, **kwargs)
+            return o, e
+        if "stderr" in kwargs:
+            del kwargs["stderr"]
+        _, o, _ = self._cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
+        return o
+
     def cmd_status(self, cmd, **kwargs):
         "Run given command returning status and outputs"
         #
@@ -744,6 +765,22 @@ class Commander:  # pylint: disable=R0904
         #
         cmds = self.cmd_get_cmd_list(cmd)
         return await self._async_cmd_status(cmds, **kwargs)
+
+    async def async_cmd_nostatus(self, cmd, **kwargs):
+        """Run given command returning output[s]
+
+        if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
+        both stdout and stderr are returned, otherwise stderr is combined
+        with stdout and only stdout is returned.
+        """
+        cmds = self.cmd_get_cmd_list(cmd)
+        if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
+            _, o, e = await self._async_cmd_status(cmds, **kwargs)
+            return o, e
+        if "stderr" in kwargs:
+            del kwargs["stderr"]
+        _, o, _ = await self._async_cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
+        return o
 
     async def async_cmd_raises(self, cmd, **kwargs):
         """Execute a command. Raise an exception on errors"""

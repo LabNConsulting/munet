@@ -1432,6 +1432,7 @@ class L3QemuVM(L3Node):
             # # XXX
             # if hasattr(switch, "is_nat") and switch.is_nat:
             #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+        con.cmd_raises("ip link set lo up")
 
     async def _opencons(self, *cnames):
         "Open consoles based on socket file names"
