@@ -1503,7 +1503,11 @@ class L3QemuVM(L3Node):
         args = [get_exec_path_host("qemu-system-x86_64"), "-nodefaults", "-boot", bootd]
 
         if qc.get("kvm"):
-            args += ["-accel", "kvm", "-cpu", "host"]
+            rc, _, e = await self.async_cmd_status_host("ls -l /dev/kvm")
+            if rc:
+                self.logger.warning("Can't enable KVM no /dev/kvm: %s", e)
+            else:
+                args += ["-accel", "kvm", "-cpu", "host"]
 
         if ncpu := qc.get("ncpu"):
             args += ["-smp", f"{ncpu},sockets=1,cores={ncpu},threads=1"]
