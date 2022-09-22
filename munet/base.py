@@ -1993,9 +1993,19 @@ if have_pexpect:
         """
 
         def __init__(
-            self, cmd_or_spawn, orig_prompt, prompt_change, will_echo=False, **kwargs
+            self,
+            cmd_or_spawn,
+            orig_prompt,
+            prompt_change,
+            will_echo=False,
+            escape_ansi=False,
+            **kwargs,
         ):
             self.echo = will_echo
+            self.escape = (
+                re.compile(r"(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]") if escape_ansi else None
+            )
+
             # REPLWrapper expect a non-echoing child or will create one if given a
             # command string
             super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
@@ -2020,6 +2030,8 @@ if have_pexpect:
                     # Remove up to and including the command from the output stream
                     output = output[idx + len(cmd) :]
 
+            if self.escape:
+                output = self.escape.sub("", output)
             return output.replace("\r", "").strip()
 
         def cmd_status(self, cmd, timeout=-1):

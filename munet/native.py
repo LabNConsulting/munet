@@ -350,7 +350,7 @@ ff02::2\tip6-allrouters
         # for the prompt
         p.send("\n")
         prompt = "(qemu) "
-        return ShellWrapper(p, prompt, None, will_echo=True)
+        return ShellWrapper(p, prompt, None, will_echo=True, escape_ansi=True)
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
