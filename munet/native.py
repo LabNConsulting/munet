@@ -531,19 +531,31 @@ ff02::2\tip6-allrouters
                 self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
     def pytest_hook_run_cmd(self, stdout, stderr):
+        """
+        Handle pytest options related to running the node cmd:
+
+        This function does things such as launch tail'ing windows
+        on the given files if requested by the user.
+
+        Args
+           stdout, stderr - objects with `name` attribute otherwise
+                            path string to file for stdout, stderr
+        """
         if not self.unet or not self.unet.pytest_config:
             return
 
         outopt = self.unet.pytest_config.getoption("--stdout")
         outopt = outopt if outopt is not None else ""
         if outopt == "all" or self.name in outopt.split(","):
-            self.run_in_window(f"tail -F {stdout.name}", title=f"O:{self.name}")
+            outname = stdout.name if hasattr(stdout, "name") else stdout
+            self.run_in_window(f"tail -F {outname}", title=f"O:{self.name}")
 
         if stderr:
             erropt = self.unet.pytest_config.getoption("--stderr")
             erropt = erropt if erropt is not None else ""
             if erropt == "all" or self.name in erropt.split(","):
-                self.run_in_window(f"tail -F {stderr.name}", title=f"E:{self.name}")
+                errname = stderr.name if hasattr(stderr, "name") else stderr
+                self.run_in_window(f"tail -F {errname}", title=f"E:{self.name}")
 
     def pytest_hook_open_shell(self):
         if not self.unet or not self.unet.pytest_config:
@@ -1339,11 +1351,10 @@ class L3QemuVM(L3Node):
             # immediately
             self.cmdrepl.run_command(cmds, timeout=120, async_=True)
         )
-        # output =
-        # stdout = open(os.path.join(self.rundir, "cmd.out"), "w")
-        # stdout.write(output)
-        # stdout.flush()
-        # self.pytest_hook_run_cmd(stdout, None)
+
+        # stdout and err both combined into logfile from the spawned repl
+        stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
+        self.pytest_hook_run_cmd(stdout, None)
 
         return self.cmd_p
 
@@ -1620,6 +1631,8 @@ class L3QemuVM(L3Node):
             # XXX reconcile this
             start_new_session=True,  # allows us to signal all children to exit
         )
+
+        self.pytest_hook_run_cmd(stdout, stderr)
 
         # We've passed these on, so don't need these open here anymore.
         for fd in pass_fds:
