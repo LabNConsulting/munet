@@ -568,6 +568,9 @@ ff02::2\tip6-allrouters
     def set_p2p_addr(self, other, cconf, occonf):
         ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf.get("ip") else None
         oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf.get("ip") else None
+        self.logger.debug(
+            "%s: set_p2p_addr %s %s %s", self, other.name, ipaddr, oipaddr
+        )
 
         if not ipaddr and not oipaddr:
             if self.unet.autonumber:
@@ -596,8 +599,10 @@ ff02::2\tip6-allrouters
                 other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     async def add_host_intf(self, hname, lname):
+        if hname in self.host_intfs:
+            return
         self.host_intfs[hname] = lname
-        self.unet.rootcmd.cmd_raises(f"ip link set {hname} down ")
+        self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
         self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
         self.cmd_raises(f"ip link set {hname} name {lname}")
         self.cmd_raises(f"ip link set {lname} up")
@@ -614,7 +619,8 @@ ff02::2\tip6-allrouters
 
         This is primarily useful for Qemu, but also for things like TREX or DPDK
         """
-
+        if devaddr in self.phy_intfs:
+            return
         self.phy_intfs[devaddr] = lname
         index = len(self.phy_intfs)
 
@@ -1362,6 +1368,10 @@ class L3QemuVM(L3Node):
         # L3QemuVM needs it's own add_host_intf for macvtap, We need to create the tap
         # in the host then move that interface so that the ifindex/devfile are
         # different.
+
+        if hname in self.host_intfs:
+            return
+
         self.host_intfs[hname] = lname
         index = len(self.host_intfs)
 
@@ -1771,7 +1781,8 @@ class Munet(BaseMunet):
                     "help": (
                         "capture packets from NETWORK into file capture-NETWORK.pcap"
                         " the command is run within a new window which also shows"
-                        " packet summaries"
+                        " packet summaries. NETWORK can also be an interface specified"
+                        " as HOST:INTF. To capture inside the host namespace."
                     ),
                     "exec": "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
                     "top-level": True,
@@ -2044,8 +2055,15 @@ class Munet(BaseMunet):
             pcapopt = self.switches.keys()
         if pcapopt:
             for pcap in pcapopt.split(","):
-                self.run_in_window(
-                    f"tshark -s 1508 -i {pcap} -P -w capture-{pcap}.pcap",
+                if ":" in pcap:
+                    host, intf = pcap.split(":")
+                    pcap = f"{host}-{intf}"
+                    host = self.hosts[host]
+                else:
+                    host = self
+                    intf = pcap
+                host.run_in_window(
+                    f"tshark -s 9200 -i {intf} -P -w capture-{pcap}.pcap",
                     background=True,
                     title=f"cap:{pcap}",
                 )
