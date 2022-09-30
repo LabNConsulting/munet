@@ -1521,7 +1521,9 @@ class L3QemuVM(L3Node):
 
         qc = self.qemu_config
         bootd = "d" if "iso" in qc else "c"
-        args = [get_exec_path_host("qemu-system-x86_64"), "-nodefaults", "-boot", bootd]
+        # args = [get_exec_path_host("qemu-system-x86_64"),
+        #         "-nodefaults", "-boot", bootd]
+        args = [get_exec_path_host("qemu-system-x86_64"), "-boot", bootd]
 
         if qc.get("kvm"):
             rc, _, e = await self.async_cmd_status_host("ls -l /dev/kvm")
@@ -1531,7 +1533,8 @@ class L3QemuVM(L3Node):
                 args += ["-accel", "kvm", "-cpu", "host"]
 
         if ncpu := qc.get("ncpu"):
-            args += ["-smp", f"{ncpu},sockets=1,cores={ncpu},threads=1"]
+            # args += ["-smp", f"{ncpu},sockets=1,cores={ncpu},threads=1"]
+            args += ["-smp", f"{ncpu},sockets={ncpu},cores=1,threads=1"]
 
         args.extend(["-m", str(qc.get("memory", "512M"))])
 
