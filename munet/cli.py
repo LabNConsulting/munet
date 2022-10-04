@@ -37,6 +37,7 @@ import tempfile
 import termios
 import tty
 
+from .config import list_to_dict_with_key
 
 ENDMARKER = b"\x00END\x00"
 
@@ -261,15 +262,17 @@ New Window Commands:\n"""
 def get_shcmd(unet, host, kinds, execfmt, ucmd):
     if host is None:
         h = None
+        kind = None
     elif host is unet:
         h = unet
+        kind = ""
     else:
         h = unet.hosts[host]
         kind = h.config.get("kind", "")
         if kinds and kind not in kinds:
             return ""
     if not isinstance(execfmt, str):
-        execfmt = execfmt.get(kind)
+        execfmt = execfmt.get(kind, {}).get("exec", "")
     if not execfmt:
         return ""
     numfmt = len(re.findall(r"{\d*}", execfmt))
@@ -311,6 +314,9 @@ async def run_command(
 
     Runs `execfmt`. Prior to executing the string the following transformations are
     performed on it.
+
+    `execfmt` may also be a dictionary of dicitonaries keyed on kind with `exec` holding
+    the kind's execfmt string.
 
     - if `{}` is present then `str.format` is called to replace `{}` with any extra
        input values after the command and hosts are removed from the input.
@@ -482,7 +488,15 @@ async def doline(
             if not hosts:
                 return True
 
-        if "{}" not in execfmt and ucmd and not toplevel:
+        if isinstance(execfmt, str):
+            found_brace = "{}" in execfmt
+        else:
+            found_brace = False
+            for d in execfmt.values():
+                if "{}" in d["exec"]:
+                    found_brace = True
+                    break
+        if not found_brace and ucmd and not toplevel:
             # CLI command does not expect user command so treat as hosts of which some
             # must be unknown
             unknowns = [x for x in ucmd.split() if x not in unet.hosts]
@@ -491,12 +505,17 @@ async def doline(
 
         try:
             if toplevel or hosts == [unet]:
+                if toplevel:
+                    host = None
+                else:
+                    host = ""
                 logging.debug(
                     "top-level-window: execfmt: '%s' ucmd: '%s'", execfmt, ucmd
                 )
-                shcmd = get_shcmd(unet, None, None, execfmt, ucmd)
+                shcmd = get_shcmd(unet, host, None, execfmt, ucmd)
                 logging.debug("top-level-window: cmd: '%s' kwargs: '%s'", shcmd, kwargs)
-                unet.run_in_window(shcmd, **kwargs)
+                if shcmd:
+                    unet.run_in_window(shcmd, **kwargs)
             else:
                 for host in hosts:
                     shcmd = get_shcmd(unet, host, kinds, execfmt, ucmd)
@@ -681,7 +700,9 @@ def add_cli_in_window_cmd(
         helpfmt: format of command to display in help (left side)
         helptxt: help string for command (right side)
         execfmt: interpreter `cmd` to pass to `host.run_in_window()`, if {} present then
-          allow for user commands to be entered and inserted.
+          allow for user commands to be entered and inserted. May also be a dict of dict
+          keyed on kind with sub-key of "exec" providing the `execfmt` string for that
+          kind.
         toplevel: run command in common top-level namespaec not inside hosts
         kinds: limit CLI command to nodes which match list of kinds.
         **kwargs: keyword args to pass to `host.run_in_window()`
@@ -711,7 +732,9 @@ def add_cli_run_cmd(
         name: command string (no spaces)
         helpfmt: format of command to display in help (left side)
         helptxt: help string for command (right side)
-        execfmt: format string to insert user cmds into for execution
+        execfmt: format string to insert user cmds into for execution. May also be a
+          dict of dict keyed on kind with sub-key of "exec" providing the `execfmt`
+          string for that kind.
         toplevel: run command in common top-level namespaec not inside hosts
         kinds: limit CLI command to nodes which match list of kinds.
         on_host: Should execute the command on the host vs in the node namespace.
@@ -770,7 +793,9 @@ def add_cli_config(unet, config):
         name = cli_cmd.get("name", None)
         helpfmt = cli_cmd.get("format", "")
         helptxt = cli_cmd.get("help", "")
-        execfmt = cli_cmd.get("exec", "bash -c '{}'")
+        execfmt = list_to_dict_with_key(cli_cmd.get("exec-kind"), "kind")
+        if not execfmt:
+            execfmt = cli_cmd.get("exec", "bash -c '{}'")
         toplevel = cli_cmd.get("top-level", False)
         kinds = cli_cmd.get("kinds", [])
         stdargs = (unet, name, helpfmt, helptxt, execfmt, toplevel, kinds)
