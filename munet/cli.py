@@ -263,7 +263,7 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
     if host is None:
         h = None
         kind = None
-    elif host is unet:
+    elif host is unet or host == "":
         h = unet
         kind = ""
     else:
