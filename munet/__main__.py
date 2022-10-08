@@ -176,9 +176,9 @@ def main(*args):
 
     status = 4
     try:
+        parser.validate_config(config, logger, args)
         if args.validate_only:
-            return parser.validate_config(config, logger, args)
-
+            return 0
         # Executes the cmd for each node.
         status = asyncio.run(async_main(args, config))
     except KeyboardInterrupt:

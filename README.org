@@ -460,13 +460,18 @@ module: labn-munet-config
             "The description of the command. Used to print help string for
              user.";
         }
+        leaf interactive {
+          type boolean;
+          description
+            "Run the command in interactive pty.";
+        }
         leaf-list kinds {
           type leafref {
             path "../../../kinds/name";
           }
           description
-            "List of kinds for which this command should be restricted to running
-             on.";
+            "List of kinds for which this command should be restricted to
+             running on.";
         }
         leaf name {
           type string;

@@ -29,8 +29,24 @@ import subprocess
 import sys
 import tempfile
 
+import jsonschema  # pylint: disable=C0415
+import jsonschema.validators  # pylint: disable=C0415
+
+from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
+
 from .config import config_to_dict_with_key
 from .native import Munet
+
+
+def get_schema():
+    if get_schema.schema is None:
+        with importlib.resources.path("munet", "munet-schema.json") as datapath:
+            search = [str(datapath.parent)]
+        get_schema.schema = get_config(basename="munet-schema", search=search)
+    return get_schema.schema
+
+
+get_schema.schema = None
 
 
 def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
@@ -132,26 +148,14 @@ def append_hosts_files(unet, netname):
 
 
 def validate_config(config, logger, args):
-    import jsonschema  # pylint: disable=C0415
-
-    from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
-
-    if not config:
-        config = get_config(basename="munet")
-        del config["config_pathname"]
-
     old = os.getcwd()
     if args:
         os.chdir(args.rundir)
 
     try:
-        search = [old]
-        with importlib.resources.path("munet", "munet-schema.yaml") as datapath:
-            search.append(str(datapath.parent))
-
-        schema = get_config(basename="munet-schema", search=search)
-        jsonschema.validate(instance=config, schema=schema)
-        logger.info("Validated")
+        validator = jsonschema.validators.Draft202012Validator(get_schema())
+        validator.validate(instance=config)
+        logger.debug("Validated %s", config["config_pathname"])
         return True
     except FileNotFoundError as error:
         logger.info("No schema found: %s", error)
@@ -179,6 +183,9 @@ def load_kinds(args):
         config = get_config(args_config, "kinds", search)
 
         if config is not None:
+            validator = jsonschema.validators.Draft202012Validator(get_schema())
+            validator.validate(instance=config)
+
             if os.path.exists(config["config_pathname"]):
                 logging.info("Loaded kinds config %s", config["config_pathname"])
 

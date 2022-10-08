@@ -33,17 +33,24 @@ jobs:
       #     path: .venv
       #     key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
 
-      - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: |
-          poetry update --no-interaction
-          poetry install -E ci --no-interaction
+      # - name: Install dependencies
+      #   if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+      #   run: |
+      #     poetry install -E ci --no-interaction
 
       - name: Install munet project
         run: poetry install -E ci --no-interaction
 
       - name: Lint the project
         run: make ci-lint
+
+      - name: Verify json schema is up-to-date
+        run: |
+          make munet/munet-schema.json
+          bash -c '[[ -z "$(git status -s --untracked=no)" ]]'
+
+      - name: Run YANG tests
+        run: make test-validate
 
       - name: Make sure podman image is present
         run: sudo podman pull docker.io/labn/docker-ci-test:20.04
@@ -55,7 +62,7 @@ jobs:
           cat /proc/meminfo || true
           cat /proc/cpuinfo || true
 
-      - name: Run tests
+      - name: Run main tests
         run: make test
 
       - name: Upload coverage report
