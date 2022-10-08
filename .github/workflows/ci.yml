@@ -37,7 +37,7 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: |
           poetry update --no-interaction
-          poetry install -E ci --no-interaction
+          poetry install --no-interaction
 
       - name: Install munet project
         run: poetry install -E ci --no-interaction
