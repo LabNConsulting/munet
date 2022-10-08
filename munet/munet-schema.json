@@ -35,6 +35,9 @@
               "help": {
                 "type": "string"
               },
+              "interactive": {
+                "type": "boolean"
+              },
               "kinds": {
                 "type": "array",
                 "items": {
