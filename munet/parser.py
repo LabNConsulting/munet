@@ -133,6 +133,7 @@ def append_hosts_files(unet, netname):
 
 def validate_config(config, logger, args):
     import jsonschema  # pylint: disable=C0415
+    import jsonschema.validators  # pylint: disable=C0415
 
     from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
 
@@ -150,7 +151,9 @@ def validate_config(config, logger, args):
             search.append(str(datapath.parent))
 
         schema = get_config(basename="munet-schema", search=search)
-        jsonschema.validate(instance=config, schema=schema)
+        validator = jsonschema.validators.Draft202012Validator(schema)
+        validator.validate(instance=config)
+        # jsonschema.validate
         logger.info("Validated")
         return True
     except FileNotFoundError as error:
