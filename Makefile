@@ -1,28 +1,32 @@
 unexport VIRTUAL_ENV
 ORG := README.org
 YANG := labn-munet-config.yang
+YANG_SCHEMA := munet/munet-schema.json
 SCHEMA := test-schema.json
-JDATA := test-data.json
 LOG_CLI := # --log-cli
 TMP := .testtmp
 
-all: $(TMP) ci-lint test $(YANG) yang-test
+POETRYRUN := env -u VIRTUAL_ENV PATH="$(PATH)" poetry run
+
+all: $(TMP) ci-lint test $(YANG) $(YANG_SCHEMA) yang-test
+
+prepare-publish: $(YANG_SCHEMA)
 
 lint:
-	pylint ./munet $(shell find ./tests/*/* -name '*.py')
+	$(POETRYRUN) pylint ./munet $(shell find ./tests/*/* -name '*.py')
 
 ci-lint:
-	env PATH="$(PATH)" poetry run pylint --disable="fixme" ./munet ./tests
+	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
 
-test:
-	sudo env PATH="$(PATH)" poetry run pytest -s -v --cov=munet --cov-report=xml tests
+test: test-validate
+	sudo $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
 
 clean:
 	rm -f *.yang coverage.xml err.out ox-rfc.el
 	rm -rf .testtmp/schema
 
 run:
-	sudo -E poetry run python3 -m munet
+	sudo -E $(POETRYRUN) python3 -m munet
 
 install:
 	poetry install
@@ -36,7 +40,7 @@ install:
 # -------------------------
 
 ajv = $(or $(and $(shell which ajv),ajv $(1)),)
-y2j = python  -c 'import sys; import json; import yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout, indent=2)' < $(1) > $(2)
+y2j = $(POETRYRUN) python -c 'import sys; import json; import yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout, indent=2)' < $(1) > $(2)
 
 $(YANG): $(ORG)
 	sed -n '/#+begin_src yang :exports code/,/^#+end_src/p' $< | sed '/^#/d' >$@
@@ -68,21 +72,12 @@ ox-rfc.el:
 # YANG data validation
 # --------------------
 
+$(YANG_SCHEMA): $(YANG)
+	$(POETRYRUN) pyang --plugindir .venv/src/pyang-json-schema-plugin/jsonschema/jsonschema.py --format jsonschema  -o $@ $<
+
 $(TMP):
 	mkdir -p .testtmp
 
-$(SCHEMA): test-schema.yaml
-	$(call y2j,$<,$@)
-
-$(JDATA): munet/kinds.yaml
-	$(call y2j,$<,$@)
-
-validate: $(SCHEMA) $(JDATA) $(TMP)
-	$(call ajv,--spec=draft2020 -d $(JDATA) -s $(SCHEMA))
-	jsonschema --instance $(JDATA) $(SCHEMA)
-
-CANON_SCHEMA := .testtmp/munet-schema.json
-YANG_SCHEMA := .testtmp/yang-schema.json
 KINDS_DATA := .testtmp/kinds.json
 
 .testtmp/%.json: munet/%.yaml $(TMP)
@@ -91,22 +86,11 @@ KINDS_DATA := .testtmp/kinds.json
 .testtmp/basic.json: tests/basic/munet.yaml $(TMP)
 	$(call y2j,$<,$@)
 
-$(YANG_SCHEMA): $(YANG) $(TMP)
-	pyang --plugindir .venv/src/pyang-json-schema-plugin/jsonschema --format jsonschema  -o $@ $<
-
-test-valid: $(CANON_SCHEMA) $(YANG_SCHEMA) $(KINDS_DATA) .testtmp/basic.json $(TMP)
-	@echo "testing kinds with canonical schema"
-	$(call ajv,--spec=draft2020 -d .testtmp/kinds.json -s .testtmp/munet-schema.json)
-	jsonschema --instance .testtmp/kinds.json .testtmp/munet-schema.json
-
-	@echo "testing basic with canonical schema"
-	$(call ajv,--spec=draft2020 -d .testtmp/basic.json -s .testtmp/munet-schema.json)
-	jsonschema --instance .testtmp/basic.json .testtmp/munet-schema.json
-
+test-validate: $(YANG_SCHEMA) $(KINDS_DATA) .testtmp/basic.json $(TMP)
 	@echo "testing basic with yang generated schema"
-	$(call ajv,--spec=draft2020 -d .testtmp/basic.json -s .testtmp/yang-schema.json)
-	jsonschema --instance .testtmp/basic.json .testtmp/yang-schema.json
+	$(call ajv,--spec=draft2020 -d .testtmp/basic.json -s $(YANG_SCHEMA))
+	$(POETRYRUN) jsonschema --instance .testtmp/basic.json $(YANG_SCHEMA)
 
 	@echo "testing kinds with yang generated schema"
-	$(call ajv,--spec=draft2020 -d .testtmp/kinds.json -s .testtmp/yang-schema.json)
-	jsonschema --instance .testtmp/kinds.json .testtmp/yang-schema.json
+	$(call ajv,--spec=draft2020 -d .testtmp/kinds.json -s $(YANG_SCHEMA))
+	$(POETRYRUN) jsonschema --instance .testtmp/kinds.json $(YANG_SCHEMA)

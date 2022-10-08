@@ -147,7 +147,7 @@ def validate_config(config, logger, args):
 
     try:
         search = [old]
-        with importlib.resources.path("munet", "munet-schema.yaml") as datapath:
+        with importlib.resources.path("munet", "munet-schema.json") as datapath:
             search.append(str(datapath.parent))
 
         schema = get_config(basename="munet-schema", search=search)
