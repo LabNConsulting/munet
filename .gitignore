@@ -2,6 +2,7 @@
 /dist/
 /err.out
 /coverage.xml
+/.testtmp/
 *.log
 *.pyc
 *.yang
