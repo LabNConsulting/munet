@@ -13,7 +13,7 @@ include = ["logconf.yaml", "munet-schema.json"]
 python = "^3.8"
 pexpect = "^4.8.0"
 PyYAML = "^6.0"
-jsonschema = {version = "^4.16.0", optional = true}
+jsonschema = "^4.16.0"
 toml = {version = "^0.10.2", optional = true}
 autoflake = {version = "^1.7.0", optional = true}
 flake8 = {version = "^5.0.4", optional = true}
@@ -27,7 +27,6 @@ pyang-json-schema-plugin = {git = "https://github.com/LabNConsulting/pyang-json-
 [tool.poetry.dev-dependencies]
 black = "^22.10.0"
 isort = "^5.10.1"
-jsonschema = "^4.16.0"
 pylint = "^2.15.3"
 pytest = "^7.1.3"
 pytest-asyncio = "^0.19.0"
@@ -36,10 +35,9 @@ pytest-xdist = "^2.5.0"
 toml = "^0.10.2"
 
 [tool.poetry.extras]
-ci = ["jsonschema", "pyang", "pyang-json-schema-plugin"]
-schemadev = ["jsonschema", "pyang", "pyang-json-schema-plugin"]
+ci = ["pyang", "pyang-json-schema-plugin"]
+schemadev = ["pyang", "pyang-json-schema-plugin"]
 ide = ["Pygments", "autoflake", "flake8", "importmagic", "jedi", "json-rpc"]
-validate = ["jsonschema"]
 
 [tool.poetry.scripts]
 munet = "munet.__main__:main"
