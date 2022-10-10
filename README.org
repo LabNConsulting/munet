@@ -743,3 +743,104 @@ cisco VM using a nexos file system image.
   LINT="$DOCKER yanglint -p /yang-drafts -p /yang --strict -t data"
   $LINT $extra $module ${file} 2>&1 || echo FAIL
 #+end_src
+
+* Development
+
+** Dependencies
+
+μNET requires the following packages:
+    python3 python3-pip
+
+Automate tests require the following system packages:
+    docker
+
+Ensure you have poetry setup (via pip3 install):
+    pip3 poetry
+
+Install μNET dependencies via poetry:
+   poetry install -E dev
+
+** Check your install
+   sudo make
+
+** Run an example
+
+The following uses FRR (see https://frrouting.org)
+   sudo poetry run munet -c examples/frr/ospf/ospf/munet.yaml
+
+For example:
+#+begin_src shell
+munet$ sudo poetry run munet -c examples/frr/ospf/ospf/munet.yaml
+2022-09-16 13:37:05,603: INFO: Loaded logging config /home/lberger/Code/github/labn/munet/munet/logconf.yaml
+2022-09-16 13:37:05,609: INFO: Loaded config from /home/lberger/Code/github/labn/munet/examples/frr/ospf/ospf/munet.yaml
+2022-09-16 13:37:05,623: INFO: Loaded kinds config /home/lberger/Code/github/labn/munet/munet/kinds.yaml
+2022-09-16 13:37:05,745: INFO: Munet(munet): created
+2022-09-16 13:37:05,926: INFO: L3Node(r1): created
+2022-09-16 13:37:06,086: INFO: L3Node(r2): created
+2022-09-16 13:37:06,247: INFO: L3Node(r3): created
+2022-09-16 13:37:06,778: INFO: Topology up: rundir: /tmp/unet-root
+
+--- Munet CLI Starting ---
+
+
+munet>
+munet> help
+
+Basic Commands:
+  cli   :: open a secondary CLI window
+  help  :: this help
+  hosts :: list hosts
+  quit  :: quit the cli
+
+  HOST can be a host or one of the following:
+    - '*' for all hosts
+    - '.' for the parent munet
+    - a regex specified between '/' (e.g., '/rtr.*/')
+
+New Window Commands:
+  hterm HOST [HOST ...] :: open terminal[s] on HOST[S] (outside containers), * for all
+  pcap NETWORK  :: capture packets from NETWORK into file capture-NETWORK.pcap the command is run within a new window which also shows packet summaries
+  stdout HOST [HOST ...]        :: tail -f on the stdout of the cmd for this node
+  stdout HOST [HOST ...]        :: tail -f on the stdout of the cmd for this node
+  term HOST [HOST ...]  :: open terminal[s] (TMUX or XTerm) on HOST[S], * for all
+  vtysh ROUTER [ROUTER ...]     ::
+  xterm HOST [HOST ...] :: open XTerm[s] on HOST[S], * for all
+Inline Commands:
+  [ROUTER ...] COMMAND  :: execute vtysh COMMAND on the router[s]
+  [HOST ...] sh <SHELL-COMMAND> :: execute <SHELL-COMMAND> on hosts
+  [HOST ...] shi <INTERACTIVE-COMMAND>  :: execute <INTERACTIVE-COMMAND> on HOST[s]
+munet> show ip ospf neighbor
+2022-09-16 13:43:13,172: INFO: Filtering hosts to kinds: ['frr']
+2022-09-16 13:43:13,172: INFO: Filtered hosts: ['r1', 'r2', 'r3']
+------ Host: r1 ------
+
+Neighbor ID     Pri State           Up Time         Dead Time Address         Interface                        RXmtL RqstL DBsmL
+172.16.0.2        1 Full/DR         5m21s             33.727s 10.0.1.2        eth0:10.0.1.1                        0     0     0
+172.16.0.3        1 Full/DR         5m26s             33.735s 10.0.2.3        eth1:10.0.2.1                        0     0     0
+
+------- End: r1 ------
+------ Host: r2 ------
+
+Neighbor ID     Pri State           Up Time         Dead Time Address         Interface                        RXmtL RqstL DBsmL
+172.16.0.1        1 Full/Backup     5m21s             33.707s 10.0.1.1        eth0:10.0.1.2                        0     0     0
+172.16.0.3        1 Full/DR         5m26s             33.715s 10.0.3.3        eth1:10.0.3.2                        0     0     0
+
+------- End: r2 ------
+------ Host: r3 ------
+
+Neighbor ID     Pri State           Up Time         Dead Time Address         Interface                        RXmtL RqstL DBsmL
+172.16.0.1        1 Full/Backup     5m26s             33.707s 10.0.2.1        eth0:10.0.2.3                        0     0     0
+172.16.0.2        1 Full/Backup     5m26s             33.706s 10.0.3.2        eth1:10.0.3.3                        0     0     0
+
+------- End: r3 ------
+munet> r1 show ip ospf neighbor
+2022-09-16 13:43:18,073: INFO: Filtering hosts to kinds: ['frr']
+2022-09-16 13:43:18,075: INFO: Filtered hosts: ['r1']
+
+Neighbor ID     Pri State           Up Time         Dead Time Address         Interface                        RXmtL RqstL DBsmL
+172.16.0.2        1 Full/DR         5m26s             38.788s 10.0.1.2        eth0:10.0.1.1                        0     0     0
+172.16.0.3        1 Full/DR         5m31s             38.795s 10.0.2.3        eth1:10.0.2.1                        0     0     0
+
+munet>
+
+#+end_src
