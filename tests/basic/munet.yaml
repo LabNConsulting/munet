@@ -3,15 +3,19 @@ topology:
   networks-autonumber: true
   networks:
     - name: net0
+      mtu: 5000
     - name: net1
       ip: "192.168.10.0/24"
+      mtu: 9000
   nodes:
     - name: r1
       connections:
         - to: net0
           name: xyz0
+          mtu: 4500
         - to: net1
         - to: "r2"
+          mtu: 9000
       cmd: |
         ip addr show
         which ping
@@ -20,8 +24,10 @@ topology:
       # More detailed connection config
       connections:
         - to: "net0"
+          mtu: 4500
         - to: "r1"
           name: "p2p0"
+          mtu: 9000
         - to: "r3"
           name: "p2p1"
           remote-name: "eth1"
@@ -29,6 +35,7 @@ topology:
           ip: "192.168.202.0/31"
           name: "p2p2"
           remote-name: "eth2"
+          mtu: 9000
       cmd: |
         ip addr show
         which ping
@@ -41,6 +48,7 @@ topology:
         - to: "r2"
           ip: "192.168.202.1/31"
           remote-name: "p2p2"
+          mtu: 9000
       cmd: |
         stat -f -c %T /sys/fs/cgroup
         ip addr show
