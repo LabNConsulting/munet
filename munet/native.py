@@ -45,6 +45,7 @@ from .base import get_exec_path_host
 from .config import config_subst
 from .config import config_to_dict_with_key
 from .config import find_matching_net_config
+from .config import find_with_kv
 from .config import merge_kind_config
 
 
@@ -117,10 +118,10 @@ class L2Bridge(Bridge):
     A linux bridge with no IP network address.
     """
 
-    def __init__(self, name=None, unet=None, logger=None, config=None):
+    def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
         """Create a linux Bridge."""
 
-        super().__init__(name=name, unet=unet, logger=logger)
+        super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
 
@@ -130,10 +131,10 @@ class L3Bridge(Bridge):
     A linux bridge with associated IP network address.
     """
 
-    def __init__(self, name=None, unet=None, logger=None, config=None):
+    def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
         """Create a linux Bridge."""
 
-        super().__init__(name=name, unet=unet, logger=logger)
+        super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
 
@@ -598,13 +599,15 @@ ff02::2\tip6-allrouters
             if "physical" not in occonf and not other.is_vm:
                 other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
-    async def add_host_intf(self, hname, lname):
+    async def add_host_intf(self, hname, lname, mtu=None):
         if hname in self.host_intfs:
             return
         self.host_intfs[hname] = lname
         self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
         self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
         self.cmd_raises(f"ip link set {hname} name {lname}")
+        if mtu:
+            self.cmd_raises(f"ip link set {lname} mtu {mtu}")
         self.cmd_raises(f"ip link set {lname} up")
 
     async def rem_host_intf(self, hname):
@@ -1364,7 +1367,7 @@ class L3QemuVM(L3Node):
 
         return self.cmd_p
 
-    async def add_host_intf(self, hname, lname):
+    async def add_host_intf(self, hname, lname, mtu=None):
         # L3QemuVM needs it's own add_host_intf for macvtap, We need to create the tap
         # in the host then move that interface so that the ifindex/devfile are
         # different.
@@ -1387,6 +1390,8 @@ class L3QemuVM(L3Node):
         self.unet.rootcmd.cmd_raises(
             f"ip link add link {hname} name {tapname} type macvtap"
         )
+        if mtu:
+            self.unet.rootcmd.cmd_raises(f"ip link set {tapname} mtu {mtu}")
         self.unet.rootcmd.cmd_raises(f"ip link set {tapname} address {mac} up")
         ifindex = self.unet.rootcmd.cmd_raises(
             f"cat /sys/class/net/{tapname}/ifindex"
@@ -1412,7 +1417,7 @@ class L3QemuVM(L3Node):
         del self.tapnames[hname]
         del self.host_intfs[hname]
 
-    async def create_tap(self, index, ifname):
+    async def create_tap(self, index, ifname, mtu=None):
         # XXX we shouldn't be doign a tap on a bridge with a veth
         # we should just be using a tap created earlier which was connected to the
         # bridge. Except we need to handle the case of p2p qemu <-> namespace
@@ -1427,6 +1432,9 @@ class L3QemuVM(L3Node):
         self.cmd_raises(f"ip link add name br{index} type bridge")
         self.cmd_raises(f"ip link set dev {ifname} master br{index}")
         self.cmd_raises(f"ip link set dev tap{tapindex} master br{index}")
+        if mtu:
+            self.cmd_raises(f"ip link set dev tap{tapindex} mtu {mtu}")
+            self.cmd_raises(f"ip link set dev {ifname} mtu {mtu}")
         self.cmd_raises(f"ip link set dev tap{tapindex} up")
         self.cmd_raises(f"ip link set dev {ifname} up")
         self.cmd_raises(f"ip link set dev br{index} up")
@@ -1447,6 +1455,10 @@ class L3QemuVM(L3Node):
         con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
         for ifname in sorted(self.intf_addrs):
             ifaddr = self.intf_addrs[ifname]
+            conn = find_with_kv(self.config.get("connections"), "name", ifname)
+            mtu = conn.get("mtu", self.unet.switches[conn["to"]].config.get("mtu"))
+            if mtu:
+                con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
             con.cmd_raises(f"ip link set {ifname} up")
             con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
 
@@ -1585,7 +1597,8 @@ class L3QemuVM(L3Node):
                 pass_fds.append(fd)
                 nnics += 1
             elif not hostintf:
-                tapargs = await self.create_tap(index, conn["name"])
+                mtu = conn.get("mtu", self.unet.switches[conn["to"]].config.get("mtu"))
+                tapargs = await self.create_tap(index, conn["name"], mtu=mtu)
                 tapargs[-1] += f",addr={pciaddr}"
                 args += tapargs
                 nnics += 1
@@ -1997,7 +2010,7 @@ class Munet(BaseMunet):
         do_add_link = True
         for n, c in ((node1, c1), (node2, c2)):
             if "hostintf" in c:
-                await n.add_host_intf(c["hostintf"], c["name"])
+                await n.add_host_intf(c["hostintf"], c["name"], mtu=c.get("mtu"))
                 do_add_link = False
             elif "physical" in c:
                 await n.add_phy_intf(c["physical"], c["name"])
@@ -2007,7 +2020,15 @@ class Munet(BaseMunet):
             assert "hostintf" not in c2
             assert "physical" not in c1
             assert "physical" not in c2
-            super().add_link(node1, node2, if1, if2)
+            if isp2p:
+                mtu1 = c1.get("mtu")
+                mtu2 = c2.get("mtu")
+                mtu = mtu1 if mtu1 else mtu2
+                if mtu1 and mtu2 and mtu1 != mtu2:
+                    self.logger.error("mtus differ for add_link %s != %s", mtu1, mtu2)
+            else:
+                mtu = c2.get("mtu")
+            super().add_link(node1, node2, if1, if2, mtu=mtu)
 
         if isp2p:
             node1.set_p2p_addr(node2, c1, c2)
@@ -2036,7 +2057,8 @@ class Munet(BaseMunet):
             config = {}
 
         cls = L3Bridge if config.get("ip") else L2Bridge
-        return super().add_switch(name, cls=cls, config=config, **kwargs)
+        mtu = kwargs.get("mtu", config.get("mtu"))
+        return super().add_switch(name, cls=cls, config=config, mtu=mtu, **kwargs)
 
     async def run(self):
         tasks = []

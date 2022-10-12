@@ -1685,7 +1685,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
         Bridge.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, unet=None, logger=None, **kwargs):
+    def __init__(self, name=None, unet=None, logger=None, mtu=None, **kwargs):
         """Create a linux Bridge."""
 
         self.id = self._get_next_id()
@@ -1697,6 +1697,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         self.set_intf_basename(self.name + "-e")
 
+        self.mtu = mtu
         self.unet = unet
 
         self.logger.debug("Bridge: Creating")
@@ -1704,6 +1705,8 @@ class Bridge(SharedNamespace, InterfaceMixin):
         assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
         self.cmd_raises(f"ip link delete {name} || true")
         self.cmd_raises(f"ip link add {name} type bridge")
+        if self.mtu:
+            self.cmd_raises(f"ip link set {name} mtu {self.mtu}")
         self.cmd_raises(f"ip link set {name} up")
 
         self.logger.debug("%s: Created, Running", self)
@@ -1787,7 +1790,7 @@ class BaseMunet(LinuxNamespace):
 
         return self.hosts[name]
 
-    def add_link(self, node1, node2, if1, if2, **intf_constraints):
+    def add_link(self, node1, node2, if1, if2, mtu=None, **intf_constraints):
         """Add a link between switch and node or 2 nodes.
 
         If constraints are given they are applied to each endpoint. See
@@ -1840,11 +1843,15 @@ class BaseMunet(LinuxNamespace):
 
             self.cmd_raises_host("ip link set {} netns {}".format(lifname, lhost.pid))
             lhost.cmd_raises_host("ip link set {} name {}".format(lifname, if1))
+            if mtu:
+                lhost.cmd_raises_host("ip link set {} mtu {}".format(if1, mtu))
             lhost.cmd_raises_host("ip link set {} up".format(if1))
             lhost.register_interface(if1)
 
             self.cmd_raises_host("ip link set {} netns {}".format(rifname, rhost.pid))
             rhost.cmd_raises_host("ip link set {} name {}".format(rifname, if2))
+            if mtu:
+                rhost.cmd_raises_host("ip link set {} mtu {}".format(if2, mtu))
             rhost.cmd_raises_host("ip link set {} up".format(if2))
             rhost.register_interface(if2)
         else:
@@ -1852,6 +1859,9 @@ class BaseMunet(LinuxNamespace):
             host = self.hosts[name2]
             lifname = "i1{:x}".format(switch.pid)
             rifname = "i1{:x}".format(host.pid)
+
+            if mtu is None:
+                mtu = switch.mtu
 
             if len(if1) > 16:
                 self.logger.error('"%s" len %s > 16', if1, len(if1))
@@ -1866,6 +1876,15 @@ class BaseMunet(LinuxNamespace):
             self.cmd_raises_host(f"ip link set {lifname} netns {switch.pid}")
             switch.cmd_raises_host(f"ip link set {lifname} name {if1}")
             host.cmd_raises_host(f"ip link set {rifname} name {if2}")
+
+            if mtu:
+                # if switch.mtu:
+                #     # the switch interface should match the switch config
+                #     switch.cmd_raises_host(
+                #         "ip link set {} mtu {}".format(if1, switch.mtu)
+                #     )
+                switch.cmd_raises_host("ip link set {} mtu {}".format(if1, mtu))
+                host.cmd_raises_host("ip link set {} mtu {}".format(if2, mtu))
 
             switch.register_interface(if1)
             host.register_interface(if2)
