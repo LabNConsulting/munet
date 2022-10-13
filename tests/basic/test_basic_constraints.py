@@ -42,7 +42,7 @@ async def ping_average_rtt(r, other, oifname):
 async def ping_with_loss(r, other, oifname):
     oip = other.intf_addrs[oifname].ip
     await r.async_cmd_status(f"ping -w1 -c1 {oip}", warn=False)
-    r, o, _ = await r.async_cmd_status(f"ping -i.01 -c300 {oip}")
+    r, o, _ = await r.async_cmd_status(f"ping -i.001 -c500 {oip}")
     ms = r"(\d+) packets transmitted, (\d+) received"
     m = re.search(ms, o)
     sent, recv = [float(x) for x in m.groups()]
@@ -91,7 +91,8 @@ async def test_basic_ping(rundir):
     # Base API w/ loss constraints
     #
     ifname = "p2p2"
-    ci1 = {"name": ifname, "delay": 1, "loss": 30, "loss-correlation": 0}
+    # ci1 = {"name": ifname, "delay": 1, "loss": 30, "loss-correlation": 0}
+    ci1 = {"name": ifname, "loss": 30}
     ci2 = {"name": ifname}
     await unet.add_native_link(r2, r3, ci1, ci2)
 

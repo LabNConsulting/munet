@@ -1031,7 +1031,7 @@ class InterfaceMixin:
         jitter :: (int) number of microseconds
         jitter-correlation :: (float) % correlation to previous (default 10%)
         loss :: (float) % of loss
-        loss-correlation :: (float) % correlation to previous (default 25%)
+        loss-correlation :: (float) % correlation to previous (default 0%)
         rate :: (int or str) bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
         """
@@ -1057,10 +1057,11 @@ class InterfaceMixin:
 
         loss = get_number(config, "loss")
         if loss is not None:
-            if not delay:
-                raise ValueError("loss but no delay specified")
-            loss_correlation = get_number(config, "loss-correlation", 25)
-            netem_args += f" loss {loss}% {loss_correlation}%"
+            loss_correlation = get_number(config, "loss-correlation", 0)
+            if loss_correlation:
+                netem_args += f" loss {loss}% {loss_correlation}%"
+            else:
+                netem_args += f" loss {loss}%"
 
         if (o_rate := config.get("rate")) is None:
             return netem_args, ""
