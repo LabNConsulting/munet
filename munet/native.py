@@ -1274,6 +1274,7 @@ class L3QemuVM(L3Node):
         assert self.qemu_config
         self.cmdrepl = None
         self.conrepl = None
+        self.is_kvm = False
         self.monrepl = None
         self.use_console = False
         self.tapfds = {}
@@ -1679,6 +1680,8 @@ class L3QemuVM(L3Node):
         self.logger.info("VM status: %s", output)
         output = self.monrepl.cmd_nostatus("info kvm")
         self.logger.info("KVM status: %s", output)
+
+        self.is_kvm = "disabled" not in output
 
         # Have standard commands begin to use the console
         self.use_console = True
