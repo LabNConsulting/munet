@@ -39,6 +39,7 @@ import tty
 
 from .config import list_to_dict_with_key
 
+
 ENDMARKER = b"\x00END\x00"
 
 logger = logging.getLogger(__name__)
@@ -777,7 +778,7 @@ def add_cli_config(unet, config):
         - name: "capture"
           help: "Capture packets on a given network"
           format: "pcap NETWORK"
-          exec: "tshark -i {0} -w /tmp/capture-{0}.pcap"
+          exec: "tshark -s 9200 -i {0} -w /tmp/capture-{0}.pcap"
           new-window: true
           top-level: true # run in top-level container namespace, above hosts
 

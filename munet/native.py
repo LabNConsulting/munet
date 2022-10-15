@@ -1800,7 +1800,7 @@ class Munet(BaseMunet):
                         " packet summaries. NETWORK can also be an interface specified"
                         " as HOST:INTF. To capture inside the host namespace."
                     ),
-                    "exec": "tshark -s 1508 -i {0} -P -w capture-{0}.pcap",
+                    "exec": "tshark -s 9200 -i {0} -P -w capture-{0}.pcap",
                     "top-level": True,
                     "new-window": {"background": True},
                 },
