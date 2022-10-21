@@ -10,7 +10,7 @@
     and then reinstall it with ~apt install virtualenv~
 ** Installation
    Clone the git repository.
-   cd into munet and run ~make install~
+   cd into munet and run ~make install~.
    If the command fails and you see something like this:
    #+begin_src bash
    Creating virtualenv munet in /home/maximiliano/munet/.venv
