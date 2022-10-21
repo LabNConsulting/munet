@@ -269,13 +269,17 @@ ff02::2\tip6-allrouters
     async def console(
         self,
         concmd,
-        prompt=r"(^|\r\n)[^#\$]*[#\$] ",
+        prompt=r"(^|\r?\n)[^#\$]*[#\$] ",
+        is_bourne=True,
         user=None,
         password=None,
+        expects=None,
+        sends=None,
         use_pty=False,
         will_echo=False,
         logfile_prefix="console",
         trace=True,
+        **kwargs,
     ):
         """
         Create a REPL (read-eval-print-loop) driving a console.
@@ -283,9 +287,15 @@ ff02::2\tip6-allrouters
         Args:
             concmd - string or list to popen with, or an already open socket
             prompt - the REPL prompt to look for, the function returns when seen
+            is_bourne - True if the console is a bourne shell
             user - user name to log in with
             password - password to log in with
+            expects - a list of regex other than the prompt, the standard user, or
+                password to look for. "ogin:" or "[Pp]assword:"r.
+            sends - what to send when an element of `expects` matches. Can be the
+                empty string to send nothing.
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
+
             will_echo - bash is buggy in that it echo's to non-tty unlike any other
                         sh/ksh, set this value to true if running back
             trace - trace the send/expect sequence
@@ -304,8 +314,9 @@ ff02::2\tip6-allrouters
         logfile_send = open(lfname, "a+", encoding="utf-8")
         logfile_send.write("-- start send logging for: '{}' --\n".format(concmd))
 
-        expects = []
-        sends = []
+        expects = [] if expects is None else expects
+        sends = [] if sends is None else sends
+        timeout = 30 if timeout is None or timeout == "" else timeout
         if user:
             expects.append("ogin:")
             sends.append(user + "\n")
@@ -319,10 +330,12 @@ ff02::2\tip6-allrouters
             sends=sends,
             use_pty=use_pty,
             will_echo=will_echo,
+            is_bourne=is_bourne,
             logfile=logfile,
             logfile_read=logfile_read,
             logfile_send=logfile_send,
             trace=trace,
+            **kwargs,
         )
         return repl
 
@@ -347,11 +360,8 @@ ff02::2\tip6-allrouters
         p = self.spawn(sock, prompt, logfile=logfile, logfile_read=logfile_read)
         from .base import ShellWrapper  # pylint: disable=C0415
 
-        # ShellWrapper (REPLWrapper) unfortunately uses string match not regex
-        # for the prompt
         p.send("\n")
-        prompt = "(qemu) "
-        return ShellWrapper(p, prompt, None, will_echo=True, escape_ansi=True)
+        return ShellWrapper(p, "(qemu) ", None, will_echo=True, escape_ansi=True)
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
@@ -1468,16 +1478,26 @@ class L3QemuVM(L3Node):
             #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
         con.cmd_raises("ip link set lo up")
 
-    async def _opencons(self, *cnames):
+    async def _opencons(
+        self,
+        *cnames,
+        prompt=None,
+        is_bourne=True,
+        user="root",
+        password="",
+        expects=None,
+        sends=None,
+        timeout=-1,
+    ):
         "Open consoles based on socket file names"
 
-        timeout = Timeout(30)
+        timeo = Timeout(timeout)
         cons = []
         for cname in cnames:
             sockpath = os.path.join(self.sockdir, cname)
             connected = False
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            while self.launch_p.returncode is None and not timeout.is_expired():
+            while self.launch_p.returncode is None and not timeo.is_expired():
                 try:
                     sock.connect(sockpath)
                     connected = True
@@ -1490,7 +1510,7 @@ class L3QemuVM(L3Node):
                             "can't open console socket: %s", error.strerror
                         )
                         raise
-                elapsed = int(timeout.elapsed())
+                elapsed = int(timeo.elapsed())
                 if elapsed <= 3:
                     await asyncio.sleep(0.25)
                 else:
@@ -1500,13 +1520,21 @@ class L3QemuVM(L3Node):
                     await asyncio.sleep(1)
 
             if connected:
+                if prompt is None:
+                    prompt = r"(^|\r\n)[^#\$]*[#\$] "
                 cons.append(
                     await self.console(
                         sock,
-                        user="root",
+                        prompt=prompt,
+                        is_bourne=is_bourne,
+                        user=user,
+                        password=password,
                         use_pty=False,
                         logfile_prefix=cname,
                         will_echo=True,
+                        expects=expects,
+                        sends=sends,
+                        timeout=timeout,
                         trace=True,
                     )
                 )
@@ -1514,17 +1542,17 @@ class L3QemuVM(L3Node):
                 self.logger.warning(
                     "%s: launch (qemu) exited quickly (%ss) rc: %s",
                     self,
-                    timeout.elapsed(),
+                    timeo.elapsed(),
                     self.launch_p.returncode,
                 )
                 raise Exception("Qemu launch exited early")
-            elif timeout.is_expired():
+            elif timeo.is_expired():
                 self.logger.critical(
                     "%s: timeout (%ss) waiting for qemu to start",
                     self,
-                    timeout.elapsed(),
+                    timeo.elapsed(),
                 )
-                assert not timeout.is_expired()
+                assert not timeo.is_expired()
 
         return cons
 

@@ -41,14 +41,13 @@ try:
 
     from pexpect.fdpexpect import fdspawn
     from pexpect.popen_spawn import PopenSpawn
-    from pexpect.replwrap import PEXPECT_CONTINUATION_PROMPT
-    from pexpect.replwrap import PEXPECT_PROMPT
-    from pexpect.replwrap import REPLWrapper
 
     have_pexpect = True
 except ImportError:
     have_pexpect = False
 
+PEXPECT_PROMPT = "PEXPECT_PROMPT>"
+PEXPECT_CONTINUATION_PROMPT = "PEXPECT_PROMPT+"
 
 root_hostname = subprocess.check_output("hostname")
 
@@ -507,11 +506,13 @@ class Commander:  # pylint: disable=R0904
                         self,
                         p.match.group(0),
                         index,
-                        spawned_re,
+                        patterns[index],
                         sends[index - 1],
                     )
                 if sends[index - 1]:
                     p.send(sends[index - 1])
+
+                self.logger.debug("%s: expecting again: %s", self, patterns)
             self.logger.debug(
                 "%s: got spawned_re: '%s' matching '%s'",
                 self,
@@ -545,6 +546,7 @@ class Commander:  # pylint: disable=R0904
         sends=(),
         use_pty=False,
         will_echo=False,
+        is_bourne=True,
         **kwargs,
     ):
         """
@@ -558,18 +560,20 @@ class Commander:  # pylint: disable=R0904
             sends - what to send when an element of `expects` matches. So e.g., the
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
+            is_bourne - if False then do not modify shell prompt for internal
+                parser friently format, and do not expect continuation prompts.
             use_pty - true for pty based expect, otherwise uses popen (pipes/files)
             will_echo - bash is buggy in that it echo's to non-tty unlike any other
                         sh/ksh, set this value to true if running back
 
             **kwargs - kwargs passed on the _spawn.
         """
-        prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
+        combined_prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
 
         assert not is_file_like(cmd) or not use_pty
         p = self.spawn(
             cmd,
-            prompt,
+            combined_prompt,
             expects=expects,
             sends=sends,
             use_pty=use_pty,
@@ -578,6 +582,10 @@ class Commander:  # pylint: disable=R0904
         )
         assert not p.echo
 
+        if not is_bourne:
+            p.send("\n")
+            return ShellWrapper(p, prompt, will_echo=will_echo)
+
         ps1 = PEXPECT_PROMPT
         ps2 = PEXPECT_CONTINUATION_PROMPT
 
@@ -585,10 +593,13 @@ class Commander:  # pylint: disable=R0904
         ps1p = ps1[:5] + "${UNSET_V}" + ps1[5:]
         ps2p = ps2[:5] + "${UNSET_V}" + ps2[5:]
 
+        ps1 = re.escape(ps1)
+        ps2 = re.escape(ps2)
+
         extra = "PAGER=cat; export PAGER; TERM=dumb; unset HISTFILE; set +o emacs +o vi"
         pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
         p.send(pchg)
-        return ShellWrapper(p, ps1, None, extra_init_cmd=extra, will_echo=will_echo)
+        return ShellWrapper(p, ps1, ps2, extra_init_cmd=extra, will_echo=will_echo)
 
     def popen(self, cmd, **kwargs):
         """
@@ -2004,38 +2015,85 @@ class BaseMunet(LinuxNamespace):
 
 BaseMunet.g_unet = None
 
-
-if have_pexpect:
-
-    class ShellWrapper(REPLWrapper):
+is True:
+    class ShellWrapper:
         """
-        REPLWrapper - a read-execute-print-loop interface
+        A Read-Execute-Print-Loop (REPL) interface
+
+        A newline or prompt changing command should be sent to the
+        spawned child prior to creation as the `prompt` will be `expect`ed
         """
 
         def __init__(
             self,
-            cmd_or_spawn,
-            orig_prompt,
-            prompt_change,
+            spawn,
+            prompt,
+            continuation_prompt=None,
+            extra_init_cmd=None,
             will_echo=False,
             escape_ansi=False,
-            **kwargs,
         ):
             self.echo = will_echo
             self.escape = (
                 re.compile(r"(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]") if escape_ansi else None
             )
 
-            # REPLWrapper expect a non-echoing child or will create one if given a
-            # command string
-            super().__init__(cmd_or_spawn, orig_prompt, prompt_change, **kwargs)
+            self.child = spawn
+            if hasattr(self.child, "echo") and self.child.echo and not will_echo:
+                self.child.setecho(False)
+                self.child.waitnoecho()
+                assert not self.child.echo
+
+            self.prompt = prompt
+            self.cont_prompt = continuation_prompt
+
+            # Use expect_exact if we can as it should be faster
+            self.expects = [prompt]
+            if re.escape(prompt) == prompt and hasattr(self.child, "expect_exact"):
+                self._expectf = self.child.expect_exact
+            else:
+                self._expectf = self.child.expect
+            if continuation_prompt:
+                self.expects.append(continuation_prompt)
+                if re.escape(continuation_prompt) != continuation_prompt:
+                    self._expectf = self.child.expect
+
+            if extra_init_cmd:
+                self.expect_prompt()
+                self.sendline(extra_init_cmd)
+            self.expect_prompt()
+
+        def expect_prompt(self, timeout=-1):
+            return self._expectf(self.expects, timeout=timeout)
+
+        def run_command(command, timeout=-1):
+            """Pexpect REPLWrapper compatible run_command.
+
+            This will split `command` into lines and feed each one to the shell.
+
+            Args:
+                command - string of commands separated by newlines, a trailing
+                    newline will cause and empty line to be sent.
+                timeout - pexpect timeout value.
+            """
+            lines = command.splitlines()
+            if command[-1] == "\n":
+                lines.append("")
+            index = 0
+            for line in lines:
+                self.child.sendline(line)
+                index = self.expect_prompt(timeout=timeout)
+            if index:
+                self.child.kill(signal.SIGINT)
+                self.expect_prompt(timeout=30 if self.child.timeout is None else -1)
+                raise ValueError("Continuation prompt found at end of commands")
 
         def cmd_nostatus(self, cmd, timeout=-1):
             """Execute a shell command
 
             Returns (strip/cleaned \r) output
             """
-            output = self.run_command(cmd, timeout, async_=False)
+            output = self.run_command(cmd, timeout)
             output = output.replace("\r\n", "\n")
             if self.echo:
                 # remove the command
@@ -2062,11 +2120,15 @@ if have_pexpect:
 
             # Run the command getting the output
             output = self.cmd_nostatus(cmd, timeout)
+            if self.escape:
+                output = self.escape.sub("", output)
 
             # Now get the status
             scmd = "echo $?"
             rcstr = self.run_command(scmd)
             rcstr = rcstr.replace("\r\n", "\n")
+            if self.escape:
+                rcstr = self.escape.sub("", rcstr)
             if self.echo:
                 # remove the command
                 idx = rcstr.find(scmd)
