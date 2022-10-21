@@ -1427,7 +1427,7 @@ class L3QemuVM(L3Node):
         del self.tapnames[hname]
         del self.host_intfs[hname]
 
-    async def create_tap(self, index, ifname, mtu=None):
+    async def create_tap(self, index, ifname, mtu=None, driver="virtio-net-pci"):
         # XXX we shouldn't be doign a tap on a bridge with a veth
         # we should just be using a tap created earlier which was connected to the
         # bridge. Except we need to handle the case of p2p qemu <-> namespace
@@ -1448,11 +1448,12 @@ class L3QemuVM(L3Node):
         self.cmd_raises(f"ip link set dev tap{tapindex} up")
         self.cmd_raises(f"ip link set dev {ifname} up")
         self.cmd_raises(f"ip link set dev br{index} up")
+        dev = f"{driver},netdev=n{index},mac={mac}"
         return [
             "-netdev",
             f"tap,id=n{index},ifname=tap{tapindex},script=no,downscript=no",
             "-device",
-            f"virtio-net-pci,netdev=n{index},mac={mac}",
+            dev,
         ]
 
     async def renumber_interfaces(self):
@@ -1578,6 +1579,11 @@ class L3QemuVM(L3Node):
 
         args.extend(["-m", str(qc.get("memory", "512M"))])
 
+        if "bios" in qc:
+            if qc["bios"] == "open-firmware":
+                args.extend(["-bios", "/usr/share/qemu/OVMF.fd"])
+            else:
+                args.extend(["-bios", qc["bios"]])
         if "kernel" in qc:
             args.extend(["-kernel", qc["kernel"]])
         if "initrd" in qc:
@@ -1625,8 +1631,11 @@ class L3QemuVM(L3Node):
                 pass_fds.append(fd)
                 nnics += 1
             elif not hostintf:
+                driver = conn.get("driver", "virtio-net-pci")
                 mtu = conn.get("mtu", self.unet.switches[conn["to"]].config.get("mtu"))
-                tapargs = await self.create_tap(index, conn["name"], mtu=mtu)
+                tapargs = await self.create_tap(
+                    index, conn["name"], mtu=mtu, driver=driver
+                )
                 tapargs[-1] += f",addr={pciaddr}"
                 args += tapargs
                 nnics += 1
@@ -1634,14 +1643,21 @@ class L3QemuVM(L3Node):
         if not nnics:
             args += ["-nic", "none"]
 
+        if "disk" in qc:
+            args.extend(
+                ["-drive", f"file={qc['disk']},if=none,id=sata-disk0,format=qcow2"]
+            )
+            args.extend(["-device", "ahci,id=ahci"])
+            args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
+
         args += [
             # 4 serial ports (max)
-            "-serial",
-            "stdio",
             "-serial",
             # All these serial/console ports require entries in inittab
             # to have getty running on them, modify inittab
             "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
+            "-serial",
+            "stdio",
             "-serial",
             "unix:/tmp/qemu-sock/_console,server,nowait",
             "-serial",

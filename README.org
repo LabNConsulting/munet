@@ -265,6 +265,16 @@ module: labn-munet-config
       }
       container qemu {
         description "Specify parameters for Qemu VM node";
+        leaf bios {
+          type string;
+          description
+            "'open-firmare' to use open firmware bios, or a path to
+             bios image file";
+        }
+        leaf disk {
+          type string;
+          description "path to disk image possibly to boot from";
+        }
         leaf kerenel {
           type string;
           description "path to kernel image (e.g,. bzImage) to boot";
@@ -361,6 +371,11 @@ module: labn-munet-config
             "The remote name of a p2p connection. This is used for disambiguation
              when there are multiple point-to-point connections to the same
              remote node.";
+        }
+        leaf driver {
+          type string;
+          default "virtio-net-pc";
+          description "driver name for qemu based interfaces";
         }
         uses intf-constraints;
       }
