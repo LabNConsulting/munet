@@ -1,0 +1,104 @@
+topology:
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+    - name: net0
+    - name: net1
+  nodes:
+    - name: h1
+      connections: ["mgmt0", "net0"]
+    - name: r1
+      kind: cisco
+      connections:
+        - to: "mgmt0"
+          name: "eth1"
+          driver: "e1000"
+        - to: "net0"
+          name: "eth2"
+          driver: "e1000"
+    - name: r2
+      kind: cisco
+      connections:
+        - to: "mgmt0"
+          name: "eth1"
+          driver: "e1000"
+        - to: "net0"
+          name: "eth2"
+          driver: "e1000"
+        - to: "net1"
+          name: "eth3"
+          driver: "e1000"
+    - name: h2
+      connections: ["mgmt0", "net1"]
+
+kinds:
+  - name: cisco
+    shell: false
+    cmd: |
+      terminal terminal-type dumb
+      terminal length 0
+      terminal width 511
+      terminal session 0
+      conf t
+      line console
+      exec-timeout 0
+      line vty
+      exec-timeout 0
+      int mgmt0
+        ip address 192.168.0.2/24
+      exit
+      feature ssh
+      feature telnet
+      end
+    qemu:
+      unix-os: false
+      disk: "%CONFIGDIR%/nexus9300v64.10.2.3.F.qcow2"
+      bios: "open-firmware"
+      memory: "8192M"
+      smp: 2
+      kvm: true
+      console:
+        stdio: false
+        user: "admin"
+        password: ""
+        prompt: "(^|\r?\n\r?)switch(\\([^\\)]+\\))?#"
+        expects:
+          - "skip - bypass.*yes/skip/no\\)\\[no\\]:"
+          - "loader > "
+        sends:
+          - "skip\n"
+          - "boot nxos64-cs.10.2.3.F.bin\n"
+        timeout: 900
+
+
+cli:
+  commands:
+    - name: ssh
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@%IPADDR%"
+      kinds: ["cisco"]
+      format: "ssh NODE [NODE ...]"
+      top-level: true
+      new-window: true
+    - name: sship
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {}"
+      format: "sship [user@]ip-addr"
+      top-level: true
+      new-window: true
+    - name: vtysh
+      exec: "expect -c 'spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@%IPADDR% ; expect \"assword:\"; send \"\n\"; interact'"
+      format: "vtysh NODE"
+      top-level: true
+      new-window: true
+    - name: mon
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/monitor"
+      format: "mon NODE [NODE ...]"
+      help: "open monitor on given hosts, * for all"
+      new-window: true
+    # - name: con
+    #   exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/console"
+    #   format: "con HOST [HOST ...]"
+    #   help: "open console on given hosts, * for all"
+    #   new-window: true

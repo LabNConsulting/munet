@@ -113,6 +113,7 @@ max-returns = 8
 [tool.pytest.ini_options]
 
 asyncio_mode = "auto"
+norecursedirs = "tests/qemu"
 
 testpaths = [
         "tests",
