@@ -93,6 +93,12 @@
           "qemu": {
             "type": "object",
             "properties": {
+              "bios": {
+                "type": "string"
+              },
+              "disk": {
+                "type": "string"
+              },
               "kerenel": {
                 "type": "string"
               },
@@ -116,6 +122,32 @@
               },
               "extra-args": {
                 "type": "string"
+              },
+              "console": {
+                "type": "object",
+                "properties": {
+                  "user": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "expects": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "sends": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "timeout": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           },
@@ -140,6 +172,9 @@
                   "type": "string"
                 },
                 "remote-name": {
+                  "type": "string"
+                },
+                "driver": {
                   "type": "string"
                 },
                 "delay": {
@@ -336,6 +371,12 @@
               "qemu": {
                 "type": "object",
                 "properties": {
+                  "bios": {
+                    "type": "string"
+                  },
+                  "disk": {
+                    "type": "string"
+                  },
                   "kerenel": {
                     "type": "string"
                   },
@@ -359,6 +400,32 @@
                   },
                   "extra-args": {
                     "type": "string"
+                  },
+                  "console": {
+                    "type": "object",
+                    "properties": {
+                      "user": {
+                        "type": "string"
+                      },
+                      "password": {
+                        "type": "string"
+                      },
+                      "expects": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "sends": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "timeout": {
+                        "type": "integer"
+                      }
+                    }
                   }
                 }
               },
@@ -383,6 +450,9 @@
                       "type": "string"
                     },
                     "remote-name": {
+                      "type": "string"
+                    },
+                    "driver": {
                       "type": "string"
                     },
                     "delay": {
