@@ -2015,7 +2015,8 @@ class BaseMunet(LinuxNamespace):
 
 BaseMunet.g_unet = None
 
-is True:
+if True:  # pylint: disable=using-constant-test
+
     class ShellWrapper:
         """
         A Read-Execute-Print-Loop (REPL) interface
@@ -2060,13 +2061,13 @@ is True:
 
             if extra_init_cmd:
                 self.expect_prompt()
-                self.sendline(extra_init_cmd)
+                self.child.sendline(extra_init_cmd)
             self.expect_prompt()
 
         def expect_prompt(self, timeout=-1):
             return self._expectf(self.expects, timeout=timeout)
 
-        def run_command(command, timeout=-1):
+        def run_command(self, command, timeout=-1):
             """Pexpect REPLWrapper compatible run_command.
 
             This will split `command` into lines and feed each one to the shell.
@@ -2079,14 +2080,21 @@ is True:
             lines = command.splitlines()
             if command[-1] == "\n":
                 lines.append("")
+            output = ""
             index = 0
             for line in lines:
                 self.child.sendline(line)
                 index = self.expect_prompt(timeout=timeout)
-            if index:
-                self.child.kill(signal.SIGINT)
-                self.expect_prompt(timeout=30 if self.child.timeout is None else -1)
-                raise ValueError("Continuation prompt found at end of commands")
+                if index:
+                    self.child.kill(signal.SIGINT)
+                    self.expect_prompt(timeout=30 if self.child.timeout is None else -1)
+                    raise ValueError("Continuation prompt found at end of commands")
+                output += self.child.before
+
+            if self.escape:
+                output = self.escape.sub("", output)
+
+            return output
 
         def cmd_nostatus(self, cmd, timeout=-1):
             """Execute a shell command
@@ -2108,8 +2116,6 @@ is True:
                     # Remove up to and including the command from the output stream
                     output = output[idx + len(cmd) :]
 
-            if self.escape:
-                output = self.escape.sub("", output)
             return output.replace("\r", "").strip()
 
         def cmd_status(self, cmd, timeout=-1):
@@ -2120,15 +2126,11 @@ is True:
 
             # Run the command getting the output
             output = self.cmd_nostatus(cmd, timeout)
-            if self.escape:
-                output = self.escape.sub("", output)
 
             # Now get the status
             scmd = "echo $?"
             rcstr = self.run_command(scmd)
             rcstr = rcstr.replace("\r\n", "\n")
-            if self.escape:
-                rcstr = self.escape.sub("", rcstr)
             if self.echo:
                 # remove the command
                 idx = rcstr.find(scmd)

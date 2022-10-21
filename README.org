@@ -301,6 +301,35 @@ module: labn-munet-config
           type string;
           description "extra qemu args passed when launching";
         }
+        container console {
+          description "Configuration for console handling";
+          leaf user {
+            type string;
+            description "User to login to console with";
+          }
+          leaf password {
+            type string;
+            description "Password to login to console with";
+          }
+          leaf-list expects {
+            type string;
+            description "Strings to expect for logging into the console";
+          }
+          leaf-list sends {
+            type string;
+            description
+              "Strings paired to `expects` for logging into the
+               console. These are sent to the console when the
+               corresponding expect is seen, zero length strings are
+               allowed which indicate send nothing. An Expect with a
+               send nothing could be used to reset the timeout timer on
+               long boots";
+          }
+          leaf timeout {
+            type uint32;
+            description "Timeout for logging into the console";
+          }
+        }
       }
       list connections {
         key to;
@@ -487,9 +516,9 @@ module: labn-munet-config
           type boolean;
           default false;
           description
-            "If true the command is run in the top-level containing namespace. This is the
-             namespace from which each of the hosts allocated sub-namespaces from.
-             or a host namespace.";
+            "If true the command is run in the top-level containing namespace.
+             This is the namespace from which each of the hosts allocated
+             sub-namespaces from. or a host namespace.";
         }
       }
     }

@@ -316,7 +316,6 @@ ff02::2\tip6-allrouters
 
         expects = [] if expects is None else expects
         sends = [] if sends is None else sends
-        timeout = 30 if timeout is None or timeout == "" else timeout
         if user:
             expects.append("ogin:")
             sends.append(user + "\n")
@@ -1698,7 +1697,19 @@ class L3QemuVM(L3Node):
         #
         # Connect to the console socket, retrying
         #
-        cons = await self._opencons("_cmdcon", "_console")
+        cc = qc.get("console", {})
+        prompt = cc.get("prompt")
+        cons = await self._opencons(
+            "_cmdcon",
+            "_console",
+            prompt=prompt,
+            is_bourne=bool(prompt),
+            user=cc.get("user"),
+            password=cc.get("password"),
+            expects=cc.get("expects"),
+            sends=cc.get("sends"),
+            timeout=int(cc.get("timeout", 60)),
+        )
         self.cmdrepl = cons[0]
         self.conrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
