@@ -1285,8 +1285,8 @@ class L3QemuVM(L3Node):
         self.conrepl = None
         self.is_kvm = False
         self.monrepl = None
-        self.use_console = False
         self.tapfds = {}
+
         self.tapnames = {}
 
         super().__init__(name=name, config=config, **kwargs)
@@ -1351,30 +1351,49 @@ class L3QemuVM(L3Node):
             self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
             cmds = "/tmp/cmd.shebang"
         else:
-            cmds = cmds.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmds = cmds.replace("%RUNDIR%", self.rundir)
-            cmds = cmds.replace("%NAME%", self.name)
+            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
+            cmd = cmd.replace("%RUNDIR%", self.rundir)
+            cmd = cmd.replace("%NAME%", self.name)
+            cmds = cmd
 
-        class future_proc:
+        # class future_proc:
+        #     """Treat awaitable minimally as a proc"""
+        #     def __init__(self, aw):
+        #         self.aw = aw
+        #         # XXX would be nice to have a real value here
+        #         self.returncode = 0
+        #     async def wait(self):
+        #         if self.aw:
+        #             return await self.aw
+        #         return None
+
+        class now_proc:
             """Treat awaitable minimally as a proc"""
 
-            def __init__(self, aw):
-                self.aw = aw
-                # XXX would be nice to have a real value here
+            def __init__(self, output):
+                self.output = output
                 self.returncode = 0
 
             async def wait(self):
-                return await self.aw
+                return self.output
 
-        self.cmd_p = future_proc(
-            # We need our own console here b/c this is async and not returning
-            # immediately
-            self.cmdrepl.run_command(cmds, timeout=120, async_=True)
-        )
+        if self.cmdrepl:
+            # self.cmd_p = future_proc(
+            #     # We need our own console here b/c this is async and not returning
+            #     # immediately
+            #     # self.cmdrepl.run_command(cmds, timeout=120, async_=True)
+            #     self.cmdrepl.run_command(cmds, timeout=120)
+            # )
 
-        # stdout and err both combined into logfile from the spawned repl
-        stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
-        self.pytest_hook_run_cmd(stdout, None)
+            # When run_command supports async_ arg we can use the above...
+            self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
+
+            # stdout and err both combined into logfile from the spawned repl
+            stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
+            self.pytest_hook_run_cmd(stdout, None)
+        else:
+            # If we only have a console we can't run in parallel, so run to completion
+            self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
 
         return self.cmd_p
 
@@ -1562,6 +1581,7 @@ class L3QemuVM(L3Node):
         self.logger.info("%s: Launch Qemu", self)
 
         qc = self.qemu_config
+        cc = qc.get("console", {})
         bootd = "d" if "iso" in qc else "c"
         # args = [get_exec_path_host("qemu-system-x86_64"),
         #         "-nodefaults", "-boot", bootd]
@@ -1651,7 +1671,9 @@ class L3QemuVM(L3Node):
             args.extend(["-device", "ahci,id=ahci"])
             args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
 
+        use_stdio = cc.get("stdio", True)
         has_cmd = self.config.get("cmd")
+        use_cmdcon = has_cmd and use_stdio
 
         #
         # Any extra serial/console ports beyond thw first, require entries in
@@ -1662,10 +1684,10 @@ class L3QemuVM(L3Node):
         # input chars for some reason.
         #
         # 4 serial ports (max), we'll add extra ports using virtual consoles.
-        if not qc.get("no-stdio-console", False):
+        if use_stdio:
             args += ["-serial", "stdio"]
         args += ["-serial", "unix:/tmp/qemu-sock/_console,server,nowait"]
-        if has_cmd:
+        if use_cmdcon:
             args += [
                 "-serial",
                 "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
@@ -1722,13 +1744,12 @@ class L3QemuVM(L3Node):
         self.logger.debug("%s: async_popen => %s", self, self.launch_p.pid)
 
         confiles = ["_console"]
-        if has_cmd:
+        if use_cmdcon:
             confiles.append("_cmdcon")
 
         #
         # Connect to the console socket, retrying
         #
-        cc = qc.get("console", {})
         prompt = cc.get("prompt")
         cons = await self._opencons(
             *confiles,
@@ -1741,7 +1762,7 @@ class L3QemuVM(L3Node):
             timeout=int(cc.get("timeout", 60)),
         )
         self.conrepl = cons[0]
-        if has_cmd:
+        if use_cmdcon:
             self.cmdrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
@@ -1753,10 +1774,8 @@ class L3QemuVM(L3Node):
 
         self.is_kvm = "disabled" not in output
 
-        # Have standard commands begin to use the console
-        self.use_console = True
-
-        await self.renumber_interfaces()
+        if qc.get("unix-os", True):
+            await self.renumber_interfaces()
 
         self.pytest_hook_open_shell()
 
@@ -2143,7 +2162,6 @@ class Munet(BaseMunet):
         run_nodes = [
             x for x in run_nodes if x.config.get("cmd") or x.config.get("image")
         ]
-        # run_nodes = [x for x in run_nodes if x not in launch_nodes]
 
         if not self.pytest_config:
             pcapopt = ""
