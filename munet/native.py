@@ -360,7 +360,7 @@ ff02::2\tip6-allrouters
         from .base import ShellWrapper  # pylint: disable=C0415
 
         p.send("\n")
-        return ShellWrapper(p, "(qemu) ", None, will_echo=True, escape_ansi=True)
+        return ShellWrapper(p, prompt, None, will_echo=True, escape_ansi=True)
 
     def mount_volumes(self):
         for m in self.config.get("volumes", []):
@@ -1315,16 +1315,17 @@ class L3QemuVM(L3Node):
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
+        cmd = self.config.get("cmd", "").strip()
+        if not cmd:
+            self.logger.debug("%s: no `cmd` to run", self)
+            return None
+
         shell_cmd = self.config.get("shell", "/bin/bash")
         if not isinstance(shell_cmd, str):
             if shell_cmd:
                 shell_cmd = "/bin/bash"
             else:
                 shell_cmd = ""
-
-        cmd = self.config.get("cmd", "").strip()
-        if not cmd:
-            return None
 
         # See if we have a custom update for this `kind`
         if kind := self.config.get("kind", None):
@@ -1650,16 +1651,26 @@ class L3QemuVM(L3Node):
             args.extend(["-device", "ahci,id=ahci"])
             args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
 
+        has_cmd = self.config.get("cmd")
+
+        #
+        # Any extra serial/console ports beyond thw first, require entries in
+        # inittab to have getty running on them, modify inittab
+        #
+        # Use -serial stdio for output only, and as the first serial console
+        # which kernel uses for printk, as it has serious issues with dropped
+        # input chars for some reason.
+        #
+        # 4 serial ports (max), we'll add extra ports using virtual consoles.
+        if not qc.get("no-stdio-console", False):
+            args += ["-serial", "stdio"]
+        args += ["-serial", "unix:/tmp/qemu-sock/_console,server,nowait"]
+        if has_cmd:
+            args += [
+                "-serial",
+                "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
+            ]
         args += [
-            # 4 serial ports (max)
-            "-serial",
-            # All these serial/console ports require entries in inittab
-            # to have getty running on them, modify inittab
-            "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
-            "-serial",
-            "stdio",
-            "-serial",
-            "unix:/tmp/qemu-sock/_console,server,nowait",
             "-serial",
             "unix:/tmp/qemu-sock/console,server,nowait",
             # A 2 virtual consoles - /dev/hvc[01]
@@ -1710,24 +1721,28 @@ class L3QemuVM(L3Node):
 
         self.logger.debug("%s: async_popen => %s", self, self.launch_p.pid)
 
+        confiles = ["_console"]
+        if has_cmd:
+            confiles.append("_cmdcon")
+
         #
         # Connect to the console socket, retrying
         #
         cc = qc.get("console", {})
         prompt = cc.get("prompt")
         cons = await self._opencons(
-            "_cmdcon",
-            "_console",
+            *confiles,
             prompt=prompt,
-            is_bourne=bool(prompt),
-            user=cc.get("user"),
-            password=cc.get("password"),
+            is_bourne=not bool(prompt),
+            user=cc.get("user", "root"),
+            password=cc.get("password", ""),
             expects=cc.get("expects"),
             sends=cc.get("sends"),
             timeout=int(cc.get("timeout", 60)),
         )
-        self.cmdrepl = cons[0]
-        self.conrepl = cons[1]
+        self.conrepl = cons[0]
+        if has_cmd:
+            self.cmdrepl = cons[1]
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
         # the monitor output has super annoying ANSI escapes in it
@@ -2128,6 +2143,7 @@ class Munet(BaseMunet):
         run_nodes = [
             x for x in run_nodes if x.config.get("cmd") or x.config.get("image")
         ]
+        # run_nodes = [x for x in run_nodes if x not in launch_nodes]
 
         if not self.pytest_config:
             pcapopt = ""
@@ -2151,8 +2167,11 @@ class Munet(BaseMunet):
                     title=f"cap:{pcap}",
                 )
 
-        # launch first
-        await asyncio.gather(*[x.launch() for x in launch_nodes])
+        if launch_nodes:
+            logging.info("Launching nodes")
+            await asyncio.gather(*[x.launch() for x in launch_nodes])
+
+        # Watch for launched processes to exit
         for node in launch_nodes:
             task = asyncio.create_task(
                 node.launch_p.wait(), name=f"Node-{node.name}-launch"
@@ -2160,12 +2179,16 @@ class Munet(BaseMunet):
             task.add_done_callback(node.launch_completed)
             tasks.append(task)
 
-        # the run
-        await asyncio.gather(*[x.run_cmd() for x in run_nodes])
+        if run_nodes:
+            logging.info("Running `cmd` on nodes")
+            await asyncio.gather(*[x.run_cmd() for x in run_nodes])
+
+        # Watch for run_cmd processes to exit
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
             task.add_done_callback(node.cmd_completed)
             tasks.append(task)
+
         return tasks
 
     async def _async_delete(self):

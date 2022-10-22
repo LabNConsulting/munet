@@ -2040,7 +2040,8 @@ if True:  # pylint: disable=using-constant-test
             )
 
             self.child = spawn
-            if hasattr(self.child, "echo") and self.child.echo and not will_echo:
+            if self.child.echo:
+                logging.info("Setting child to echo")
                 self.child.setecho(False)
                 self.child.waitnoecho()
                 assert not self.child.echo
