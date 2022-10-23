@@ -17,8 +17,8 @@ built in to python that format is always supported. Additionally YAML and TOML
 are supported if the corresponding packages are available (i.e., ~PyYAML~ and
 ~toml~).
 
-The config itself is defined with a YANG model which is defined in the following
-sections.
+The config itself is defined with a YANG model which is defined in the
+subsequent sections.
 
 ** Config Tree
 
@@ -130,6 +130,85 @@ module: labn-munet-config
   |     +--rw volumes*       string
   +--rw version?    uint32
 #+end_example
+
+
+** Examples
+*** Router VM
+
+Router VMs are very different from standard unix-like OSs. Munet does a lot of
+automatic configuration assuming a unix-like (and mostly Linux) OS. Various
+configuration parameters need to be set to tune the automatic configuration and
+assumptions down. Here's an example munet config fragment that shows booting a
+cisco VM using a nexos file system image.
+
+#+begin_src yaml
+  topology:
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+    - name: net0
+  nodes:
+    # ...
+    - name: r1
+      kind: cisco
+      connections:
+        - to: "mgmt0"
+          name: "eth1"
+          driver: "e1000"
+        - to: "net0"
+          name: "eth2"
+          driver: "e1000"
+  kinds:
+    - name: cisco
+      shell: false
+      cmd: |
+        terminal terminal-type dumb
+        terminal length 0
+        terminal width 511
+        terminal session 0
+        conf t
+        line console
+        exec-timeout 0
+        line vty
+        exec-timeout 0
+        int mgmt0
+          ip address 192.168.0.2/24
+        exit
+        feature ssh
+        feature telnet
+        end
+      qemu:
+        unix-os: false
+        disk: "%CONFIGDIR%/nexus9300v64.10.2.3.F.qcow2"
+        bios: "open-firmware"
+        memory: "8192M"
+        smp: 2
+        kvm: true
+        console:
+          stdio: false
+          user: "admin"
+          password: ""
+          prompt: "(^|\r?\n\r?)switch(\\([^\\)]+\\))?#"
+          expects:
+            - "skip - bypass.*yes/skip/no\\)\\[no\\]:"
+            - "loader > "
+          sends:
+            - "skip\n"
+            - "boot nxos64-cs.10.2.3.F.bin\n"
+          timeout: 900
+
+  cli:
+    commands:
+      - name: ssh
+        exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@%IPADDR%"
+        kinds: ["cisco"]
+        format: "ssh NODE [NODE ...]"
+        top-level: true
+        new-window: true
+#+end_src
 
 
 ** Config Model
@@ -533,7 +612,8 @@ module: labn-munet-config
           description
             "If true the command is run in the top-level containing namespace.
              This is the namespace from which each of the hosts allocated
-             sub-namespaces from. or a host namespace.";
+             sub-namespaces from. Multple hosts are still allowed and their
+             variables will be substituted accordingly.";
         }
       }
     }
