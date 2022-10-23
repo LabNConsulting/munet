@@ -121,7 +121,8 @@ def host_in(restr, names):
 def expand_host(restr, names):
     "Expand name or regexp into list of hosts"
     hosts = []
-    if not (regexp := get_host_regex(restr)):
+    regexp = get_host_regex(restr)
+    if not regexp:
         assert restr in names
         hosts.append(restr)
     else:
@@ -139,7 +140,7 @@ def expand_hosts(restrs, names):
     return sorted(hosts)
 
 
-def host_cmd_split(unet, line):
+def host_cmd_split(unet, line, toplevel):
     all_hosts = set(unet.hosts)
     csplit = line.split()
     i = 0
@@ -165,8 +166,11 @@ def host_cmd_split(unet, line):
         csplit = csplit[i:]
 
         if not hosts and not csplit[:i]:
-            hosts = sorted(all_hosts)
-            banner = True
+            if toplevel:
+                hosts = [unet]
+            else:
+                hosts = sorted(all_hosts)
+                banner = True
 
     if not csplit:
         return hosts, "", "", True
@@ -282,10 +286,10 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
     elif numfmt:
         ucmd = execfmt.format(ucmd)
     else:
-        if '"' in execfmt:
-            fstring = "f'" + execfmt + "'"
+        if execfmt.endswith('"'):
+            fstring = "f'''" + execfmt + "'''"
         else:
-            fstring = 'f"' + execfmt + '"'
+            fstring = 'f"""' + execfmt + '"""'
         ucmd = eval(  # pylint: disable=W0123
             fstring,
             globals(),
@@ -294,8 +298,10 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
     ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
     if host is None or host is unet:
         ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
-        return ucmd
+        return ucmd.replace("%NAME%", ".")
     ucmd = ucmd.replace("%RUNDIR%", os.path.join(unet.rundir, host))
+    if h.mgmt_ip:
+        ucmd = ucmd.replace("%IPADDR%", str(h.mgmt_ip))
     return ucmd.replace("%NAME%", host)
 
 
@@ -338,11 +344,10 @@ async def run_command(
         hosts = [x for x in hosts if unet.hosts[x].config.get("kind", "") in kinds]
         logging.info("Filtered hosts: %s", hosts)
 
-    if not toplevel and not hosts:
-        return
-
-    if toplevel:
-        hosts = [None]
+    if not hosts:
+        if not toplevel:
+            return
+        hosts = [unet]
 
     # if unknowns := [x for x in hosts if x not in unet.hosts]:
     #     outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
@@ -356,7 +361,7 @@ async def run_command(
                 continue
             if len(hosts) > 1 or banner:
                 outf.write(f"------ Host: {host} ------\n")
-            spawn(unet, host, shcmd, outf, on_host)
+            spawn(unet, host if not toplevel else unet, shcmd, outf, on_host)
             if len(hosts) > 1 or banner:
                 outf.write(f"------- End: {host} ------\n")
         outf.write("\n")
@@ -367,7 +372,10 @@ async def run_command(
         shcmd = get_shcmd(unet, host, kinds, execfmt, line)
         if not shcmd:
             continue
-        ns = unet.hosts[host] if host and host != unet else unet
+        if toplevel:
+            ns = unet
+        else:
+            ns = unet.hosts[host] if host and host != unet else unet
         if on_host:
             cmdf = ns.async_cmd_status_host
         else:
@@ -482,12 +490,14 @@ async def doline(
     if cmd in unet.cli_in_window_cmds:
         execfmt, toplevel, kinds, kwargs = unet.cli_in_window_cmds[cmd][2:]
 
-        if toplevel:
-            ucmd = " ".join(nline.split())
-        else:
-            hosts, ucmd = win_cmd_host_split(unet, nline, kinds, False)
-            if not hosts:
+        # if toplevel:
+        #     ucmd = " ".join(nline.split())
+        # else:
+        hosts, ucmd = win_cmd_host_split(unet, nline, kinds, False)
+        if not hosts:
+            if not toplevel:
                 return True
+            hosts = [unet]
 
         if isinstance(execfmt, str):
             found_brace = "{}" in execfmt
@@ -505,21 +515,14 @@ async def doline(
             return True
 
         try:
-            if toplevel or hosts == [unet]:
-                if toplevel:
-                    host = None
-                else:
-                    host = ""
-                logging.debug(
-                    "top-level-window: execfmt: '%s' ucmd: '%s'", execfmt, ucmd
-                )
-                shcmd = get_shcmd(unet, host, None, execfmt, ucmd)
-                logging.debug("top-level-window: cmd: '%s' kwargs: '%s'", shcmd, kwargs)
-                if shcmd:
+            if not hosts and toplevel:
+                hosts = [unet]
+
+            for host in hosts:
+                shcmd = get_shcmd(unet, host, kinds, execfmt, ucmd)
+                if toplevel or host == unet:
                     unet.run_in_window(shcmd, **kwargs)
-            else:
-                for host in hosts:
-                    shcmd = get_shcmd(unet, host, kinds, execfmt, ucmd)
+                else:
                     unet.hosts[host].run_in_window(shcmd, **kwargs)
         except Exception as error:
             outf.write(f"% Error: {error}\n")
@@ -530,14 +533,15 @@ async def doline(
     #
 
     toplevel = unet.cli_run_cmds[cmd][3] if cmd in unet.cli_run_cmds else False
-    if toplevel:
-        logging.debug("top-level: cmd: '%s' nline: '%s'", cmd, nline)
-        hosts = None
-        banner = False
-    else:
-        hosts, cmd, nline, banner = host_cmd_split(unet, line)
-        hoststr = "munet" if hosts == [unet] else f"{hosts}"
-        logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hoststr, cmd, nline)
+    # if toplevel:
+    #     logging.debug("top-level: cmd: '%s' nline: '%s'", cmd, nline)
+    #     hosts = None
+    #     banner = False
+    # else:
+
+    hosts, cmd, nline, banner = host_cmd_split(unet, line, toplevel)
+    hoststr = "munet" if hosts == [unet] else f"{hosts}"
+    logging.debug("hosts: '%s' cmd: '%s' nline: '%s'", hoststr, cmd, nline)
 
     if cmd in unet.cli_run_cmds:
         pass
@@ -552,9 +556,11 @@ async def doline(
     if with_pty and notty:
         outf.write("% Error: interactive command must be run from primary CLI\n")
         return True
+
     await run_command(
         unet, outf, nline, execfmt, banner, hosts, toplevel, kinds, on_host, with_pty
     )
+
     return True
 
 

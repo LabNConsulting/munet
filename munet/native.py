@@ -198,6 +198,7 @@ class L3Node(LinuxNamespace):
         self.unet = unet
         self.cleanup_called = False
 
+        self.mgmt_ip = None  # set in parser.py
         self.host_intfs = {}
         self.phy_intfs = {}
         self.phycount = 0
@@ -532,6 +533,9 @@ ff02::2\tip6-allrouters
         else:
             return
 
+        dns_network = self.unet.topoconf.get("dns-network")
+        if dns_network and dns_network == switch.name:
+            self.mgmt_ip = ipaddr.ip
         ifname = cconf["name"]
         self.intf_addrs[ifname] = ipaddr
         self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)

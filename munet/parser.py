@@ -236,7 +236,9 @@ async def async_build_topology(
     if not topoconf:
         return unet
 
-    append_hosts_files(unet, topoconf.get("dns-network"))
+    dns_network = topoconf.get("dns-network")
+    if dns_network:
+        append_hosts_files(unet, dns_network)
 
     # Write our current config to the run directory
     with open(f"{unet.rundir}/config.json", "w", encoding="utf-8") as f:
