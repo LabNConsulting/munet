@@ -150,7 +150,7 @@ async def test_fstring(unet):
     # assert stdout.getvalue().strip() == match.strip()
 
 
-async def test_toplevel(unet):
+async def test_toplevel_no_host(unet):
     netname = "net0"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"toplevel-ip link show {netname}\n", stdout)
@@ -160,6 +160,32 @@ async def test_toplevel(unet):
     stdout = io.StringIO()
     assert await cli.doline(unet, f"toplevel-ip link show {netname}\n", stdout)
     assert not re.match(rf"\d+: {netname}: <.*> mtu 1500.*", stdout.getvalue())
+
+
+async def test_toplevel_host(unet):
+    match = r"""------ Host: r1 ------
+name:r1 echo:testing echoback
+------- End: r1 ------
+------ Host: r2 ------
+name:r2 echo:testing echoback
+------- End: r2 ------"""
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "toplevel-echo testing echoback\n", stdout)
+    assert stdout.getvalue().strip() == match.strip()
+
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "r1 r2 toplevel-echo testing echoback\n", stdout)
+    assert stdout.getvalue().strip() == match.strip()
+
+    match = r"name:r1 echo:foo"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "r1 toplevel-echo foo\n", stdout)
+    assert stdout.getvalue().strip() == match.strip()
+
+    match = r"name:r2 echo:bar"
+    stdout = io.StringIO()
+    assert await cli.doline(unet, "r2 toplevel-echo bar\n", stdout)
+    assert stdout.getvalue().strip() == match.strip()
 
 
 async def _test_async_cli(unet, rundir):
