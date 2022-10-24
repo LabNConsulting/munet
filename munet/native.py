@@ -1368,10 +1368,10 @@ class L3QemuVM(L3Node):
             for k, v in m.items():
                 if k in ["destination", "dst", "source", "src"]:
                     continue
-                elif k == "type":
-                    assert v == "bind" or v == "tmpfs"
+                if k == "type":
+                    assert v in ["bind", "tmpfs"]
                     continue
-                elif not v:
+                if not v:
                     margs.append(k)
                 else:
                     margs.append(f"{k}={v}")
