@@ -1312,6 +1312,74 @@ class L3QemuVM(L3Node):
     async def moncmd(self):
         "Uses internal REPL to send cmmand to qemu monitor and get reply"
 
+    def tmpfs_mount(self, inner):
+        # eventually would be nice to support live mounting
+        self.logger.debug("Mounting tmpfs on %s", inner)
+        self.extra_mounts.append(("", inner, ""))
+
+    #
+    # bind_mount is actually being used to mount into the namespace
+    #
+    # def bind_mount(self, outer, inner):
+    #     # eventually would be nice to support live mounting
+    #     assert not self.container_id
+    #     if self.test_host("-f", outer):
+    #         self.logger.warning("Can't bind mount files with L3QemuVM: %s", outer)
+    #         return
+    #     self.logger.debug("Bind mounting %s on %s", outer, inner)
+    #     if not self.test_host("-e", outer):
+    #         self.cmd_raises(f"mkdir -p {outer}")
+    #     self.extra_mounts.append((outer, inner, ""))
+
+    def mount_volumes(self):
+        """Mount volumes from the config"""
+        args = []
+        for m in self.config.get("volumes", []):
+            if not isinstance(m, str):
+                continue
+            s = m.split(":", 1)
+            if len(s) == 1:
+                args.append(("", s[0], ""))
+            else:
+                spath = s[0]
+                spath = os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(self.unet.config["config_pathname"]), spath
+                    )
+                )
+                if not self.test_host("-e", spath):
+                    self.cmd_raises(f"mkdir -p {spath}")
+                args.append((spath, s[1], ""))
+
+        for m in self.config.get("mounts", []):
+            src = m.get("src", m.get("source", ""))
+            if src:
+                src = os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(self.unet.config["config_pathname"]), src
+                    )
+                )
+                if not self.test_host("-e", src):
+                    self.cmd_raises(f"mkdir -p {src}")
+            dst = m.get("dst", m.get("destination"))
+            assert dst, "destination path required for mount"
+
+            margs = []
+            for k, v in m.items():
+                if k in ["destination", "dst", "source", "src"]:
+                    continue
+                elif k == "type":
+                    assert v == "bind" or v == "tmpfs"
+                    continue
+                elif not v:
+                    margs.append(k)
+                else:
+                    margs.append(f"{k}={v}")
+            args.append((src, dst, ",".join(margs)))
+
+        if args:
+            self.extra_mounts += args
+
     async def run_cmd(self):
         """Run the configured commands for this node inside VM"""
 
@@ -1479,6 +1547,26 @@ class L3QemuVM(L3Node):
             "-device",
             dev,
         ]
+
+    async def mount_mounts(self):
+        """Mount any shared directories"""
+        self.logger.info("Mounting shared directories")
+        con = self.conrepl
+        for i, m in enumerate(self.extra_mounts):
+            outer, mp, uargs = m
+            if not outer:
+                con.cmd_raises(f"mkdir -p {mp}")
+                margs = f"-o {uargs}" if uargs else ""
+                con.cmd_raises(f"mount {margs} -t tmpfs tmpfs {mp}")
+                continue
+
+            uargs = "" if uargs is None else uargs
+            margs = "trans=virtio"
+            if uargs:
+                margs += f",{uargs}"
+            self.logger.info("Mounting %s on %s with %s", outer, mp, margs)
+            con.cmd_raises(f"mkdir -p {mp}")
+            con.cmd_raises(f"mount -t 9p -o {margs} shared{i} {mp}")
 
     async def renumber_interfaces(self):
         """Re-number the interfaces.
@@ -1657,7 +1745,9 @@ class L3QemuVM(L3Node):
                 nnics += 1
             elif not hostintf:
                 driver = conn.get("driver", "virtio-net-pci")
-                mtu = conn.get("mtu", self.unet.switches[conn["to"]].config.get("mtu"))
+                mtu = conn.get("mtu")
+                if not mtu and conn["to"] in self.unet.switches:
+                    mtu = self.unet.switches[conn["to"]].config.get("mtu")
                 tapargs = await self.create_tap(
                     index, conn["name"], mtu=mtu, driver=driver
                 )
@@ -1668,9 +1758,27 @@ class L3QemuVM(L3Node):
         if not nnics:
             args += ["-nic", "none"]
 
-        if "disk" in qc:
+        dtpl = qc.get("disk-template")
+        diskpath = disk = qc.get("disk")
+        if dtpl and not disk:
+            disk = qc["disk"] = f"{self.name}-{os.path.basename(dtpl)}"
+            diskpath = os.path.join(self.rundir, disk)
+            if self.path_exists(diskpath):
+                logging.debug("Disk '%s' file exists, using.", diskpath)
+            else:
+                dtplpath = os.path.abspath(
+                    os.path.join(
+                        os.path.dirname(self.unet.config["config_pathname"]), dtpl
+                    )
+                )
+                logging.info("Create disk '%s' from template '%s'", diskpath, dtplpath)
+                self.cmd_raises(
+                    f"qemu-img create -f qcow2 -F qcow2 -b {dtplpath} {diskpath}"
+                )
+
+        if diskpath:
             args.extend(
-                ["-drive", f"file={qc['disk']},if=none,id=sata-disk0,format=qcow2"]
+                ["-drive", f"file={diskpath},if=none,id=sata-disk0,format=qcow2"]
             )
             args.extend(["-device", "ahci,id=ahci"])
             args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
@@ -1718,8 +1826,15 @@ class L3QemuVM(L3Node):
             "unix:/tmp/qemu-sock/monitor,server,nowait",
             "-gdb",
             "unix:/tmp/qemu-sock/gdbserver,server,nowait",
-            "-nographic",
         ]
+
+        for i, m in enumerate(self.extra_mounts):
+            args += [
+                "-virtfs",
+                f"local,path={m[0]},mount_tag=shared{i},security_model=passthrough",
+            ]
+
+        args += ["-nographic"]
 
         #
         # Launch Qemu
@@ -1780,6 +1895,9 @@ class L3QemuVM(L3Node):
 
         if qc.get("unix-os", True):
             await self.renumber_interfaces()
+
+        if self.extra_mounts:
+            await self.mount_mounts()
 
         self.pytest_hook_open_shell()
 
