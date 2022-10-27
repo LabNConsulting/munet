@@ -286,21 +286,20 @@ ff02::2\tip6-allrouters
         Create a REPL (read-eval-print-loop) driving a console.
 
         Args:
-            concmd - string or list to popen with, or an already open socket
-            prompt - the REPL prompt to look for, the function returns when seen
-            is_bourne - True if the console is a bourne shell
-            user - user name to log in with
-            password - password to log in with
-            expects - a list of regex other than the prompt, the standard user, or
+            concmd: string or list to popen with, or an already open socket
+            prompt: the REPL prompt to look for, the function returns when seen
+            is_bourne: True if the console is a bourne shell
+            user: user name to log in with
+            password: password to log in with
+            expects: a list of regex other than the prompt, the standard user, or
                 password to look for. "ogin:" or "[Pp]assword:"r.
-            sends - what to send when an element of `expects` matches. Can be the
+            sends: what to send when an element of `expects` matches. Can be the
                 empty string to send nothing.
-            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
-
-            will_echo - bash is buggy in that it echo's to non-tty unlike any other
-                        sh/ksh, set this value to true if running back
-            trace - trace the send/expect sequence
-            **kwargs - kwargs passed on the _spawn.
+            use_pty: true for pty based expect, otherwise uses popen (pipes/files)
+            will_echo: bash is buggy in that it echo's to non-tty unlike any other
+                sh/ksh, set this value to true if running back
+            trace: trace the send/expect sequence
+            **kwargs: kwargs passed on the _spawn.
         """
 
         lfname = os.path.join(self.rundir, f"{logfile_prefix}-log.txt")
@@ -888,18 +887,6 @@ class L3ContainerNode(L3Node):
         return False
 
     def popen(self, cmd, **kwargs):
-        """
-        Creates a pipe with the given `command`.
-
-        Args:
-            cmd: `str` or `list` of command to open a pipe with.
-            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
-                then will be invoked with `bash -c`, otherwise `command` is a list and
-                will be invoked without a shell.
-
-        Returns:
-            a subprocess.Popen object.
-        """
         if self._check_use_base(cmd):
             return super().popen(cmd, **kwargs)
 

@@ -438,15 +438,15 @@ class Commander:  # pylint: disable=R0904
         Create a spawned send/expect process.
 
         Args:
-            cmd - list of args to exec/popen with, or an already open socket
-            spawned_re - what to look for to know when done, `spawn` returns when seen
-            expects - a list of regex other than `spawned_re` to look for. Commonly,
+            cmd: list of args to exec/popen with, or an already open socket
+            spawned_re: what to look for to know when done, `spawn` returns when seen
+            expects: a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
-            sends - what to send when an element of `expects` matches. So e.g., the
+            sends: what to send when an element of `expects` matches. So e.g., the
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
-            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
-            trace - if true then log send/expects
+            use_pty: true for pty based expect, otherwise uses popen (pipes/files)
+            trace: if true then log send/expects
             **kwargs - kwargs passed on the _spawn.
         Returns:
             A pexpect process.
@@ -553,19 +553,18 @@ class Commander:  # pylint: disable=R0904
         Create a shell REPL (read-eval-print-loop).
 
         Args:
-            cmd - shell and list of args to popen with, or an already open socket
-            prompt - the REPL prompt to look for, the function returns when seen
-            expects - a list of regex other than `spawned_re` to look for. Commonly,
+            cmd: shell and list of args to popen with, or an already open socket
+            prompt: the REPL prompt to look for, the function returns when seen
+            expects: a list of regex other than `spawned_re` to look for. Commonly,
                 "ogin:" or "[Pp]assword:"r.
-            sends - what to send when an element of `expects` matches. So e.g., the
+            sends: what to send when an element of `expects` matches. So e.g., the
                 username or password if thats what corresponding expect matched. Can
                 be the empty string to send nothing.
-            is_bourne - if False then do not modify shell prompt for internal
+            is_bourne: if False then do not modify shell prompt for internal
                 parser friently format, and do not expect continuation prompts.
-            use_pty - true for pty based expect, otherwise uses popen (pipes/files)
-            will_echo - bash is buggy in that it echo's to non-tty unlike any other
-                        sh/ksh, set this value to true if running back
-
+            use_pty: true for pty based expect, otherwise uses popen (pipes/files)
+            will_echo: bash is buggy in that it echo's to non-tty unlike any other
+                sh/ksh, set this value to true if running back
             **kwargs - kwargs passed on the _spawn.
         """
         combined_prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
@@ -636,7 +635,6 @@ class Commander:  # pylint: disable=R0904
 
         Args:
             cmd: `str` or `list` of command to open a pipe with.
-
             **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
                 `command` is a string then will be invoked with `bash -c`, otherwise
                 `command` is a list and will be invoked without a shell.
@@ -652,7 +650,6 @@ class Commander:  # pylint: disable=R0904
 
         Args:
             cmd: `str` or `list` of command to open a pipe with.
-
             **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
                 `command` is a string then will be invoked with `bash -c`, otherwise
                 `command` is a list and will be invoked without a shell.
@@ -726,9 +723,17 @@ class Commander:  # pylint: disable=R0904
     def cmd_nostatus(self, cmd, **kwargs):
         """Run given command returning output[s]
 
-        if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
-        both stdout and stderr are returned, otherwise stderr is combined
-        with stdout and only stdout is returned.
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+        Returns:
+            if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
+            both stdout and stderr are returned, otherwise stderr is combined
+            with stdout and only stdout is returned.
         """
         #
         # This method serves as the basis for all derived sync cmd variations, so to
@@ -745,7 +750,21 @@ class Commander:  # pylint: disable=R0904
         return o
 
     def cmd_status(self, cmd, **kwargs):
-        "Run given command returning status and outputs"
+        """Run given command returning status and outputs
+
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+        Returns:
+            (status, output, error) are returned
+            status: the returncode of the command.
+            output: stdout as a string from the command.
+            error: stderr as a string from the command.
+        """
         #
         # This method serves as the basis for all derived sync cmd variations, so to
         # override sync cmd behavior simply override this function and *not* the other
@@ -755,7 +774,21 @@ class Commander:  # pylint: disable=R0904
         return self._cmd_status(cmds, **kwargs)
 
     def cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors"""
+        """Execute a command. Raise an exception on errors
+
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+        Returns:
+            output: stdout as a string from the command.
+
+        Raises:
+            CalledProcessError: on non-zero exit status
+        """
 
         _, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
         return stdout
@@ -769,6 +802,21 @@ class Commander:  # pylint: disable=R0904
         return Commander.cmd_status(self, cmd, raises=True, **kwargs)
 
     async def async_cmd_status(self, cmd, **kwargs):
+        """Run given command returning status and outputs
+
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `cmd` is a string then will be invoked with `bash -c`, otherwise
+                `cmd` is a list and will be invoked without a shell.
+        Returns:
+            (status, output, error) are returned
+            status: the returncode of the command.
+            output: stdout as a string from the command.
+            error: stderr as a string from the command.
+        """
         #
         # This method serves as the basis for all derived async cmd variations, so to
         # override async cmd behavior simply override this function and *not* the other
@@ -780,9 +828,18 @@ class Commander:  # pylint: disable=R0904
     async def async_cmd_nostatus(self, cmd, **kwargs):
         """Run given command returning output[s]
 
-        if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
-        both stdout and stderr are returned, otherwise stderr is combined
-        with stdout and only stdout is returned.
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `cmd` is a string then will be invoked with `bash -c`, otherwise
+                `cmd` is a list and will be invoked without a shell.
+        Returns:
+            if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
+            both stdout and stderr are returned, otherwise stderr is combined
+            with stdout and only stdout is returned.
+
         """
         cmds = self.cmd_get_cmd_list(cmd)
         if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
@@ -794,7 +851,21 @@ class Commander:  # pylint: disable=R0904
         return o
 
     async def async_cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors"""
+        """Execute a command. Raise an exception on errors
+
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
+                `cmd` is a string then will be invoked with `bash -c`, otherwise
+                `cmd` is a list and will be invoked without a shell.
+        Returns:
+            output: stdout as a string from the command.
+
+        Raises:
+            CalledProcessError: on non-zero exit status
+        """
         _, stdout, _ = await self.async_cmd_status(cmd, raises=True, **kwargs)
         return stdout
 
@@ -835,7 +906,7 @@ class Commander:  # pylint: disable=R0904
 
         Args:
             wait_for: True to wait for exit from command or `str` as channel neme to
-                      signal on exit, otherwise False
+                signal on exit, otherwise False
             background: Do not change focus to new window.
             title: Title for new pane (tmux) or window (xterm).
             name: Name of the new window (tmux)
@@ -1038,13 +1109,13 @@ class InterfaceMixin:
 
         The keys and their values are as follows:
 
-        delay :: (int) number of microseconds
-        jitter :: (int) number of microseconds
-        jitter-correlation :: (float) % correlation to previous (default 10%)
-        loss :: (float) % of loss
-        loss-correlation :: (float) % correlation to previous (default 0%)
-        rate :: (int or str) bits per second, string allows for use of
-                {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
+        delay (int): number of microseconds
+        jitter (int): number of microseconds
+        jitter-correlation (float): % correlation to previous (default 10%)
+        loss (float): % of loss
+        loss-correlation (float): % correlation to previous (default 0%)
+        rate  (int or str): bits per second, string allows for use of
+            {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000
         """
         del ifname  # unused
 
@@ -2074,9 +2145,9 @@ if True:  # pylint: disable=using-constant-test
             This will split `command` into lines and feed each one to the shell.
 
             Args:
-                command - string of commands separated by newlines, a trailing
+                command: string of commands separated by newlines, a trailing
                     newline will cause and empty line to be sent.
-                timeout - pexpect timeout value.
+                timeout: pexpect timeout value.
             """
             lines = command.splitlines()
             if command[-1] == "\n":
@@ -2100,7 +2171,8 @@ if True:  # pylint: disable=using-constant-test
         def cmd_nostatus(self, cmd, timeout=-1):
             """Execute a shell command
 
-            Returns (strip/cleaned \r) output
+            Returns:
+                (strip/cleaned \r) output
             """
             output = self.run_command(cmd, timeout)
             output = output.replace("\r\n", "\n")
@@ -2122,7 +2194,8 @@ if True:  # pylint: disable=using-constant-test
         def cmd_status(self, cmd, timeout=-1):
             """Execute a shell command
 
-            Returns status and (strip/cleaned \r) output
+            Returns:
+                status and (strip/cleaned \r) output
             """
 
             # Run the command getting the output
@@ -2164,8 +2237,11 @@ if True:  # pylint: disable=using-constant-test
         def cmd_raises(self, cmd, timeout=-1):
             """Execute a shell command.
 
-            Returns (strip/cleaned \r) ouptut
-            Raises CalledProcessError on non-zero exit status
+            Returns:
+                (strip/cleaned \r) ouptut
+
+            Raises:
+               CalledProcessError: on non-zero exit status
             """
             rc, output = self.cmd_status(cmd, timeout)
             if rc:
