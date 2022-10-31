@@ -1,8 +1,11 @@
 **/__pycache__/
 /dist/
-/err.out
+err.out
 /coverage.xml
 /.testtmp/
 *.log
 *.pyc
 *.yang
+bzImage
+rootfs.cpio.gz
+.coverage
