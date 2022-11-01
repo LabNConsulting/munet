@@ -95,7 +95,7 @@ Test Target Summary                                                  Pass Fail\n
         res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, rstr, p, f)
         self.log("R:" + res)
         self.summary(res)
-        if f == 1 and self.CallOnFail != False:
+        if f == 1 and self.CallOnFail is not False:
             self.CallOnFail()
 
     def closeFiles(self):
@@ -214,14 +214,13 @@ Total %-4d                                                           %-4d %d\n\
             report = "<no output>"
         else:
             report = out
-            if returnJson == True:
+            if returnJson is True:
                 try:
                     js = json.loads(out)
                 except:
                     js = None
-                    self.log(
-                        "WARNING: JSON load failed -- confirm command output is in JSON format."
-                    )
+                    self.log("WARNING: JSON load failed -- " +
+                             "confirm command output is in JSON format.")
         self.log("COMMAND OUTPUT:%s:" % report)
 
         # JSON comparison
@@ -230,9 +229,8 @@ Total %-4d                                                           %-4d %d\n\
                 expect = json.loads(regexp)
             except:
                 expect = None
-                self.log(
-                    "WARNING: JSON load failed -- confirm regex input is in JSON format."
-                )
+                self.log("WARNING: JSON load failed -- " +
+                         "confirm regex input is in JSON format.")
             json_diff = json_cmp(expect, js)
             if len(json_diff) != 0:
                 if op == "jsoncmp_fail":
@@ -266,7 +264,7 @@ Total %-4d                                                           %-4d %d\n\
         out = " ".join(out.splitlines())
         search = re.search(regexp, out)
         self.l_last = search
-        if search == None:
+        if search is None:
             if op == "fail":
                 success = True
             else:
@@ -324,7 +322,8 @@ Total %-4d                                                           %-4d %d\n\
 
         while wait_count > 0:
             n += 1
-            found = self.command(target, command, regexp, op, result, returnJson, startt)
+            found = self.command(target, command, regexp,
+                                 op, result, returnJson, startt)
             if found is not False:
                 break
 
@@ -371,16 +370,14 @@ def luCommand(
     regexp=".",
     op="none",
     result="",
-    time=10,
+    ltime=10,
     returnJson=False,
     wait_time=0.5,
 ):
     if op != "wait":
         return LUtil.command(target, command, regexp, op, result, returnJson)
-    else:
-        return LUtil.wait(
-            target, command, regexp, op, result, time, returnJson, wait_time
-        )
+    return LUtil.wait(target, command, regexp, op,
+                      result, ltime, returnJson, wait_time)
 
 
 def luLast(usenl=False):
@@ -388,10 +385,9 @@ def luLast(usenl=False):
         if LUtil.l_last_nl is not None:
             LUtil.log("luLast:%s:" % LUtil.l_last_nl.group(), 7)
         return LUtil.l_last_nl
-    else:
-        if LUtil.l_last is not None:
-            LUtil.log("luLast:%s:" % LUtil.l_last.group(), 7)
-        return LUtil.l_last
+    if LUtil.l_last is not None:
+        LUtil.log("luLast:%s:" % LUtil.l_last.group(), 7)
+    return LUtil.l_last
 
 
 def luInclude(filename, CallOnFail=None):
@@ -446,10 +442,10 @@ def luShowFail():
     for line in sf:
         if line[-2] != "0":
             printed += 1
-            logger.error(line.rstrip())
+            logging.error(line.rstrip())
     sf.close()
     if printed > 0:
-        logger.error("See %s for details of errors" % LUtil.fout_name)
+        logging.error("See %s for details of errors" % (LUtil.fout_name))
 
 
 # for testing
