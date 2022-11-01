@@ -15,6 +15,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+"""Implement setest functioality."""
+
+# pylint: disable=global-statement
 
 import os
 import re
@@ -31,14 +34,8 @@ from deepdiff import DeepDiff as json_cmp
 # environments.
 
 
-class lUtil:
-    # to be made configurable in the future
-    base_script_dir = "."
-    base_log_dir = "."
-    fout_name = "output.log"
-    fsum_name = "summary.txt"
-    l_level = 6
-    CallOnFail = False
+class LUtil:
+    """Base class of setest functionality."""
 
     l_total = 0
     l_pass = 0
@@ -49,34 +46,57 @@ class lUtil:
     l_dotall_experiment = False
     l_last_nl = None
 
-    fout = ""
-    fsum = ""
     net = ""
 
-    def log(self, lstr, level=6):
+    def __init__(
+        self,
+        baseScriptDir=".",
+        baseLogDir=".",
+        net="",
+        fout="output.log",
+        fsum="summary.txt",
+        level=6,
+    ):
+        self.base_script_dir = baseScriptDir
+        self.base_log_dir = baseLogDir
+        self.net = net
+        if fout:
+            self.fout_name = baseLogDir + "/" + fout
+        if fsum:
+            self.fsum_name = baseLogDir + "/" + fsum
+        if level is not None:
+            self.l_level = level
+        self.l_dotall_experiment = False
+        self.l_dotall_experiment = True
+
+        self.__call_on_fail = None
+        self.__fout = None
+        self.__fsum = None
+
+    def log(self, lstr: str, level: int = 6) -> None:
         if self.l_level > 0:
-            if self.fout == "":
-                self.fout = open(self.fout_name, "w")
-            self.fout.write(lstr + "\n")
+            if not self.__fout:
+                self.__fout = open(self.fout_name, "w", encoding="utf-8")
+            self.__fout.write(lstr + "\n")
         if level <= self.l_level:
             print(lstr)
 
-    def summary(self, sstr):
-        if self.fsum == "":
-            self.fsum = open(self.fsum_name, "w")
-            self.fsum.write(
+    def summary(self, sstr: str) -> None:
+        if self.__fsum == "":
+            self.__fsum = open(self.fsum_name, "w", encoding="utf-8")
+            self.__fsum.write(
                 "\
 ******************************************************************************\n"
             )
-            self.fsum.write(
+            self.__fsum.write(
                 "\
 Test Target Summary                                                  Pass Fail\n"
             )
-            self.fsum.write(
+            self.__fsum.write(
                 "\
 ******************************************************************************\n"
             )
-        self.fsum.write(sstr + "\n")
+        self.__fsum.write(sstr + "\n")
 
     def result(self, target, success, rstr, logstr=None):
         if success:
@@ -95,8 +115,8 @@ Test Target Summary                                                  Pass Fail\n
         res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, rstr, p, f)
         self.log("R:" + res)
         self.summary(res)
-        if f == 1 and self.CallOnFail != False:
-            self.CallOnFail()
+        if f == 1 and self.__call_on_fail:
+            self.__call_on_fail()
 
     def closeFiles(self):
         ret = (
@@ -106,31 +126,25 @@ Total %-4d                                                           %-4d %d\n\
 ******************************************************************************"
             % (self.l_total, self.l_pass, self.l_fail)
         )
-        if self.fsum != "":
-            self.fsum.write(ret + "\n")
-            self.fsum.close()
-            self.fsum = ""
-        if self.fout != "":
-            if os.path.isfile(self.fsum_name):
-                r = open(self.fsum_name, "r")
-                self.fout.write(r.read())
+        if self.__fsum:
+            self.__fsum.write(ret + "\n")
+            self.__fsum.close()
+            self.__fsum = None
+        if self.__fout:
+            if os.path.isfile(self.__fout):
+                r = open(self.fsum_name, "r", encoding="utf-8")
+                self.__fout.write(r.read())
                 r.close()
-            self.fout.close()
-            self.fout = ""
+            self.__fout.close()
+            self.__fout = None
         return ret
 
-    def setFilename(self, name):
+    def __set_filename(self, name):
         fstr = "FILE: " + name
         self.log(fstr)
         self.summary(fstr)
         self.l_filename = name
-        self.line = 0
-
-    def getCallOnFail(self):
-        return self.CallOnFail
-
-    def setCallOnFail(self, CallOnFail):
-        self.CallOnFail = CallOnFail
+        self.l_line = 0
 
     def strToArray(self, string):
         a = []
@@ -167,28 +181,32 @@ Total %-4d                                                           %-4d %d\n\
         return a
 
     def execTestFile(self, tstFile):
-        if os.path.isfile(tstFile):
-            f = open(tstFile)
-            for line in f:
-                if len(line) > 1:
-                    a = self.strToArray(line)
-                    if len(a) >= 6:
-                        luCommand(a[1], a[2], a[3], a[4], a[5])
-                    else:
-                        self.l_line += 1
-                        self.log("%s:%s %s" % (self.l_filename, self.l_line, line))
-                        if len(a) >= 2:
-                            if a[0] == "sleep":
-                                time.sleep(int(a[1]))
-                            elif a[0] == "include":
-                                self.execTestFile(a[1])
-            f.close()
-        else:
+        if not os.path.isfile(tstFile):
             self.log("unable to read: " + tstFile)
             sys.exit(1)
+            return
+
+        f = open(tstFile, encoding="utf-8")
+
+        for line in f:
+            if len(line) <= 1:
+                continue
+
+            a = self.strToArray(line)
+            if len(a) >= 6:
+                luCommand(a[1], a[2], a[3], a[4], a[5])
+            else:
+                self.l_line += 1
+                self.log("%s:%s %s" % (self.l_filename, self.l_line, line))
+                if len(a) >= 2:
+                    if a[0] == "sleep":
+                        time.sleep(int(a[1]))
+                    elif a[0] == "include":
+                        self.execTestFile(a[1])
+        f.close()
 
     def command(self, target, command, regexp, op, result, returnJson, startt=None):
-        if op == "jsoncmp_pass" or op == "jsoncmp_fail":
+        if op in ("jsoncmp_pass", "jsoncmp_fail"):
             returnJson = True
 
         self.log(
@@ -214,24 +232,26 @@ Total %-4d                                                           %-4d %d\n\
             report = "<no output>"
         else:
             report = out
-            if returnJson == True:
+            if returnJson is True:
                 try:
                     js = json.loads(out)
-                except:
+                except Exception:
                     js = None
                     self.log(
-                        "WARNING: JSON load failed -- confirm command output is in JSON format."
+                        "WARNING: JSON load failed -- "
+                        "confirm command output is in JSON format."
                     )
         self.log("COMMAND OUTPUT:%s:" % report)
 
         # JSON comparison
-        if op == "jsoncmp_pass" or op == "jsoncmp_fail":
+        if op in ("jsoncmp_pass", "jsoncmp_fail"):
             try:
                 expect = json.loads(regexp)
-            except:
+            except Exception:
                 expect = None
                 self.log(
-                    "WARNING: JSON load failed -- confirm regex input is in JSON format."
+                    "WARNING: JSON load failed -- "
+                    + "confirm regex input is in JSON format."
                 )
             json_diff = json_cmp(expect, js)
             if len(json_diff) != 0:
@@ -266,11 +286,8 @@ Total %-4d                                                           %-4d %d\n\
         out = " ".join(out.splitlines())
         search = re.search(regexp, out)
         self.l_last = search
-        if search == None:
-            if op == "fail":
-                success = True
-            else:
-                success = False
+        if search is None:
+            success = op == "fail"
             ret = success
         else:
             ret = search.group()
@@ -292,7 +309,7 @@ Total %-4d                                                           %-4d %d\n\
             if js is not None or ret is not False:
                 delta = time.time() - startt
                 self.result(target, success, "%s +%4.2f secs" % (result, delta))
-        elif op == "pass" or op == "fail":
+        elif op in ("pass", "fail"):
             self.result(target, success, result)
         if js is not None:
             return js
@@ -324,7 +341,9 @@ Total %-4d                                                           %-4d %d\n\
 
         while wait_count > 0:
             n += 1
-            found = self.command(target, command, regexp, op, result, returnJson, startt)
+            found = self.command(
+                target, command, regexp, op, result, returnJson, startt
+            )
             if found is not False:
                 break
 
@@ -336,9 +355,34 @@ Total %-4d                                                           %-4d %d\n\
         self.log("Done after %d loops, time=%s, Found=%s" % (n, delta, found))
         return found
 
+    def do_include(self, filename, call_on_fail=None):
+        tstFile = self.base_script_dir + "/" + filename
+        self.__set_filename(filename)
+        if call_on_fail is not None:
+            old_call_on_fail = self.__call_on_fail
+            self.__call_on_fail = call_on_fail
+        if filename.endswith(".py"):
+            self.log("luInclude: execfile " + tstFile)
+            with open(tstFile, encoding="utf-8") as infile:
+                exec(infile.read())  # pylint: disable=exec-used
+        else:
+            self.log("luInclude: execTestFile " + tstFile)
+            self.execTestFile(tstFile)
+        if call_on_fail is not None:
+            self.__call_on_fail = old_call_on_fail
+
+    def do_last(self, usenl=False):
+        if usenl:
+            if self.l_last_nl is not None:
+                self.log("luLast:%s:" % self.l_last_nl.group(), 7)
+            return self.l_last_nl
+        if self.l_last is not None:
+            self.log("luLast:%s:" % self.l_last.group(), 7)
+        return self.l_last
+
 
 # initialized by luStart
-LUtil = None
+g_lutil = None
 
 # entry calls
 def luStart(
@@ -349,20 +393,21 @@ def luStart(
     fsum="summary.txt",
     level=None,
 ):
-    global LUtil
-    # init class
-    LUtil = lUtil()
-    LUtil.base_script_dir = baseScriptDir
-    LUtil.base_log_dir = baseLogDir
-    LUtil.net = net
-    if fout != "":
-        LUtil.fout_name = baseLogDir + "/" + fout
-    if fsum is not None:
-        LUtil.fsum_name = baseLogDir + "/" + fsum
-    if level is not None:
-        LUtil.l_level = level
-    LUtil.l_dotall_experiment = False
-    LUtil.l_dotall_experiment = True
+
+    global g_lutil
+
+    g_lutil = LUtil(
+        baseScriptDir,
+        baseLogDir,
+        net,
+        fout,
+        fsum,
+        level,
+    )
+
+
+def luInclude(filename, call_on_fail=None):
+    return g_lutil.do_include(filename, call_on_fail)
 
 
 def luCommand(
@@ -371,85 +416,57 @@ def luCommand(
     regexp=".",
     op="none",
     result="",
-    time=10,
+    ltime=10,
     returnJson=False,
     wait_time=0.5,
 ):
     if op != "wait":
-        return LUtil.command(target, command, regexp, op, result, returnJson)
-    else:
-        return LUtil.wait(
-            target, command, regexp, op, result, time, returnJson, wait_time
-        )
+        return g_lutil.command(target, command, regexp, op, result, returnJson)
+    return g_lutil.wait(
+        target, command, regexp, op, result, ltime, returnJson, wait_time
+    )
 
 
 def luLast(usenl=False):
-    if usenl:
-        if LUtil.l_last_nl is not None:
-            LUtil.log("luLast:%s:" % LUtil.l_last_nl.group(), 7)
-        return LUtil.l_last_nl
-    else:
-        if LUtil.l_last is not None:
-            LUtil.log("luLast:%s:" % LUtil.l_last.group(), 7)
-        return LUtil.l_last
-
-
-def luInclude(filename, CallOnFail=None):
-    tstFile = LUtil.base_script_dir + "/" + filename
-    LUtil.setFilename(filename)
-    if CallOnFail is not None:
-        oldCallOnFail = LUtil.getCallOnFail()
-        LUtil.setCallOnFail(CallOnFail)
-    if filename.endswith(".py"):
-        LUtil.log("luInclude: execfile " + tstFile)
-        with open(tstFile) as infile:
-            exec(infile.read())
-    else:
-        LUtil.log("luInclude: execTestFile " + tstFile)
-        LUtil.execTestFile(tstFile)
-    if CallOnFail is not None:
-        LUtil.setCallOnFail(oldCallOnFail)
+    return g_lutil.do_last(usenl)
 
 
 def luFinish():
-    global LUtil
-    ret = LUtil.closeFiles()
-    # done
-    LUtil = None
+    global g_lutil
+    ret = g_lutil.closeFiles()
+    g_lutil = None
     return ret
 
 
 def luNumFail():
-    return LUtil.l_fail
+    return g_lutil.l_fail
 
 
 def luNumPass():
-    return LUtil.l_pass
+    return g_lutil.l_pass
 
 
 def luResult(target, success, rstr, logstr=None):
-    return LUtil.result(target, success, rstr, logstr)
+    return g_lutil.result(target, success, rstr, logstr)
 
 
 def luShowResults(prFunction):
-    printed = 0
-    sf = open(LUtil.fsum_name, "r")
+    sf = open(g_lutil.fsum_name, "r", encoding="utf-8")
     for line in sf:
-        printed += 1
         prFunction(line.rstrip())
     sf.close()
 
 
 def luShowFail():
     printed = 0
-    sf = open(LUtil.fsum_name, "r")
+    sf = open(g_lutil.fsum_name, "r", encoding="utf-8")
     for line in sf:
         if line[-2] != "0":
             printed += 1
-            logger.error(line.rstrip())
+            logging.error(line.rstrip())
     sf.close()
     if printed > 0:
-        logger.error("See %s for details of errors" % LUtil.fout_name)
+        logging.error("See %s for details of errors", g_lutil.fout_name)
 
 
 # for testing
