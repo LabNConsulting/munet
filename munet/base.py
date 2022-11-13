@@ -1449,26 +1449,30 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.base_pre_cmd.append("-F")
         self.set_pre_cmd(self.base_pre_cmd)
 
-        # Remount /sys to pickup any changes, but keep root /sys/fs/cgroup
-        # This pattern could be made generic and supported for any overlapping mounts
-        tmpmnt = f"/tmp/cgm-{self.pid}"
-
         if self.p is None:
             self.cmd_raises("mount --make-rprivate /")
 
-        #
-        # We do not want cmd_status in child classes (e.g., container) for the remaining
-        # setup calls in this __init__ function.
-        #
-        self.cmd_status_host(f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}")
-        self.cmd_status_host("mount -t sysfs sysfs /sys")
-        self.cmd_status_host(f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}")
-        # self.cmd_raises(
-        #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
-        #     skip_pre_cmd=True,
-        # )
-        # o = self.cmd_raises("ls -l /sys/fs/cgroup")
-        # self.logger.warning("XXX %s", o)
+        # We do not want cmd_status in child classes (e.g., container) for
+        # the remaining setup calls in this __init__ function.
+
+        if net:
+            # Remount /sys to pickup any changes in the network, but keep root
+            # /sys/fs/cgroup. This pattern could be made generic and supported for any
+            # overlapping mounts
+            tmpmnt = f"/tmp/cgm-{self.pid}"
+            self.cmd_status_host(
+                f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}"
+            )
+            self.cmd_status_host("mount -t sysfs sysfs /sys")
+            self.cmd_status_host(
+                f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}"
+            )
+            # self.cmd_raises(
+            #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
+            #     skip_pre_cmd=True,
+            # )
+            # o = self.cmd_raises("ls -l /sys/fs/cgroup")
+            # self.logger.warning("XXX %s", o)
 
         # Set the hostname to the namespace name
         if uts and set_hostname and self.p is not None:
