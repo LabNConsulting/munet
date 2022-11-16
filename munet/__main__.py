@@ -30,6 +30,7 @@ import sys
 from . import cli
 from . import parser
 from .cleanup import cleanup_previous
+from .compat import PytestConfig
 
 
 logger = None
@@ -66,7 +67,10 @@ async def async_main(args, config):
     status = 3
 
     # Setup the namespaces and network addressing.
-    unet = await parser.async_build_topology(config, rundir=args.rundir, args=args)
+
+    unet = await parser.async_build_topology(
+        config, rundir=args.rundir, args=args, pytestconfig=PytestConfig(args)
+    )
     logger.info("Topology up: rundir: %s", unet.rundir)
 
     try:
@@ -134,6 +138,19 @@ def main(*args):
     ap.add_argument(
         "-V", "--version", action="store_true", help="print the verison number and exit"
     )
+
+    # Runtime (pytest compat) things
+    ap.add_argument("--shell", help="comma-sep list of nodes to open shells for")
+    ap.add_argument(
+        "--stdout", help="comma-sep list of nodes to open windows on their stdout"
+    )
+    ap.add_argument(
+        "--stderr", help="comma-sep list of nodes to open windows on their stderr"
+    )
+    ap.add_argument(
+        "--pcap", help="comma-sep list of network to open network captures on"
+    )
+
     args = ap.parse_args()
 
     if args.version:
