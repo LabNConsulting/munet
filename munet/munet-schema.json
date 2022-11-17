@@ -90,6 +90,9 @@
           "image": {
             "type": "string"
           },
+          "server": {
+            "type": "string"
+          },
           "qemu": {
             "type": "object",
             "properties": {
@@ -366,6 +369,9 @@
                 "type": "string"
               },
               "image": {
+                "type": "string"
+              },
+              "server": {
                 "type": "string"
               },
               "qemu": {
