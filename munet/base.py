@@ -21,6 +21,7 @@
 """A module that implements core functionality for library or standalone use."""
 import asyncio
 import datetime
+import getpass
 import logging
 import os
 import platform
@@ -222,6 +223,8 @@ class Commander:  # pylint: disable=R0904
         self.exec_paths = {}
         self.pre_cmd = []
         self.pre_cmd_str = ""
+        self.pre_cmd_pty = []
+        self.pre_cmd_pty_str = ""
 
         if not logger:
             self.logger = logging.getLogger(__name__ + ".commander." + name)
@@ -251,13 +254,25 @@ class Commander:  # pylint: disable=R0904
         handler.setFormatter(logging.Formatter(fmt=fmtstr))
         self.logger.addHandler(handler)
 
-    def set_pre_cmd(self, pre_cmd=None):
+    def _get_pre_cmd(self, use_str, use_pty):
+        if use_pty and self.pre_cmd_pty:
+            return self.pre_cmd_pty_str if use_str else self.pre_cmd_pty
+        return self.pre_cmd_str if use_str else self.pre_cmd
+
+    def set_pre_cmd(self, pre_cmd=None, pre_cmd_pty=None):
         if not pre_cmd:
             self.pre_cmd = []
             self.pre_cmd_str = ""
         else:
             self.pre_cmd = pre_cmd
-            self.pre_cmd_str = " ".join(self.pre_cmd) + " "
+            self.pre_cmd_str = shlex.join(pre_cmd) + " "
+
+        if not pre_cmd_pty:
+            self.pre_cmd_pty = []
+            self.pre_cmd_pty_str = ""
+        else:
+            self.pre_cmd_pty = pre_cmd_pty
+            self.pre_cmd_pty_str = shlex.join(pre_cmd_pty) + " "
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.name})"
@@ -312,19 +327,14 @@ class Commander:  # pylint: disable=R0904
             return "sudo " + cmd
         return cmd
 
-    def _get_cmd_str(self, cmd):
-        if isinstance(cmd, str):
-            return self.pre_cmd_str + cmd
-        cmd = self.pre_cmd + cmd
-        return " ".join(cmd)
-
-    def _get_sub_args(self, cmd, defaults, **kwargs):
+    def _get_sub_args(self, cmd, defaults, use_pty=False, **kwargs):
         if isinstance(cmd, str):
             defaults["shell"] = True
-            pre_cmd = self.pre_cmd_str
+            pre_cmd = self._get_pre_cmd(True, use_pty)
+            cmd = shlex.quote(cmd)
         else:
             defaults["shell"] = False
-            pre_cmd = self.pre_cmd
+            pre_cmd = self._get_pre_cmd(False, use_pty)
             cmd = [str(x) for x in cmd]
 
         env = {**(kwargs["env"] if "env" in kwargs else os.environ)}
@@ -337,6 +347,7 @@ class Commander:  # pylint: disable=R0904
         return pre_cmd, cmd, defaults
 
     def _popen_prologue(self, async_exec, method, cmd, skip_pre_cmd, **kwargs):
+        cmd = self.cmd_get_cmd_list(cmd)
         if not async_exec:
             defaults = {
                 "encoding": "utf-8",
@@ -349,7 +360,14 @@ class Commander:  # pylint: disable=R0904
                 "stderr": subprocess.PIPE,
             }
         pre_cmd, cmd, defaults = self._get_sub_args(cmd, defaults, **kwargs)
-        self.logger.debug('%s: %s("%s", kwargs: %.80s)', self, method, cmd, defaults)
+        self.logger.debug(
+            '%s: %s("%s", precmd: "%s" kwargs: %.120s)',
+            self,
+            method,
+            cmd,
+            pre_cmd,
+            defaults,
+        )
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
         return actual_cmd, defaults
 
@@ -390,10 +408,16 @@ class Commander:  # pylint: disable=R0904
         return p
 
     def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, echo=False, **kwargs):
-        pre_cmd, cmd, defaults = self._get_sub_args(cmd, {}, **kwargs)
+        # Spawn expects a string.
+        if isinstance(cmd, str):
+            cmd = shlex.split(cmd)
+
+        pre_cmd, cmd, defaults = self._get_sub_args(cmd, {}, use_pty=use_pty, **kwargs)
         actual_cmd = cmd if skip_pre_cmd else pre_cmd + cmd
+
         if "shell" in defaults:
             del defaults["shell"]
+
         if "encoding" not in defaults:
             defaults["encoding"] = "utf-8"
             if "codec_errors" not in defaults:
@@ -712,6 +736,18 @@ class Commander:  # pylint: disable=R0904
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
     def cmd_get_cmd_list(self, cmd):
+        """Given a list or string return a list form for execution
+
+        If `cmd` is a string then the returned list uses bash and looks
+        like this: ["/bin/bash", "-c", cmd]. Some node types override
+        this function if they utilize a different shell as to return
+        a different list of values.
+
+        Args:
+            cmd: list or string representing the command to execute.
+        Returns:
+            list of commands to execute.
+        """
         if not isinstance(cmd, str):
             cmds = cmd
         else:
@@ -740,7 +776,7 @@ class Commander:  # pylint: disable=R0904
         # override sync cmd behavior simply override this function and *not* the other
         # variations, unless you are changing only that variation's behavior
         #
-        cmds = self.cmd_get_cmd_list(cmd)
+        cmds = cmd
         if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
             _, o, e = self._cmd_status(cmds, **kwargs)
             return o, e
@@ -770,7 +806,7 @@ class Commander:  # pylint: disable=R0904
         # override sync cmd behavior simply override this function and *not* the other
         # variations, unless you are changing only that variation's behavior
         #
-        cmds = self.cmd_get_cmd_list(cmd)
+        cmds = cmd
         return self._cmd_status(cmds, **kwargs)
 
     def cmd_raises(self, cmd, **kwargs):
@@ -822,7 +858,7 @@ class Commander:  # pylint: disable=R0904
         # override async cmd behavior simply override this function and *not* the other
         # variations, unless you are changing only that variation's behavior
         #
-        cmds = self.cmd_get_cmd_list(cmd)
+        cmds = cmd
         return await self._async_cmd_status(cmds, **kwargs)
 
     async def async_cmd_nostatus(self, cmd, **kwargs):
@@ -841,7 +877,7 @@ class Commander:  # pylint: disable=R0904
             with stdout and only stdout is returned.
 
         """
-        cmds = self.cmd_get_cmd_list(cmd)
+        cmds = cmd
         if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
             _, o, e = await self._async_cmd_status(cmds, **kwargs)
             return o, e
@@ -927,12 +963,18 @@ class Commander:  # pylint: disable=R0904
 
         sudo_path = get_exec_path_host(["sudo"])
 
-        if not self.is_container or on_host:
+        if isinstance(self, SSHRemote):
+            if isinstance(cmd, str):
+                cmd = shlex.split(cmd)
+                cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
+            nscmd = self._get_pre_cmd(False, True) + cmd
+        elif not self.is_container or on_host:
             # This is the command to execute to be inside the namespace.
             # We are getting into trouble with quoting.
             cmd = f"/usr/bin/env MUNET_NODENAME={self.name} {cmd}"
-            nscmd = sudo_path + " " + self.pre_cmd_str + cmd
+            nscmd = sudo_path + " " + self._get_pre_cmd(True, True) + cmd
         else:
+            # Hmm why different.
             nscmd = self.get_cmd_container(cmd, sudo=True, tty=True)
 
         if "TMUX" in os.environ and not forcex:
@@ -957,6 +999,7 @@ class Commander:  # pylint: disable=R0904
             if tmux_target:
                 cmd.append("-t")
                 cmd.append(tmux_target)
+            # nscmd is always added as single string argument
             if isinstance(nscmd, str) or title or channel:
                 if not isinstance(nscmd, str):
                     nscmd = shlex.join(nscmd)
@@ -966,7 +1009,7 @@ class Commander:  # pylint: disable=R0904
                     nscmd = f'trap "tmux wait -S {channel}; exit 0" EXIT; {nscmd}'
                 cmd.append(nscmd)
             else:
-                cmd.extend(nscmd)
+                cmd.append(shlex.join(nscmd))
         elif "STY" in os.environ and not forcex:
             # wait for not supported in screen for now
             channel = None
@@ -991,7 +1034,7 @@ class Commander:  # pylint: disable=R0904
                 cmd.append(title)
             cmd.append("-e")
             cmd.append(sudo_path)
-            cmd.extend(self.pre_cmd)
+            cmd.extend(self._get_pre_cmd(False, True))
             cmd.extend(["bash", "-c", user_cmd])
             # if channel:
             #    return self.cmd_raises(cmd, skip_pre_cmd=True)
@@ -1220,6 +1263,65 @@ class InterfaceMixin:
             self.cmd_raises(f"tc qdisc add dev {ifname} {selector} tbf {tbf_args}")
 
         self.cmd_raises(f"tc qdisc show dev {ifname}")
+
+
+class SSHRemote(Commander):
+    """SSHRemote a node representing an ssh connection to something"""
+
+    def __init__(
+        self, name, server, port=22, user=None, password=None, unet=None, **kwargs
+    ):
+        super().__init__(name, unet=unet, **kwargs)
+
+        self.logger.debug("%s: creating", self)
+
+        self.unet = unet
+        self.config = kwargs.get("config", {})
+        self.mgmt_ip = None
+
+        self.port = port
+
+        if user:
+            self.user = user
+        elif "SUDO_USER" in os.environ:
+            self.user = os.environ["SUDO_USER"]
+        else:
+            self.user = getpass.getuser()
+        self.password = password
+
+        self.server = f"{self.user}@{server}"
+
+        pre_cmd = [get_exec_path_host("ssh")]
+        if port != 22:
+            pre_cmd.append(f"-p{port}")
+        pre_cmd.append("-q")
+        pre_cmd.append("-oStrictHostKeyChecking=no")
+        pre_cmd.append("-oUserKnownHostsFile=/dev/null")
+        pre_cmd_tty = list(pre_cmd)
+        pre_cmd_tty.append("-t")
+        pre_cmd.append(self.server)
+        pre_cmd_tty.append(self.server)
+        self.set_pre_cmd(pre_cmd, pre_cmd_tty)
+
+        # We don't add the server until later as we may need to insert a "-t"
+
+        self.logger.info("%s: created", self)
+
+    def cmd_get_cmd_list(self, cmd):
+        """Given a list or string return a list form for execution
+
+        If cmd is a string then [cmd] is returned, for most other
+        node types ["bash", "-c", cmd] is returned but in our case
+        ssh is the shell.
+
+        Args:
+            cmd: list or string representing the command to execute.
+            str_shell: if True and `cmd` is a string then run the
+              command using bash -c
+        Returns:
+            list of commands to execute.
+        """
+        return [cmd] if isinstance(cmd, str) else cmd
 
 
 class LinuxNamespace(Commander, InterfaceMixin):

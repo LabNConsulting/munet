@@ -201,7 +201,12 @@ def load_kinds(args):
 
 
 async def async_build_topology(
-    config=None, logger=None, rundir=None, args=None, pytestconfig=None
+    config=None,
+    logger=None,
+    rundir=None,
+    args=None,
+    unshare_inline=True,
+    pytestconfig=None,
 ):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
@@ -221,7 +226,7 @@ async def async_build_topology(
         config=config,
         pytestconfig=pytestconfig,
         isolated=isolated,
-        unshare_inline=args.unshare_inline if args else True,
+        unshare_inline=args.unshare_inline if args else unshare_inline,
         logger=logger,
     )
 

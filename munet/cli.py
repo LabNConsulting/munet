@@ -70,8 +70,9 @@ def spawn(unet, host, cmd, iow, on_host):
 
         # use os.setsid() make it run in a new process group, or bash job
         # control will not be enabled
+        cmds = ns.cmd_get_cmd_list(cmd)
         p = ns.popen(
-            cmd,
+            cmds,
             preexec_fn=os.setsid,
             stdin=slave_fd,
             stdout=slave_fd,
@@ -280,12 +281,14 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
         execfmt = execfmt.get(kind, {}).get("exec", "")
     if not execfmt:
         return ""
+
+    # Do substitutions for {} in string
     numfmt = len(re.findall(r"{\d*}", execfmt))
     if numfmt > 1:
         ucmd = execfmt.format(*shlex.split(ucmd))
     elif numfmt:
         ucmd = execfmt.format(ucmd)
-    else:
+    elif len(re.findall(r"{[a-zA-Z_][0-9a-zA-Z_\.]*}", execfmt)):
         if execfmt.endswith('"'):
             fstring = "f'''" + execfmt + "'''"
         else:
@@ -295,6 +298,11 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
             globals(),
             {"host": h, "unet": unet, "user_input": ucmd},
         )
+    else:
+        # No variable or usercmd substitution at all.
+        ucmd = execfmt
+
+    # Do substitution for munet variables
     ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
     if host is None or host is unet:
         ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
@@ -384,7 +392,11 @@ async def run_command(
 
     results = await asyncio.gather(*aws, return_exceptions=True)
     for host, result in zip(hosts, results):
-        rc, o, _ = result
+        if isinstance(result, Exception):
+            o = str(result) + "\n"
+            rc = -1
+        else:
+            rc, o, _ = result
         if len(hosts) > 1 or banner:
             outf.write(f"------ Host: {host} ------\n")
         if rc:

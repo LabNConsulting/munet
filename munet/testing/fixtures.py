@@ -133,11 +133,12 @@ def rundir_module():
     return d
 
 
-async def _unet_impl(_rundir, _pytestconfig, param=None):
+async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
     try:
         _unet = await async_build_topology(
             config=get_config(basename=param) if param else None,
             rundir=_rundir,
+            unshare_inline=unshare,
             pytestconfig=_pytestconfig,
         )
     except Exception as error:
@@ -179,7 +180,19 @@ async def _unet_impl(_rundir, _pytestconfig, param=None):
 @pytest.fixture(scope="module")
 async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
     param = request.param if hasattr(request, "param") else None
-    async for x in _unet_impl(rundir_module, pytestconfig, param):
+    async for x in _unet_impl(rundir_module, pytestconfig, unshare=True, param=param):
+        yield x
+
+
+@pytest.fixture(scope="module")
+async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W0621
+    """
+    This share variant keeps munet from unsharing the process to a new namespace so that
+    root level commands and actions are execute on the host, normally they are executed
+    in the munet namespace which allowing things like scapy inline in tests to work.
+    """
+    param = request.param if hasattr(request, "param") else None
+    async for x in _unet_impl(rundir_module, pytestconfig, unshare=False, param=param):
         yield x
 
 
@@ -282,5 +295,29 @@ async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
         def test_example(unet_perfunc)
     """
     param = request.param if hasattr(request, "param") else None
-    async for x in _unet_impl(rundir, pytestconfig, param):
+    async for x in _unet_impl(rundir, pytestconfig, unshare=True, param=param):
+        yield x
+
+
+@pytest.fixture
+async def unet_perfunc_share(request, rundir, pytestconfig):  # pylint: disable=W0621
+    """
+    Build unet per test function with an optional topology basename parameter
+
+    This share variant keeps munet from unsharing the process to a new namespace so that
+    root level commands and actions are execute on the host, normally they are executed
+    in the munet namespace which allowing things like scapy inline in tests to work.
+
+    The fixture can be parameterized to choose different config files.  For example, use
+    as follows to run the test with unet_perfunc configured first with a config file
+    named `cfg1.yaml` then with config file `cfg2.yaml` (where the actual files could
+    end with `json` or `toml` rather than `yaml`).
+
+        @pytest.mark.parametrize(
+            "unet_perfunc", ["cfg1", "cfg2]", indirect=["unet_perfunc"]
+        )
+        def test_example(unet_perfunc)
+    """
+    param = request.param if hasattr(request, "param") else None
+    async for x in _unet_impl(rundir, pytestconfig, unshare=False, param=param):
         yield x

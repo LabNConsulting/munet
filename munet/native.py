@@ -36,6 +36,7 @@ from .base import Bridge
 from .base import Commander
 from .base import LinuxNamespace
 from .base import MunetError
+from .base import SSHRemote
 from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
@@ -2035,13 +2036,13 @@ class Munet(BaseMunet):
                     "name": "sh",
                     "format": "[HOST ...] sh <SHELL-COMMAND>",
                     "help": "execute <SHELL-COMMAND> on hosts",
-                    "exec": "bash -c '{}'",
+                    "exec": "{}",
                 },
                 {
                     "name": "shi",
                     "format": "[HOST ...] shi <INTERACTIVE-COMMAND>",
                     "help": "execute <INTERACTIVE-COMMAND> on HOST[s]",
-                    "exec": "bash -c '{}'",
+                    "exec": "{}",
                     "interactive": True,
                 },
                 {
@@ -2248,6 +2249,9 @@ class Munet(BaseMunet):
             cls = L3ContainerNode
         elif config and config.get("qemu"):
             cls = L3QemuVM
+        elif config and config.get("server"):
+            cls = SSHRemote
+            kwargs["server"] = config["server"]
         else:
             cls = L3Node
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
