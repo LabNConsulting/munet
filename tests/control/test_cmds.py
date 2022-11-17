@@ -28,8 +28,9 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.mark.parametrize("host", ["r1", "r2"])
-async def test_cmd_raises(unet, host):
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+async def test_cmd_raises(unet_share, host):
+    unet = unet_share
     host = unet.hosts[host]
 
     o = host.cmd_raises("echo Foobar")
@@ -52,8 +53,9 @@ async def test_cmd_raises(unet, host):
         assert False, "Failed to raise error"
 
 
-@pytest.mark.parametrize("host", ["r1", "r2"])
-async def test_cmd_status(unet, host):
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+async def test_cmd_status(unet_share, host):
+    unet = unet_share
     host = unet.hosts[host]
 
     rc, o, e = host.cmd_status("echo Foobar")
@@ -63,8 +65,8 @@ async def test_cmd_status(unet, host):
 
     rc, o, e = host.cmd_status("ls ajfipoasdjiopa", warn=False)
     assert rc == 2
-    assert "No such file or directory" in e
     assert o == ""
+    assert "No such file or directory" in e
 
     rc, o, e = await host.async_cmd_status("echo Foobar")
     assert o == "Foobar\n"
@@ -77,8 +79,9 @@ async def test_cmd_status(unet, host):
     assert o == ""
 
 
-@pytest.mark.parametrize("host", ["r1", "r2"])
-async def test_cmd_nostatus(unet, host):
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+async def test_cmd_nostatus(unet_share, host):
+    unet = unet_share
     host = unet.hosts[host]
 
     o = host.cmd_nostatus("echo Foobar")
@@ -118,16 +121,17 @@ async def test_cmd_nostatus(unet, host):
     assert "No such file or directory" in e
 
 
-@pytest.mark.parametrize("host", ["r1", "r2"])
-async def test_popen(unet, host):
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+async def test_popen(unet_share, host):
+    unet = unet_share
     host = unet.hosts[host]
 
     p = host.popen("echo Foobar")
     o, e = p.communicate()
     rc = p.wait()
+    assert e == ""
     assert rc == 0
     assert o == "Foobar\n"
-    assert e == ""
 
     # XXX should really test this with real async actions
     p = await host.async_popen(["echo", "Foobar"])

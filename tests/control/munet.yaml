@@ -6,13 +6,15 @@ topology:
       ip: 10.0.1.254/24
       nat: true
   nodes:
-    - name: r1
+    - name: host1
       connections:
         - to: mgmt0
           ip: 10.0.1.1/24
-    - name: r2
+    - name: container1
       image: docker.io/labn/docker-ci-test:20.04
       connections:
         - to: mgmt0
           ip: 10.0.1.2/24
       cmd: tail -f /dev/null
+    - name: remote1
+      server: localhost
