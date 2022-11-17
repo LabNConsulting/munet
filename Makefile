@@ -19,7 +19,7 @@ ci-lint:
 	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
 
 test: test-validate
-	sudo $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
+	sudo -E $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
 
 clean:
 	rm -f *.yang coverage.xml err.out ox-rfc.el

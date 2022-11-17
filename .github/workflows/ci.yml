@@ -63,7 +63,11 @@ jobs:
           cat /proc/cpuinfo || true
 
       - name: Run main tests
-        run: make test
+        run: |
+          mkdir .ssh
+          ssh-keygen -b 2048 -t rsa -f .ssh/id_rsa -q -N ""
+          cp .ssh/id_rsa.pub .ssh/authorized_keys
+          make test
 
       - name: Upload coverage report
         uses: codecov/codecov-action@v3
