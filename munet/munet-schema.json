@@ -93,6 +93,9 @@
           "server": {
             "type": "string"
           },
+          "ssh-port": {
+            "type": "number"
+          },
           "qemu": {
             "type": "object",
             "properties": {
@@ -373,6 +376,9 @@
               },
               "server": {
                 "type": "string"
+              },
+              "ssh-port": {
+                "type": "number"
               },
               "qemu": {
                 "type": "object",

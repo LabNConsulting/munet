@@ -396,6 +396,15 @@ cisco VM using a nexos file system image.
            instead of the normal `unet` one, otherwise ssh may not
            work as it is executing inside the munet namespace.";
       }
+      leaf ssh-port {
+        type uint16;
+        must "../server" {
+          error-message "ssh-port requires a server";
+        }
+        default 22;
+        description
+          "Port of the ssh server";
+      }
       container qemu {
         must "not(../image) and not(../server)" {
           error-message "Can only have one of image, server or qemu";
