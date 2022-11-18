@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 "Testing of basic topology configuration."
+import os
 import subprocess
 
 import pytest
@@ -26,6 +27,10 @@ import pytest
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
+if "GITHUB_ACTION" in os.environ:
+    pytestmark = pytest.mark.parametrize(
+        "unet_share", ["munet-ci"], indirect=["unet_share"]
+    )
 
 
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1"])

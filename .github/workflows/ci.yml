@@ -20,23 +20,21 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Setup SSH
+        run: |
+          mkdir -p $HOME/.ssh
+          ssh-keygen -q -t rsa -N "" -f $HOME/.ssh/id_rsa
+          cp $HOME/.ssh/id_rsa.pub $HOME/.ssh/authorized_keys
+          ssh-keygen -b 2048 -t rsa -f ssh_host_rsa_key -q -N ""
+          sed "s,\$PWD,$PWD,;s,\$USER,$USER,;s,\$HOME,$HOME," .github/workflows/sshd_config.tpl > sshd_config
+          echo -n > sshd.log
+          sudo /usr/sbin/sshd -f sshd_config -E sshd.log
+
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
           virtualenvs-create: true
           virtualenvs-in-project: true
-
-      # - name: Load cached venv
-      #   id: cached-poetry-dependencies
-      #   uses: actions/cache@v2
-      #   with:
-      #     path: .venv
-      #     key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
-
-      # - name: Install dependencies
-      #   if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      #   run: |
-      #     poetry install -E ci --no-interaction
 
       - name: Install munet project
         run: poetry install -E ci --no-interaction
@@ -64,9 +62,6 @@ jobs:
 
       - name: Run main tests
         run: |
-          mkdir .ssh
-          ssh-keygen -b 2048 -t rsa -f .ssh/id_rsa -q -N ""
-          cp .ssh/id_rsa.pub .ssh/authorized_keys
           make test
 
       - name: Upload coverage report
@@ -75,3 +70,10 @@ jobs:
           verbose: true
           files: ./coverage.xml
           # fail_ci_if_error: false
+
+      - name: Cleanup SSH
+        if: always()
+        run: |
+          if [ -e sshd.pid ]; then
+            sudo kill $(cat sshd.pid)
+          fi

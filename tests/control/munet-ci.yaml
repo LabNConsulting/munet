@@ -1,0 +1,21 @@
+topology:
+  networks-autonumber: false
+  dns: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 10.0.1.254/24
+      nat: true
+  nodes:
+    - name: host1
+      connections:
+        - to: mgmt0
+          ip: 10.0.1.1/24
+    - name: container1
+      image: docker.io/labn/docker-ci-test:20.04
+      connections:
+        - to: mgmt0
+          ip: 10.0.1.2/24
+      cmd: tail -f /dev/null
+    - name: remote1
+      server: localhost
+      port: 5222
