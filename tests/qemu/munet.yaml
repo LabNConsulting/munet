@@ -5,23 +5,12 @@ topology:
     - name: mgmt0
       ip: 192.168.0.254/24
       nat: true
-    - name: net0
-      #ip: 10.0.0.254/24
-    - name: net1
-      #ip: 10.0.1.254/24
-    - name: net2
-      #ip: 10.0.2.254/24
   nodes:
     - name: h1
-      connections: ["mgmt0", "net0"]
+      connections: ["mgmt0", "r1"]
     - name: r1
       kind: linux
-      connections: ["mgmt0", "net0", "net1"]
-    - name: r2
-      kind: linux
-      connections: ["mgmt0", "net2", "net1"]
-    - name: h2
-      connections: ["mgmt0", "net2"]
+      connections: ["mgmt0", "h1"]
 
 kinds:
   - name: linux
@@ -29,7 +18,7 @@ kinds:
       kernel: "%CONFIGDIR%/bzImage"
       initrd: "%CONFIGDIR%/rootfs.cpio.gz"
       cmdline-extra: "acpi=off nokaslr"
-      memory: "1024M"
+      memory: "768M"
       kvm: true
       ncpu: 2
 

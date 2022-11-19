@@ -36,6 +36,12 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
+      - name: install Qemu
+        run: |
+          uname -a
+          sudo apt-get update -y
+          sudo apt-get install -y qemu-system-x86
+
       - name: Install munet project
         run: poetry install -E ci --no-interaction
 
