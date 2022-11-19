@@ -27,9 +27,7 @@ kinds:
   - name: linux
     qemu:
       kernel: "%CONFIGDIR%/bzImage"
-      #initrd: "%CONFIGDIR%/rootfs.cpio.gz"
-      #kernel: "/home/chopps/w/ltfs/output-linux/arch/x86/boot/bzImage"
-      initrd: "/home/chopps/w/ltfs/output-buildroot/images/rootfs.cpio.gz"
+      initrd: "%CONFIGDIR%/rootfs.cpio.gz"
       memory: "768M"
       kvm: true
       ncpu: 2

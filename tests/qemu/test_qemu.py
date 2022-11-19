@@ -22,7 +22,8 @@
 import logging
 
 import pytest
-import requests
+
+from common.fetch import fetch
 
 
 # All tests are coroutines
@@ -32,25 +33,7 @@ pytestmark = pytest.mark.asyncio
 @pytest.fixture(autouse=True, scope="module")
 async def fetch_images():
     assets = ["bzImage", "rootfs.cpio.gz"]
-
-    bheader = {"Accept": "application/octet-stream"}
-    api = "https://api.github.com/repos"
-    owner = "LabNConsulting"
-    repo = "iptfs-dev"
-    qurl = f"{api}/{owner}/{repo}/releases/latest"
-    latest_json = requests.get(qurl, timeout=30).json()
-
-    for asset in latest_json["assets"]:
-        # for curl if we wanted ot use that
-        # burl = asset["browser_download_url"]
-        name = asset["name"]
-        if name not in assets:
-            logging.warning("Skipping unknown asset '%s'", name)
-        aid = asset["id"]
-        aurl = f"{api}/{owner}/{repo}/releases/assets/{aid}"
-        logging.info("Downloading asset '%s'", name)
-        rfile = requests.get(aurl, headers=bheader, timeout=600)
-        open(name, "wb+").write(rfile.content)
+    fetch("LabNConsulting", "iptfs-dev", assets)
 
 
 async def test_qemu_up(unet):
