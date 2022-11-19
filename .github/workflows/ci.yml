@@ -77,3 +77,18 @@ jobs:
           if [ -e sshd.pid ]; then
             sudo kill $(cat sshd.pid)
           fi
+
+      - name: Collect test logs
+        if: ${{ always() }}
+        run: |
+          sudo find /tmp/unet-test -type s -exec rm {} +
+          mkdir -p test-logs
+          sudo tar -C /tmp/unet-test -cf - . | tar -C test-logs -xf -
+          tar -cjf test-logs.tar.bz2 test-logs
+
+      - name: Archive test logs tarball
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-logs-tar
+          path: test-logs.tar.bz2
