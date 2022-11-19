@@ -1567,7 +1567,9 @@ class L3QemuVM(L3Node):
         for ifname in sorted(self.intf_addrs):
             ifaddr = self.intf_addrs[ifname]
             conn = find_with_kv(self.config.get("connections"), "name", ifname)
-            mtu = conn.get("mtu", self.unet.switches[conn["to"]].config.get("mtu"))
+            mtu = conn.get("mtu")
+            if not mtu and conn["to"] in self.unet.switches:
+                mtu = self.unet.switches[conn["to"]].config.get("mtu")
             if mtu:
                 con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
             con.cmd_raises(f"ip link set {ifname} up")
