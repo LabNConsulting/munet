@@ -28,7 +28,8 @@ kinds:
     qemu:
       kernel: "%CONFIGDIR%/bzImage"
       initrd: "%CONFIGDIR%/rootfs.cpio.gz"
-      memory: "768M"
+      cmdline-extra: "acpi=off nokaslr"
+      memory: "1024M"
       kvm: true
       ncpu: 2
 
