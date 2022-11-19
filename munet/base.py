@@ -1291,7 +1291,12 @@ class SSHRemote(Commander):
 
         self.server = f"{self.user}@{server}"
 
-        pre_cmd = [get_exec_path_host("ssh")]
+        pre_cmd = [
+            get_exec_path_host("sudo"),
+            "-E",
+            f"-u{self.user}",
+            get_exec_path_host("ssh"),
+        ]
         if port != 22:
             pre_cmd.append(f"-p{port}")
         pre_cmd.append("-q")
