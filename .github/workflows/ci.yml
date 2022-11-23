@@ -43,7 +43,7 @@ jobs:
           sudo apt-get install -y qemu-system-x86
 
       - name: Install munet project
-        run: poetry install -E ci --no-interaction
+        run: poetry install --all-extras --no-interaction
 
       - name: Lint the project
         run: make ci-lint
