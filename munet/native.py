@@ -2049,16 +2049,22 @@ class Munet(BaseMunet):
                 },
                 {
                     "name": "stdout",
-                    "exec": "tail -F %RUNDIR%/cmd.out",
+                    "exec": (
+                        "[ -e %RUNDIR%/qemu.out ] && tail -F %RUNDIR%/qemu.out "
+                        "|| tail -F %RUNDIR%/cmd.out"
+                    ),
                     "format": "stdout HOST [HOST ...]",
-                    "help": "tail -f on the stdout of the cmd for this node",
+                    "help": "tail -f on the stdout of the qemu/cmd for this node",
                     "new-window": True,
                 },
                 {
                     "name": "stderr",
-                    "exec": "tail -F %RUNDIR%/cmd.err",
-                    "format": "stdout HOST [HOST ...]",
-                    "help": "tail -f on the stdout of the cmd for this node",
+                    "exec": (
+                        "[ -e %RUNDIR%/qemu.err ] && tail -F %RUNDIR%/qemu.err "
+                        "|| tail -F %RUNDIR%/cmd.err"
+                    ),
+                    "format": "stderr HOST [HOST ...]",
+                    "help": "tail -f on the stdout of the qemu/cmd for this node",
                     "new-window": True,
                 },
             ]
