@@ -6,7 +6,8 @@ SCHEMA := test-schema.json
 LOG_CLI := # --log-cli
 TMP := .testtmp
 
-POETRYRUN := env -u VIRTUAL_ENV PATH="$(PATH)" poetry run
+POETRY := env -u VIRTUAL_ENV PATH="$(PATH)" poetry
+POETRYRUN := $(POETRY) run
 
 all: $(TMP) ci-lint test $(YANG) $(YANG_SCHEMA) yang-test
 
@@ -18,7 +19,7 @@ lint:
 ci-lint:
 	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
 
-test: test-validate
+test: test-validate ci-lint
 	sudo -E $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
 
 clean:
@@ -29,7 +30,7 @@ run:
 	sudo -E $(POETRYRUN) python3 -m munet
 
 install:
-	poetry install
+	$(POETRY) install
 
 # ====
 # YANG
