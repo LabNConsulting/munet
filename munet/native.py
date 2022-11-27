@@ -2260,7 +2260,7 @@ class Munet(BaseMunet):
         elif config and config.get("server"):
             cls = SSHRemote
             kwargs["server"] = config["server"]
-            kwargs["port"] = int(config.get("port", 22))
+            kwargs["port"] = int(config.get("server-port", 22))
         else:
             cls = L3Node
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
