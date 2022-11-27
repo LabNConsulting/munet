@@ -18,4 +18,4 @@ topology:
       cmd: tail -f /dev/null
     - name: remote1
       server: localhost
-      port: 5222
+      server-port: 5222
