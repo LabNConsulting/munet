@@ -785,29 +785,13 @@ cisco VM using a nexos file system image.
 #+NAME: generate-tree
 #+HEADER: :var dep1=dep-babel
 #+begin_src shell :results output verbatim replace :wrap example :exports results
-  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
+  [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc" #
   $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
 #+end_src
 
 #+NAME: validate-module
 #+HEADER: :var dep1=dep-babel
 #+begin_src bash :results output verbatim replace :wrap comment :exports none
-  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
-  if ! $DOCKER pyang --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
-#+end_src
-
-#+NAME: validate-config
-#+HEADER: :var dep1=dep-babel
-#+begin_src bash :results output verbatim replace :wrap comment :exports none
-  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
-  LINT="$DOCKER yanglint -p /yang-drafts -p /yang --strict -t config"
-  $LINT $extra $module ${file} 2>&1 || echo FAIL
-#+end_src
-
-#+NAME: validate-data
-#+HEADER: :var dep1=dep-babel
-#+begin_src bash :results output verbatim replace :wrap comment :exports none
-  [ -d /yang ] || DOCKER="docker run --net=host -v $(pwd):/work labn/org-rfc"
-  LINT="$DOCKER yanglint -p /yang-drafts -p /yang --strict -t data"
-  $LINT $extra $module ${file} 2>&1 || echo FAIL
+  [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc"
+  if ! $DOCKER pyang -P build --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
 #+end_src
