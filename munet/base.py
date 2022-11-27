@@ -206,8 +206,6 @@ def _get_exec_path(binary, cmdf, cache):
 
 class Commander:  # pylint: disable=R0904
     """
-    Commander.
-
     An object that can execute commands.
     """
 

@@ -44,6 +44,12 @@ pycodestyle = "^2.9.1"
 pylint = "^2.15.6"
 python-language-server = "^0.36.2"
 
+
+[tool.poetry.group.doc.dependencies]
+sphinx = "^5.3.0"
+python-docs-theme = "^2022.1"
+sphinx-prompt = "^1.5.0"
+
 [tool.isort]
 profile = "black"
 force_single_line = true

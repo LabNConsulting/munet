@@ -6,10 +6,28 @@ SCHEMA := test-schema.json
 LOG_CLI := # --log-cli
 TMP := .testtmp
 
+unexport VIRTUAL_ENV
+
 POETRY := env -u VIRTUAL_ENV PATH="$(PATH)" poetry
 POETRYRUN := $(POETRY) run
 
-all: $(TMP) ci-lint test $(YANG) $(YANG_SCHEMA) yang-test
+MAKE_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
+all: $(TMP) $(YANG) $(YANG_SCHEMA) doc ci-lint test yang-test
+
+.PHONY: doc
+doc:
+	$(POETRYRUN) $(MAKE) -C doc html
+
+doc-start:
+	sudo podman run -it --rm -p 8080:80 -d --volume $(MAKE_DIR)/doc/build/html:/usr/share/nginx/html --name sphinx docker.io/nginx
+
+doc-stop:
+	sudo podman stop sphinx
+
+# We hand craft this to keep things cleaner
+doc-apidoc:
+	$(POETRYRUN) sphinx-apidoc -f --module-first --ext-doctest --extensions sphinx-prompt -o doc/source/apidoc munet
 
 prepare-publish: $(YANG_SCHEMA)
 

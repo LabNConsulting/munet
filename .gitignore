@@ -1,5 +1,6 @@
 **/__pycache__/
 /dist/
+doc/build
 err.out
 /coverage.xml
 /.testtmp/
