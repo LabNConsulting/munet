@@ -93,7 +93,7 @@
           "server": {
             "type": "string"
           },
-          "ssh-port": {
+          "server-port": {
             "type": "number"
           },
           "qemu": {
@@ -377,7 +377,7 @@
               "server": {
                 "type": "string"
               },
-              "ssh-port": {
+              "server-port": {
                 "type": "number"
               },
               "qemu": {

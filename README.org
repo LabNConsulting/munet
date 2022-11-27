@@ -54,6 +54,7 @@ module: labn-munet-config
   |  +--rw cleanup_cmd?   string
   |  +--rw image?         string
   |  +--rw server?        string
+  |  +--rw server-port?   uint16
   |  +--rw qemu
   |  |  +--rw bios?            string
   |  |  +--rw disk?            string
@@ -119,6 +120,7 @@ module: labn-munet-config
   |     +--rw cleanup_cmd?   string
   |     +--rw image?         string
   |     +--rw server?        string
+  |     +--rw server-port?   uint16
   |     +--rw qemu
   |     |  +--rw bios?            string
   |     |  +--rw disk?            string
@@ -396,14 +398,14 @@ cisco VM using a nexos file system image.
            instead of the normal `unet` one, otherwise ssh may not
            work as it is executing inside the munet namespace.";
       }
-      leaf ssh-port {
+      leaf server-port {
         type uint16;
         must "../server" {
-          error-message "ssh-port requires a server";
+          error-message "server-port requires a server";
         }
         default 22;
         description
-          "Port of the ssh server";
+          "SSH port to connect to server on";
       }
       container qemu {
         must "not(../image) and not(../server)" {
