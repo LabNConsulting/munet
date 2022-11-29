@@ -1,7 +1,9 @@
 #+STARTUP: indent
 * μNET (munet)
 
-[[ci-badge-main][https://github.com/LabNConsulting/munet/actions/workflows/ci.yml/badge.svg?branch=main]] [[https://codecov.io/gh/LabNConsulting/munet][https://codecov.io/gh/LabNConsulting/munet/branch/main/graph/badge.svg?token=FD2O4YGDTT]]
+[[ci-badge-main][https://github.com/LabNConsulting/munet/actions/workflows/ci.yml/badge.svg?branch=main]]
+[[https://codecov.io/gh/LabNConsulting/munet][https://codecov.io/gh/LabNConsulting/munet/branch/main/graph/badge.svg?token=FD2O4YGDTT]]
+[[Documentation Status][https://readthedocs.org/projects/munet/badge/?version=latest]]
 
 A package for creating network topologies and running programs and containers
 within them using linux namepsaces.
