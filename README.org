@@ -6,7 +6,7 @@
 [[Doc Status][https://munet.readthedocs.io/en/latest/?badge=latest]]
 
 A package for creating network topologies and running programs and containers
-within them using linux namepsaces.
+within them using linux namepsaces, podman containers and qemu virtual machines.
 
 Munet can be run in a standalone mode with a configuration file for launching
 linux shell and container based topologies, as well as be used as a library from
@@ -22,8 +22,6 @@ are supported if the corresponding packages are available (i.e., ~PyYAML~ and
 
 The config itself is defined with a YANG model which is fully defined at the end
 of this document. Below is an tree diagram of the overal format of a config file:
-subsequent sections.
-
 
 #+NAME: Munet standalone config YANG tree diagram
 #+CALL: generate-tree(module=labn-munet-config)
