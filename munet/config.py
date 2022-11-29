@@ -109,11 +109,18 @@ def config_subst(config: Iterable, **kwargs) -> Iterable:
 
 
 def value_merge_deepcopy(s1, s2):
-    "Create a deepcopy of the result of merging the values of keys from dicts d1 and d2"
+    """
+    Create a deepcopy of the result of merging the values from dicts ``s1`` and ``s2``.
+    If a key exists in both ``s1`` and ``s2`` the value from ``s2`` is used."
+    """
+
     d = {}
     for k, v in s1.items():
-        if k not in s2:
+        if k in s2:
+            d[k] = deepcopy(s2[k])
+        else:
             d[k] = deepcopy(v)
+    return d
 
 
 def merge_kind_config(kconf, config):
