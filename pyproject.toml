@@ -24,6 +24,8 @@ mucmd = "munet.mucmd:main"
 pyang = "^2.5.3"
 pyang-json-schema-plugin = {git = "https://github.com/LabNConsulting/pyang-json-schema-plugin.git", rev = "labn-master"}
 
+[tool.poetry.group.setest.dependencies]
+deepdiff = "^6.2.1"
 
 [tool.poetry.group.test.dependencies]
 pylint = "^2.15.6"
