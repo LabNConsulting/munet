@@ -70,12 +70,38 @@ def merge_using_key(a, b, k):
 
 
 def list_to_dict_with_key(lst, k):
-    "Convert list of objects to dict using the object key `k`"
+    """Convert a YANG styl list of objects to dict of objects.
+
+    This function converts a YANG style list of objects (dictionaries) to a plain python
+    dictionary of objects (dictionaries).  The value for the supplied key for each
+    object is used to store the object in the new diciontary.
+
+    This only works for lists of objects which are keyed on a single contained value.
+
+    Args:
+      lst: a *list* of python dictionary objects.
+      k: the key value contained in each dictionary object in the list.
+
+    Returns:
+      A dictionary of objects (dictionaries).
+    """
     return {x[k]: x for x in (lst if lst else [])}
 
 
 def config_to_dict_with_key(c, ck, k):
-    "Convert the config item at `ck` from a list objects to dict using the key `k`"
+    """Convert the config item from a list of objects to dict.
+
+    Use :py:func:`list_to_dict_with_key` to convert the list of objects
+    at ``c[ck]`` to a dict of the objects using the key ``k``.
+
+    Args:
+      c: config dictionary
+      ck: The key identifying the list of objects from ``c``.
+      k: The key to pass to :py:func:`list_to_dict_with_key`.
+
+    Returns:
+      A dictionary of objects (dictionaries).
+    """
     c[ck] = list_to_dict_with_key(c.get(ck, []), k)
     return c[ck]
 
@@ -109,11 +135,18 @@ def config_subst(config: Iterable, **kwargs) -> Iterable:
 
 
 def value_merge_deepcopy(s1, s2):
-    "Create a deepcopy of the result of merging the values of keys from dicts d1 and d2"
+    """
+    Create a deepcopy of the result of merging the values from dicts ``s1`` and ``s2``.
+    If a key exists in both ``s1`` and ``s2`` the value from ``s2`` is used."
+    """
+
     d = {}
     for k, v in s1.items():
-        if k not in s2:
+        if k in s2:
+            d[k] = deepcopy(s2[k])
+        else:
             d[k] = deepcopy(v)
+    return d
 
 
 def merge_kind_config(kconf, config):
