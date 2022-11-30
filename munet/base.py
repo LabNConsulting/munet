@@ -2192,6 +2192,9 @@ class BaseMunet(LinuxNamespace):
 
         await super()._async_delete()
 
+        if BaseMunet.g_unet == self:
+            BaseMunet.g_unet = None
+
 
 BaseMunet.g_unet = None
 

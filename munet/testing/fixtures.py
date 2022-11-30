@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from munet.base import BaseMunet
 from munet.base import Bridge
 from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
@@ -114,6 +115,9 @@ def module_autouse(request):
 
     yield
 
+    if BaseMunet.g_unet:
+        raise Exception("Base Munet was not cleaned up/deleted")
+
     os.chdir(cwd)
 
 
@@ -122,6 +126,7 @@ def event_loop():
     """Create an instance of the default event loop for the session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     logging.debug("conftest: got event loop")
+
     yield loop
     loop.close()
 

@@ -49,8 +49,7 @@ async def ping_with_loss(r, other, oifname):
     return 100 - (100 * recv / sent)
 
 
-async def test_basic_ping(rundir):
-    unet = Munet(rundir)
+async def _test_basic_ping(unet):
     unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
@@ -99,3 +98,11 @@ async def test_basic_ping(rundir):
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)
     assert 20 < loss < 40
+
+
+async def test_basic_ping(rundir):
+    unet = Munet(rundir)
+    try:
+        await _test_basic_ping(unet)
+    finally:
+        await unet.async_delete()
