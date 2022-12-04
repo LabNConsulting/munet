@@ -52,9 +52,6 @@ PEXPECT_CONTINUATION_PROMPT = "PEXPECT_PROMPT+"
 
 root_hostname = subprocess.check_output("hostname")
 
-# This allows us to cleanup any leftovers later on
-os.environ["MUNET_PID"] = str(os.getpid())
-
 
 class MunetError(Exception):
     "A generic munet error"
@@ -1955,6 +1952,16 @@ class BaseMunet(LinuxNamespace):
         self.cli_run_cmds = {}
 
         super().__init__(name="munet", mount=True, net=isolated, uts=isolated, **kwargs)
+
+        # This allows us to cleanup any leftover running munet's
+        if "MUNET_PID" in os.environ:
+            if os.environ["MUNET_PID"] != str(os.getpid()):
+                logging.error(
+                    "Found env MUNET_PID != our pid %s, instead its %s, changing",
+                    os.getpid(),
+                    os.environ["MUNET_PID"],
+                )
+            os.environ["MUNET_PID"] = str(os.getpid())
 
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:

@@ -30,8 +30,16 @@ from deepdiff import DeepDiff as json_cmp
 
 # L utility functions
 #
-# These functions are inteneted to provide support for CI testing within MiniNet
+# These functions are inteneted to provide support for CI testing within munet
 # environments.
+
+#
+# This code expects the following API availability.
+# a dictionary like object ``targets'' which is keyed on the target name.
+#
+# The target object must include a method ``cmd_nostatus'' which returns
+# the output of the command's output (stdout+stderr using the same file).
+#
 
 
 class LUtil:
@@ -46,20 +54,18 @@ class LUtil:
     l_dotall_experiment = False
     l_last_nl = None
 
-    net = ""
 
     def __init__(
         self,
+        targets,
         baseScriptDir=".",
         baseLogDir=".",
-        net="",
         fout="output.log",
         fsum="summary.txt",
         level=6,
     ):
         self.base_script_dir = baseScriptDir
         self.base_log_dir = baseLogDir
-        self.net = net
         if fout:
             self.fout_name = baseLogDir + "/" + fout
         if fsum:
@@ -69,6 +75,7 @@ class LUtil:
         self.l_dotall_experiment = False
         self.l_dotall_experiment = True
 
+        self.__targets = targets
         self.__call_on_fail = None
         self.__fout = None
         self.__fsum = None
@@ -79,6 +86,7 @@ class LUtil:
                 self.__fout = open(self.fout_name, "w", encoding="utf-8")
             self.__fout.write(lstr + "\n")
         if level <= self.l_level:
+            # XXX print
             print(lstr)
 
     def summary(self, sstr: str) -> None:
@@ -223,11 +231,11 @@ Total %-4d                                                           %-4d %d\n\
                 result,
             )
         )
-        if self.net == "":
+        if not self.__targets:
             return False
         # self.log("Running %s %s" % (target, command))
         js = None
-        out = self.net[target].cmd(command).rstrip()
+        out = self.__targets[target].cmd_nostatus(command).rstrip()
         if len(out) == 0:
             report = "<no output>"
         else:
@@ -386,9 +394,9 @@ g_lutil = None
 
 # entry calls
 def luStart(
+    targets,
     baseScriptDir=".",
     baseLogDir=".",
-    net="",
     fout="output.log",
     fsum="summary.txt",
     level=None,
@@ -397,9 +405,9 @@ def luStart(
     global g_lutil
 
     g_lutil = LUtil(
+        targets,
         baseScriptDir,
         baseLogDir,
-        net,
         fout,
         fsum,
         level,
@@ -472,7 +480,7 @@ def luShowFail():
 # for testing
 if __name__ == "__main__":
     print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/lib")
-    luStart()
+    luStart(None)
     for arg in sys.argv[1:]:
         luInclude(arg)
     luFinish()
