@@ -159,7 +159,7 @@ class L3Bridge(Bridge):
 
     async def _async_delete(self):
         if type(self) == L3Bridge:  # pylint: disable=C0123
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3Bridge sub-class _async_delete", self)
 
@@ -758,7 +758,7 @@ ff02::2\tip6-allrouters
         if type(self) == L3Node:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3Node sub-class _async_delete", self)
 
@@ -1217,7 +1217,7 @@ class L3ContainerNode(L3Node):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3ContainerNode delete", self)
 
@@ -1925,7 +1925,7 @@ class L3QemuVM(L3Node):
 
     async def _async_delete(self):
         if type(self) == L3QemuVM:  # pylint: disable=C0123
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3QemuVM _async_delete", self)
 
@@ -2335,7 +2335,7 @@ class Munet(BaseMunet):
         from munet.testing.util import async_pause_test  # pylint: disable=C0415
 
         if type(self) == Munet:  # pylint: disable=C0123
-            self.logger.info("%s: deleting.", self)
+            self.logger.debug("%s: deleting.", self)
         else:
             self.logger.debug("%s: Munet sub-class munet deleting.", self)
 
