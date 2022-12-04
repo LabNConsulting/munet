@@ -21,56 +21,150 @@
 """Command to execute setests"""
 
 import argparse
+import asyncio
 import logging
+import os
 
-from munet.base import commander
+from copy import deepcopy
+from pathlib import Path
+
+from munet.base import Bridge
+from munet.native import L3Node
+from munet.parser import async_build_topology
+from munet.parser import get_config
 
 
-def use_pytest(args):
-    pytest = commander.get_exec_path("pytest")
+async def get_unet(config, rundir, unshare=True):
+    try:
+        unet = await async_build_topology(config, rundir=rundir, unshare_inline=unshare)
+    except Exception as error:
+        logging.debug("unet build failed: %s", error, exc_info=True)
+        raise
 
-    oargs = [
-        "-c",
-        "none",
-        "-s",
-        "-q",
-        # "--no-header",
-        # "--no-summary",
-        # "--show-capture=no",
-        # '--log-format="XXX %(asctime)s %(levelname)s %(message)s"',
-        # '--log-file-format="XXX %(asctime)s %(levelname)s %(message)s"',
-        # "--log-file=mutest-log.txt",
-        # "--log-level=DEBUG",
-        '--junit-xml="mutest-results.xml"',
-        "--override-ini=asyncio_mode=auto",
-        '--override-ini=python_functions="setest*"',
-    ]
-    if args.dist:
-        oargs.append("--dist=load")
-        if args.dist == -1:
-            oargs.append("-nauto")
-        else:
-            oargs.append(f"-n{args.dist}")
+    try:
+        tasks = await unet.run()
+    except Exception as error:
+        logging.debug("unet run failed: %s", error, exc_info=True)
+        await unet.async_delete()
+        raise
 
-    if not args.verbose:
-        oargs.append("--log-cli-level=CRITICAL")
-    else:
-        oargs.append("-v")
-        if args.verbose > 2:
-            oargs.append("--log-cli-level=DEBUG")
-        elif args.verbose > 1:
-            oargs.append("--log-cli-level=INFO")
-        else:
-            oargs.append("--log-cli-level=WARNING")
-    if args.paths:
-        oargs += args.paths
-    commander.cmd_status(
-        [pytest, *oargs],
-        warn=False,
-        stdin=None,
-        stdout=None,
-        stderr=None,
-    )
+    logging.debug("unet topology running")
+
+    # Pytest is supposed to always return even if exceptions
+    try:
+        yield unet
+    except Exception as error:
+        logging.error("unet fixture: yield unet unexpected exception: %s", error)
+
+    await unet.async_delete()
+
+    # No one ever awaits these so cancel them
+    logging.debug("unet fixture: cleanup")
+    for task in tasks:
+        task.cancel()
+
+    # Reset the class variables so auto number is predictable
+    logging.debug("unet fixture: resetting ords to 1")
+    L3Node.next_ord = 1
+    Bridge.next_ord = 1
+
+
+def common_root(path1, path2):
+    """Find the common root between 2 paths
+
+    >>> common_root("/foo/bar/baz", "/foo/bar/zip/zap")
+    PosixPath('/foo/bar')
+    >>> common_root("/foo/bar/baz", "/fod/bar/zip/zap")
+    PosixPath('/')
+    """
+    apath1 = Path(path1).absolute().parts
+    apath2 = Path(path2).absolute().parts
+    alen = min(len(apath1), len(apath2))
+    common = None
+    for a, b in zip(apath1[:alen], apath2[:alen]):
+        if a != b:
+            break
+        common = common.joinpath(a) if common else Path(a)
+    return common
+
+
+async def collect(args):
+    """Collect test files.
+
+    Files must match the pattern ``setest_*.py``, and their containing
+    directory must have a munet config file present. This function also changes
+    the current directory to the common parent of all the tests, and paths are
+    returned relative to the common directory.
+
+    Args:
+      args: argparse results
+
+    Returns:
+      (commondir, tests, configs): where ``commondir`` is the path representing
+        the common parent directory of all the testsd, ``tests`` is a
+        dictionary of lists of test files, keyed on their containing directory
+        path, and ``configs`` is a dictionary of config dictionaries also keyed
+        on its containing directory path. The directory paths are relative to a
+        common ancestor.
+    """
+    file_select = "setest_*.py"
+    upaths = args.paths if args.paths else ["."]
+    for upath in upaths:
+        globpaths = {x.absolute() for x in Path(upath).rglob(file_select)}
+    tests = {}
+    configs = {}
+
+    # Find the common root
+    common = None
+    for upath in upaths:
+        globpaths = {x.absolute() for x in Path(upath).rglob(file_select)}
+        for path in globpaths:
+            dirpath = path.parent
+            common = common_root(common, dirpath) if common else dirpath
+
+    ocwd = Path().absolute()
+    try:
+        os.chdir(common)
+        # Work with relative paths to the common directory
+        for path in (x.relative_to(common) for x in globpaths):
+            dirpath = path.parent
+            if dirpath not in configs:
+                try:
+                    configs[dirpath] = get_config(search=[dirpath])
+                except FileNotFoundError:
+                    logging.warning(
+                        "Skipping '%s' as munet.{yaml,toml,json} not found in '%s'",
+                        path,
+                        dirpath,
+                    )
+                    continue
+            if dirpath not in tests:
+                tests[dirpath] = []
+            tests[dirpath].append(path)
+    finally:
+        os.chdir(ocwd)
+    return common, tests, configs
+
+
+async def execute_test(unet, test, args):  # pylint: disable=W0613
+    logging.info("EXEC test %s", test)
+
+
+async def async_main(args):
+    _, tests, configs = await collect(args)
+    for dirpath in tests:
+        test_files = tests[dirpath]
+        for test in test_files:
+            config = deepcopy(configs[dirpath])
+            test_name = str(test.stem).replace("/", ".")
+            rundir = os.path.join("/tmp/unet-setest", test_name)
+            async for unet in get_unet(config, rundir):
+                try:
+                    await execute_test(unet, test, args)
+                except Exception as error:
+                    logging.error(
+                        "Unexpected exception in execute_test: %s", error, exc_info=True
+                    )
 
 
 def main():
@@ -94,7 +188,15 @@ def main():
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s: %(message)s")
 
-    use_pytest(args)
+    status = 4
+    try:
+        status = asyncio.run(async_main(args))
+    except KeyboardInterrupt:
+        logging.info("Exiting, received KeyboardInterrupt in main")
+    except Exception as error:
+        logging.info("Exiting, unexpected exception %s", error, exc_info=True)
+
+    return status
 
 
 if __name__ == "__main__":
