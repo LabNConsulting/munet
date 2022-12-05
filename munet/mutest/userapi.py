@@ -19,19 +19,19 @@
 
 # pylint: disable=global-statement
 
+import functools
 import json
 import logging
-import math
 import os
-import shlex
 import re
 import sys
+from enum import Enum
 import time
 
-import pytest
+from pathlib import Path
+from typing import Union
 
 from deepdiff import DeepDiff as json_cmp
-from pytest import StashKey
 
 
 # L utility functions
@@ -48,17 +48,27 @@ from pytest import StashKey
 #
 
 
-class LUtil:
-    """Base class of setest functionality."""
+class OP(Enum):
+    NONE = -1
+    FAIL = 0
+    PASS = 1
 
-    l_total = 0
-    l_pass = 0
-    l_fail = 0
-    l_filename = ""
-    l_last = None
-    l_line = 0
-    l_dotall_experiment = False
-    l_last_nl = None
+
+class TestCase:
+    """A mutest testcase.
+
+    This is meant to be used internally by the mutest command to implement
+    the user API. See README-mutest.org for details on the user API.
+
+    Args:
+        targets:
+        script_dir:
+        output_logger
+        result_logger
+        level
+
+    """
+
     sum_hfmt = "{:4.4s} {:>6.6s} {:4.4s} {}"
     sum_dfmt = "{:4d} {:^6.6s} {:4.4s} {}"
 
@@ -66,43 +76,49 @@ class LUtil:
         self,
         targets,
         script_dir=".",
-        outlog=None,
-        reslog=None,
-        level=6,
+        output_logger=None,
+        result_logger=None,
+        level=logging.INFO,
     ):
-        assert os.path.isdir(script_dir)
-        self.script_dir = script_dir
-        self.l_level = level
-        self.l_dotall_experiment = False
-        self.l_dotall_experiment = True
-        self.outlog = outlog
-        self.reslog = reslog
-
         self.__targets = targets
+
+        self.script_dir = Path(script_dir)
+        assert self.script_dir.is_dir()
+
+        self.reslog = result_logger
+        self.outlog = output_logger
+        self.logf = functools.partial(self.outlog.log, level)
+
+        self.l_total = 0
+        self.l_pass = 0
+        self.l_fail = 0
+
+        self.__filename = ""
+        self.__old_filenames = []
         self.__call_on_fail = None
-        self.__res_header = False
 
-        # self.request = request
-        # self.item = request.node
-        # store a pointer to us in the pytest request
-        # print("Fixname:", request.fixturename)
-        # print("Fixscope:", request.scope)
-        # print("Fixnode:", request.node)
-        # print("Fixfunc:", request.function)
-        # print("Fixsess:", request.session)
-        # self.item.stash[g_stash_key] = self
+        self.l_last = None
+        self.l_last_nl = None
+        self.l_dotall_experiment = True
 
-    def log(self, lstr: str, level: int = 6) -> None:
-        if self.l_level > 0:
-            self.outlog.info(lstr)
-        if level <= self.l_level:
-            logging.debug("%s", lstr)
+    def __push_filename(self, filename):
+        fstr = "EXEC FILE: " + filename
+        self.logf(fstr)
+        self.reslog.info(fstr)
+        self.__old_filenames.append(self.__filename)
+        self.__filename = filename
 
-    def result(self, target, success, rstr, logstr=None):
+    def __pop_filename(self):
+        self.__filename = self.__old_filenames.pop()
+        fstr = "RETURN TO FILE: " + self.__filename
+        self.logf(fstr)
+        self.reslog.info(fstr)
+
+    def post_result(self, target, success, rstr, logstr=None):
         if success:
             self.l_pass += 1
             sstr = "PASS"
-            outlf = self.outlog.info
+            outlf = self.logf
             reslf = self.reslog.info
         else:
             self.l_fail += 1
@@ -114,18 +130,12 @@ class LUtil:
         if logstr is not None:
             outlf("R:%d %s: %s" % (self.l_total, sstr, logstr))
         res = self.sum_dfmt.format(self.l_total, target, sstr, rstr)
-        # if not self.__res_header:
-        #     self.__res_header = True
-        #     self.reslog.info("-" * 70)
-        #     header = self.sum_hfmt.format("Step", "Target", "Res.", "Description")
-        #     self.reslog.info(header)
-        #     self.reslog.info("-" * 70)
-
         reslf(res)
         if not success and self.__call_on_fail:
             self.__call_on_fail()
 
-    def close_files(self):
+    def end_test(self):
+        """End the test log final results."""
         self.reslog.info("-" * 70)
         self.reslog.info(
             "END TEST: Total Steps: %d Pass: %d Fail: %d",
@@ -138,268 +148,308 @@ class LUtil:
         # self.reslog.close()
         self.outlog = None
         self.reslog = None
-        return ret
 
-    def __set_filename(self, name):
-        fstr = "FILE: " + name
-        self.outlog.info(fstr)
-        self.reslog.info(fstr)
-        self.l_filename = name
-        self.l_line = 0
+    def _command(
+        self,
+        target: str,
+        cmd: str,
+        match: Union[str, dict] = ".",
+        op: OP = OP.NONE,
+        is_json: bool = False,
+    ) -> Union[str, dict]:
 
-    def _exec_command(self, command, *args):
-        if len(args) >= 5:
-            luCommand2(self, *args)
-        elif len(args) >= 1:
-            if command == "sleep":
-                time.sleep(int(args[0]))
-            elif command == "include":
-                self.execTestFile(args[0])
+        """Execute a ``cmd`` and possibly check return result.
 
-    def execTestFile(self, tstFile):
-        with open(tstFile, encoding="utf-8") as f:
-            for line in f:
-                self.l_line += 1
-                self.log("%s:%s %s" % (self.l_filename, self.l_line, line))
-                try:
-                    self._exec_command(shlex.split(line))
-                except ValueError as error:
-                    self.outlog.error("Error parsing line '%s': %s", line, error)
-
-    def command(self, target, command, regexp, op, result, returnJson, startt=None):
-        if op in ("jsoncmp_pass", "jsoncmp_fail"):
-            returnJson = True
-
-        self.log(
-            "%s (#%d) %s:%s COMMAND:%s:%s:%s:%s:%s:"
-            % (
-                time.asctime(),
-                self.l_total + 1,
-                self.l_filename,
-                self.l_line,
-                target,
-                command,
-                regexp,
-                op,
-                result,
-            )
-        )
+        Args:
+            target: the target to execute the command on.
+            cmd: string to execut on the target.
+            is_json: True if result should be parsed into json object.
+            match (Union[str, dict()])
+        """
         if not self.__targets:
             return False
-        # self.log("Running %s %s" % (target, command))
         js = None
-        out = self.__targets[target].cmd_nostatus(command).rstrip()
-        if len(out) == 0:
+        out = self.__targets[target].cmd_nostatus(cmd).rstrip()
+        report = out
+        if not out:
             report = "<no output>"
-        else:
-            report = out
-            if returnJson is True:
-                try:
-                    js = json.loads(out)
-                except Exception:
-                    js = None
-                    self.log(
-                        "WARNING: JSON load failed -- "
-                        "confirm command output is in JSON format."
-                    )
-        self.log("COMMAND OUTPUT:%s:" % report)
+        elif is_json:
+            try:
+                js = json.loads(out)
+            except Exception as error:
+                js = {}
+                self.outlog.warning(
+                    "JSON load failed. Check command output is in JSON format: %s",
+                    error,
+                )
+        self.logf("COMMAND OUTPUT:\n", report)
 
         # JSON comparison
-        if op in ("jsoncmp_pass", "jsoncmp_fail"):
+        if is_json:
             try:
-                expect = json.loads(regexp)
-            except Exception:
-                expect = None
-                self.log(
-                    "WARNING: JSON load failed -- "
-                    + "confirm regex input is in JSON format."
+                expect = json.loads(match)
+            except Exception as error:
+                expect = {}
+                self.outlog.warning(
+                    "JSON load failed. Check match value is in JSON format: %s", error
                 )
-            json_diff = json_cmp(expect, js)
-            if len(json_diff) != 0:
-                if op == "jsoncmp_fail":
-                    success = True
-                else:
-                    success = False
-                    self.log("JSON DIFF:%s:" % json_diff)
-                ret = success
+            if json_diff := json_cmp(expect, js):
+                success = op == "fail"
+                if not success:
+                    self.logf("JSON DIFF:%s:" % json_diff)
+                ret = json_diff
             else:
-                if op == "jsoncmp_fail":
-                    success = False
-                else:
-                    success = True
-            self.result(target, success, result)
-            if js is not None:
-                return js
-            # ret is unset if no json diff
-            return ret
+                success = op != "fail"
+                ret = js
+            return success, ret
 
-        # Experiment: can we achieve the same match behavior via DOTALL
-        # without converting newlines to spaces?
-        out_nl = out
-        search_nl = re.search(regexp, out_nl, re.DOTALL)
-        self.l_last_nl = search_nl
-        # Set up for comparison
-        if search_nl is not None:
-            group_nl = search_nl.group()
-            group_nl_converted = " ".join(group_nl.splitlines())
-        else:
-            group_nl_converted = None
+        # # Experiment: can we achieve the same match behavior via DOTALL
+        # # without converting newlines to spaces?
+        # out_nl = out
+        # search_nl = re.search(match, out_nl, re.DOTALL)
+        # self.l_last_nl = search_nl
+        # # Set up for comparison
+        # if search_nl is not None:
+        #     group_nl = search_nl.group()
+        #     group_nl_converted = " ".join(group_nl.splitlines())
+        # else:
+        #     group_nl_converted = None
 
-        out = " ".join(out.splitlines())
-        search = re.search(regexp, out)
-        self.l_last = search
+        split_out = " ".join(out.splitlines())
+        search = re.search(match, split_out)
         if search is None:
-            success = op == "fail"
-            ret = success
+            success = op == OP.FAIL
+            ret = out
         else:
-            ret = search.group()
-            if op != "fail":
-                success = True
-                level = 7
-            else:
-                success = False
-                level = 5
-            self.log("found:%s:" % ret, level)
-            # Experiment: compare matched strings obtained each way
-            if self.l_dotall_experiment and (group_nl_converted != ret):
-                self.log(
-                    "DOTALL experiment: strings differ dotall=[%s] orig=[%s]"
-                    % (group_nl_converted, ret),
-                    9,
-                )
-        if startt is not None:
-            # In a wait loop
-            if js is not None or ret is not False:
-                delta = time.time() - startt
-                self.result(target, success, "%s +%4.2f secs" % (result, delta))
-        elif op in ("pass", "fail"):
-            self.result(target, success, result)
+            success = op != OP.FAIL
+            ret = search.groups()
+            if not ret:
+                ret = out
+            # level = logging.DEBUG if success else logging.WARNING
+            # self.outlog.log(level, "found:%s:" % ret)
+            # # Experiment: compare matched strings obtained each way
+            # if self.l_dotall_experiment and (group_nl_converted != ret):
+            #     self.logf(
+            #         "DOTALL experiment: strings differ dotall=[%s] orig=[%s]"
+            #         % (group_nl_converted, ret),
+            #         9,
+            #     )
+        return success, ret
 
-        if js is not None:
-            return js
-        return ret
-
-    def wait(
-        self, target, command, regexp, op, result, wait, returnJson, wait_time=0.5
-    ):
-        self.log(
-            "%s:%s WAIT:%s:%s:%s:%s:%s:%s:%s:"
-            % (
-                self.l_filename,
-                self.l_line,
-                target,
-                command,
-                regexp,
-                op,
-                result,
-                wait,
-                wait_time,
-            )
-        )
+    def _wait(
+        self,
+        target: str,
+        cmd: str,
+        match: Union[str, dict] = ".",
+        expect_fail: bool = False,
+        is_json: bool = False,
+        timeout: float = 2.0,
+        interval: float = 0.5,
+        desc: str = "",
+    ) -> Union[str, dict]:
+        """Execute a command repeatedly waiting for result until timeout"""
         found = False
-        n = 0
         startt = time.time()
+        endt = startt + timeout
 
-        # Calculate the amount of `sleep`s we are going to peform.
-        wait_count = int(math.ceil(wait / wait_time)) + 1
-
-        while wait_count > 0:
-            n += 1
-            found = self.command(
-                target, command, regexp, op, result, returnJson, startt
-            )
-            if found is not False:
-                break
-
-            wait_count -= 1
-            if wait_count > 0:
-                time.sleep(wait_time)
+        op = OP.FAIL if expect_fail else OP.PASS
+        success = False
+        ret = None
+        while not success and time.time() < endt:
+            success, ret = self._command(target, cmd, match, op, is_json)
+            if not success:
+                time.sleep(interval)
 
         delta = time.time() - startt
-        self.log("Done after %d loops, time=%s, Found=%s" % (n, delta, found))
-        return found
+        self.post_result(target, success, "%s +%4.2f secs" % (desc, delta))
+        return found, ret
 
-    def do_include(self, filename, call_on_fail=None):
-        tstFile = self.script_dir + "/" + filename
-        self.__set_filename(filename)
+    def include(self, filename, call_on_fail=None):
+        """Include a file as part of testcase"""
+        test_file = self.script_dir + "/" + filename
+        self.__push_filename(filename)
         if call_on_fail is not None:
-            old_call_on_fail = self.__call_on_fail
-            self.__call_on_fail = call_on_fail
-        if filename.endswith(".py"):
-            self.log("luInclude: execfile " + tstFile)
-            with open(tstFile, encoding="utf-8") as infile:
+            old_call_on_fail, self.__call_on_fail = self.__call_on_fail, call_on_fail
+
+        try:
+            self.logf("include: execfile " + test_file)
+            with open(test_file, encoding="utf-8") as infile:
                 exec(infile.read())  # pylint: disable=exec-used
-        else:
-            self.log("luInclude: execTestFile " + tstFile)
-            self.execTestFile(tstFile)
+        except Exception as error:
+            logging.error(
+                "Exception while including file: %s: %s", self.__filename, error
+            )
+
         if call_on_fail is not None:
             self.__call_on_fail = old_call_on_fail
+        self.__pop_filename()
 
-    def do_last(self, usenl=False):
-        if usenl:
-            if self.l_last_nl is not None:
-                self.log("luLast:%s:" % self.l_last_nl.group(), 7)
-            return self.l_last_nl
-        if self.l_last is not None:
-            self.log("luLast:%s:" % self.l_last.group(), 7)
-        return self.l_last
+    def step(
+        self, target: str, cmd: str, is_json: bool = False
+    ) -> Union[str, list, dict]:
 
+        """Execute a ``cmd`` on a ``target`` return the output.
 
-g_stash_key = StashKey[LUtil]()
+        Args:
+            target: the target to execute the ``cmd`` on.
+            cmd: string to execut on the target.
+            is_json: True if result should be parsed into json object.
+        Returns:
+            When is_json == False:
+              returns ``re.Match.groups()`` if non-empty, otherwise the ``str`` output
+              of the ``cmd``.
+            When is_json == True:
+              returns the json object (dict) after parsing the ``cmd`` output.
 
-mark = pytest.mark.usefixtures("unet")
+            If json parse fails, a warning is logged and an empty ``dict`` is used.
+        """
+        self.logf(
+            "#%s:%s:STEP:%s:%s:%s",
+            self.l_total + 1,
+            self.__filename,
+            target,
+            cmd,
+            is_json,
+        )
+        return self._command(target, cmd, None, "", is_json)
 
+    def match_step(
+        self,
+        target: str,
+        cmd: str,
+        match: Union[str, dict] = ".",
+        expect_fail: bool = False,
+        is_json: bool = False,
+        desc: str = "",
+    ) -> str:
+        """Execute a ``cmd`` on a ``target`` check result.
 
-#
-# Commands used by the pytest shim
-#
-def luStart(
-    targets,
-    script_dir=".",
-    outlog=None,
-    reslog=None,
-    level=6,
-):
-    return LUtil(
-        targets,
-        script_dir,
-        outlog,
-        reslog,
-        level,
-    )
+        ``match`` is a regular expression to search for in the output of ``cmd`` when
+        ``is_json`` is False.
 
+        When ``is_json`` is True ``match`` must be a json object or a ``str`` which
+        parses into a json object. Likewise, the ``cmd`` output is parsed into a json
+        object and then a comparison is done between the two json objects.
 
-def luFinish(lutil):
-    ret = lutil.close_files()
-    return ret
+        Args:
+            target: the target to execute the ``cmd`` on.
+            cmd: string to execut on the ``target``.
+            match (Union[str, dict()]): regex str to match against output if ``is_json``
+              is False, otherwise a json object or str representation of one to compare
+              against parsed json output from ``cmd``.
+            is_json: True if result should be parsed into json object.
+            desc: description of this test step.
+
+        Returns:
+            (success, Union[str, list, dict]): Returns a 2-tuple. The first value is a
+            bool indicating ``success``. The second value depends on ``is_json``:
+
+            When is_json == False:
+              value is ``re.Match.groups()`` if non-empty, otherwise ``str`` output
+              of the ``cmd``.
+            When is_json == True:
+              The value is a ``str`` diff if there is a difference found in the json
+              compare, otherwise the value is a json object (dict) from parsing the
+              ``cmd`` output.
+
+            If json parse fails, a warning is logged and an empty ``dict`` is used.
+        """
+        self.logf(
+            "#%s:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
+            self.l_total + 1,
+            self.__filename,
+            target,
+            cmd,
+            match,
+            expect_fail,
+            is_json,
+            desc,
+        )
+        op = OP.FAIL if expect_fail else OP.PASS
+        success, ret = self._command(target, cmd, match, op, is_json)
+        self.post_result(target, success, desc)
+        return success, ret
+
+    def wait_step(
+        self,
+        target: str,
+        cmd: str,
+        match: Union[str, dict] = ".",
+        expect_fail: bool = False,
+        is_json: bool = False,
+        timeout=10,
+        interval=0.5,
+        desc: str = "",
+    ):
+        """Execute a cmd repeatedly and wait for matching result.
+
+        Execute ``cmd`` on ``target``, every ``interval`` seconds until
+        the output of ``cmd`` matches or doesn't match (according to the
+        ``expect_fail`` value) ``match``, for up to ``timeout`` seconds.
+
+        ``match`` is a regular expression to search for in the output of ``cmd`` when
+        ``is_json`` is False.
+
+        When ``is_json`` is True ``match`` must be a json object or a ``str`` which
+        parses into a json object. Likewise, the ``cmd`` output is parsed into a json
+        object and then a comparison is done between the two json objects.
+
+        Args:
+            target: the target to execute the ``cmd`` on.
+            cmd: string to execut on the ``target``.
+            match (Union[str, dict()]): regex str to match against output if ``is_json``
+              is False, otherwise a json object or str representation of one to compare
+              against parsed json output from ``cmd``.
+            is_json: True if result should be parsed into json object.
+            timeout: The number of seconds to repeat the ``cmd`` looking for a match
+              (or non-match if ``expect_fail`` is True).
+            interval: The number of seconds between running the ``cmd``.
+            desc: description of this test step.
+
+        Returns:
+            (success, Union[str, list, dict]): Returns a 2-tuple. The first value is a
+            bool indicating ``success``. The second value depends on ``is_json``:
+
+            When is_json == False:
+              value is ``re.Match.groups()`` if non-empty, otherwise ``str`` output
+              of the ``cmd``.
+            When is_json == True:
+              The value is a ``str`` diff if there is a difference found in the json
+              compare, otherwise the value is a json object (dict) from parsing the
+              ``cmd`` output.
+
+            If json parse fails, a warning is logged and an empty ``dict`` is used.
+        """
+        self.logf(
+            "#%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s",
+            self.l_total + 1,
+            self.__filename,
+            target,
+            cmd,
+            match,
+            expect_fail,
+            is_json,
+            timeout,
+            interval,
+            desc,
+        )
+        op = OP.FAIL if expect_fail else OP.PASS
+        return self._wait(target, cmd, match, op, is_json, timeout, interval, desc)
+
+    # def do_last(self, usenl=False):
+    #     if usenl:
+    #         if self.l_last_nl is not None:
+    #             self.outlog.debug("luLast:%s:" % self.l_last_nl.group())
+    #         return self.l_last_nl
+    #     if self.l_last is not None:
+    #         self.outlog.debug("luLast:%s:" % self.l_last.group())
+    #     return self.l_last
 
 
 #
 # Commands used (indirectly) by the user script. For the user script
 # in the shim code, partial objects are created with names that don't include the `2'
 # suffix and supply the create lutil object for that script.
-#
-
-
-def luInclude2(lutil, filename, call_on_fail=None):
-    return lutil.do_include(filename, call_on_fail)
-
-
-def luCommand2(
-    lutil,
-    target,
-    command,
-    regexp=".",
-    op="none",
-    result="",
-    ltime=10,
-    returnJson=False,
-    wait_time=0.5,
-):
-    if op != "wait":
-        return lutil.command(target, command, regexp, op, result, returnJson)
-    return lutil.wait(target, command, regexp, op, result, ltime, returnJson, wait_time)
-
 
 # def luLast2(lutil, usenl=False):
 #     return lutil.do_last(usenl)
@@ -439,8 +489,8 @@ def luCommand2(
 # for testing
 if __name__ == "__main__":
     print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/lib")
-    local_lutil = luStart(None)
+    tc = TestCase(None)
     for arg in sys.argv[1:]:
-        luInclude2(local_lutil, arg)
-    luFinish(local_lutil)
+        tc.include(arg)
+    tc.end_test()
     sys.exit(0)

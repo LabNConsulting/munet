@@ -19,7 +19,7 @@ toml = {version = "^0.10.2", optional = true}
 [tool.poetry.scripts]
 munet = "munet.__main__:main"
 mucmd = "munet.mucmd:main"
-mutest = "munet.mutest:main"
+mutest = "munet.mutest.__main__:main"
 
 [tool.poetry.group.schemadev.dependencies]
 pyang = "^2.5.3"

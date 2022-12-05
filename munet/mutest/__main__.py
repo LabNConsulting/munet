@@ -33,10 +33,7 @@ from typing import Union
 
 from munet import parser
 from munet.base import Bridge
-from munet.lutil import luCommand2
-from munet.lutil import luFinish
-from munet.lutil import luInclude2
-from munet.lutil import luStart
+from munet.mutest import userapi as uapi
 from munet.native import L3Node
 from munet.parser import async_build_topology
 from munet.parser import get_config
@@ -192,24 +189,31 @@ async def execute_test(unet, test, args):  # pylint: disable=W0613
     reslog.info("EXEC: %s", test_name)
     reslog.info("-" * 70)
 
-    testdata = luStart(
+    if args.verbose >= 2:
+        level = logging.DEBUG
+    elif args.verbose == 1:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+
+    tc = uapi.TestCase(
         unet.hosts,
         outlog=outlog,
         reslog=reslog,
-        level=5,  # make this depend on -vvv
+        level=level,
     )
-    luCommand = functools.partial(luCommand2, testdata)  # pylint: disable=W0641
-    luInclude = functools.partial(luInclude2, testdata)  # pylint: disable=W0641
+
+    # pylint: disable=possibly-unused-variable
+    step = tc.step
+    match_step = tc.match_step
+    wait_step = tc.wait_step
+    include = tc.include
     try:
         exec(script, globals(), locals())  # pylint: disable=W0122
-        # assert testdata.l_fail == 0, \
-        #     f"{test_name} FAIL: steps passed: {{testdata.l_pass}}"
-        #       " failed: {{testdata.l_fail}}"
     except Exception as error:
         logging.error("Unexpected exception during test %s: %s", test_name, error)
     finally:
-        # result = "FAIL" if testdata.l_fail else "PASS"
-        luFinish(testdata)
+        tc.end_test()
 
 
 def testname_from_path(path: Union[str, Path]) -> str:
@@ -219,7 +223,7 @@ def testname_from_path(path: Union[str, Path]) -> str:
        path: path to the test file.
 
     Returns:
-        str: the name of the test.
+       str: the name of the test.
 
     """
     return str(Path(path).stem).replace("/", ".")

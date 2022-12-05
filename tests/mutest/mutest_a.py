@@ -1,7 +1,7 @@
-luCommand("r1", "ls -l /", "xhopps", "pass", "Look for xhopps")
-luCommand("r1", "ls -l /", "chopps", "pass", "Look for chopps")
-luCommand("r1", "ls -l /", "root", "pass", "Look for root")
+match_step("r1", "ls -l /home", "xhopps", "pass", "Look for xhopps")
+match_step("r1", "ls -l /home", "chopps", "pass", "Look for chopps")
+match_step("r1", "ls -l /", "root", "pass", "Look for root")
 
-luCommand("host1", "ls -l /", "xhopps", "pass", "Look for xhopps")
-luCommand("host1", "ls -l /", "chopps", "pass", "Look for chopps")
-luCommand("host1", "ls -l /", "root", "pass", "Look for root")
+match_step("host1", "ls -l /home", "xhopps", "pass", "Look for xhopps")
+match_step("host1", "ls -l /home", "chopps", "pass", "Look for chopps")
+match_step("host1", "ls -l /", "root", "pass", "Look for root")
