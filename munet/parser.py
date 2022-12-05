@@ -104,7 +104,7 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
     return config
 
 
-def setup_logging(args):
+def setup_logging(args, config_base="logconf"):
     # Create rundir and arrange for future commands to run in it.
 
     # Change CWD to the rundir prior to parsing config
@@ -112,19 +112,27 @@ def setup_logging(args):
     os.chdir(args.rundir)
     try:
         search = [old]
-        with importlib.resources.path("munet", "logconf.yaml") as datapath:
+        with importlib.resources.path("munet", config_base + ".yaml") as datapath:
             search.append(str(datapath.parent))
 
         def logf(msg, *p, **k):
             if args.verbose:
                 print("PRELOG: " + msg % p, **k, file=sys.stderr)
 
-        config = get_config(args.log_config, "logconf", search, logf=logf)
+        config = get_config(args.log_config, config_base, search, logf=logf)
         pathname = config["config_pathname"]
         del config["config_pathname"]
 
         if args.verbose:
             config["handlers"]["console"]["level"] = "DEBUG"
+
+        # add the rundir path to the filenames
+        for k, v in config["handlers"].items():
+            filename = v.get("filename")
+            if not filename:
+                continue
+            v["filename"] = os.path.join(args.rundir, filename)
+
         logging.config.dictConfig(dict(config))
         logging.info("Loaded logging config %s", pathname)
     finally:

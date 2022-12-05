@@ -23,6 +23,7 @@ import json
 import logging
 import math
 import os
+import shlex
 import re
 import sys
 import time
@@ -46,6 +47,7 @@ from pytest import StashKey
 # the output of the command's output (stdout+stderr using the same file).
 #
 
+
 class LUtil:
     """Base class of setest functionality."""
 
@@ -57,169 +59,112 @@ class LUtil:
     l_line = 0
     l_dotall_experiment = False
     l_last_nl = None
-    sum_hfmt = "{:4.4s} {:>6.6s} {:56.56s} {:4.4s} {:4.4s}"
-    sum_dfmt = "{:4d} {:^6.6s} {:56.56s} {:4d} {:4d}"
+    sum_hfmt = "{:4.4s} {:>6.6s} {:4.4s} {}"
+    sum_dfmt = "{:4d} {:^6.6s} {:4.4s} {}"
 
     def __init__(
         self,
-        request,
         targets,
         script_dir=".",
-        log_dir=".",
-        fout="output.log",
-        fsum="summary.txt",
+        outlog=None,
+        reslog=None,
         level=6,
     ):
         assert os.path.isdir(script_dir)
         self.script_dir = script_dir
-        self.log_dir = log_dir
-        self.fout_name = os.path.join(log_dir, fout) if fout else None
-        self.fsum_name = os.path.join(log_dir, fsum) if fsum else None
         self.l_level = level
         self.l_dotall_experiment = False
         self.l_dotall_experiment = True
+        self.outlog = outlog
+        self.reslog = reslog
 
         self.__targets = targets
         self.__call_on_fail = None
-        self.__fout = None
-        self.__fsum = None
+        self.__res_header = False
 
-        self.request = request
-        self.item = request.node
+        # self.request = request
+        # self.item = request.node
         # store a pointer to us in the pytest request
         # print("Fixname:", request.fixturename)
         # print("Fixscope:", request.scope)
         # print("Fixnode:", request.node)
         # print("Fixfunc:", request.function)
         # print("Fixsess:", request.session)
-        self.item.stash[g_stash_key] = self
+        # self.item.stash[g_stash_key] = self
 
     def log(self, lstr: str, level: int = 6) -> None:
         if self.l_level > 0:
-            if not self.__fout:
-                self.__fout = open(self.fout_name, "w", encoding="utf-8")
-            self.__fout.write(lstr + "\n")
+            self.outlog.info(lstr)
         if level <= self.l_level:
             logging.debug("%s", lstr)
 
-    def summary(self, sstr: str) -> None:
-        if not self.__fsum:
-            self.__fsum = open(self.fsum_name, "w", encoding="utf-8")
-            self.__fsum.write("*" * 79 + "\n")
-            header = "{!s:4.4} {!s:6.6} {!s:56.56s} {:4.4s} {:4.4s}\n".format(
-                "Step", "Target", "Summary", "Pass", "Fail"
-            )
-            self.__fsum.write(header)
-            self.__fsum.write("-" * 79 + "\n")
-        self.__fsum.write(sstr + "\n")
-
     def result(self, target, success, rstr, logstr=None):
         if success:
-            p = 1
-            f = 0
             self.l_pass += 1
             sstr = "PASS"
+            outlf = self.outlog.info
+            reslf = self.reslog.info
         else:
-            f = 1
-            p = 0
             self.l_fail += 1
             sstr = "FAIL"
+            outlf = self.outlog.error
+            reslf = self.reslog.error
+
         self.l_total += 1
         if logstr is not None:
-            self.log("R:%d %s: %s" % (self.l_total, sstr, logstr))
-        # res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, rstr, p, f)
-        res = self.sum_dfmt.format(self.l_total, target, rstr, p, f)
-        self.log("R:" + res)
-        self.summary(res)
-        self.item.user_properties.append((self.l_total, res))
-        if f == 1 and self.__call_on_fail:
+            outlf("R:%d %s: %s" % (self.l_total, sstr, logstr))
+        res = self.sum_dfmt.format(self.l_total, target, sstr, rstr)
+        # if not self.__res_header:
+        #     self.__res_header = True
+        #     self.reslog.info("-" * 70)
+        #     header = self.sum_hfmt.format("Step", "Target", "Res.", "Description")
+        #     self.reslog.info(header)
+        #     self.reslog.info("-" * 70)
+
+        reslf(res)
+        if not success and self.__call_on_fail:
             self.__call_on_fail()
 
     def close_files(self):
-        ret = (
-            "-" * 79
-            + "\n"
-            + f"Total: {self.l_total:<5d}"
-            + " " * 57
-            + f"{self.l_pass:4d} {self.l_fail:4d}"
+        self.reslog.info("-" * 70)
+        self.reslog.info(
+            "END TEST: Total Steps: %d Pass: %d Fail: %d",
+            self.l_total,
+            self.l_pass,
+            self.l_fail,
         )
-        if self.__fsum:
-            self.__fsum.write(ret + "\n")
-            self.__fsum.close()
-            self.__fsum = None
-        if self.__fout:
-            if os.path.isfile(self.fsum_name):
-                with open(self.fsum_name, "r", encoding="utf-8") as f:
-                    self.__fout.write(f.read())
-            self.__fout.close()
-            self.__fout = None
+        # No close for loggers
+        # self.outlog.close()
+        # self.reslog.close()
+        self.outlog = None
+        self.reslog = None
         return ret
 
     def __set_filename(self, name):
         fstr = "FILE: " + name
-        self.log(fstr)
-        self.summary(fstr)
+        self.outlog.info(fstr)
+        self.reslog.info(fstr)
         self.l_filename = name
         self.l_line = 0
 
-    def strToArray(self, string):
-        a = []
-        c = 0
-        end = ""
-        words = string.split()
-        if len(words) < 1 or words[0].startswith("#"):
-            return a
-        words = string.split()
-        for word in words:
-            if len(end) == 0:
-                a.append(word)
-            else:
-                a[c] += str(" " + word)
-            if end == "\\":
-                end = ""
-            if not word.endswith("\\"):
-                if end != '"':
-                    if word.startswith('"'):
-                        end = '"'
-                    else:
-                        c += 1
-                else:
-                    if word.endswith('"'):
-                        end = ""
-                        c += 1
-                    else:
-                        c += 1
-            else:
-                end = "\\"
-        #        if len(end) == 0:
-        #            print('%d:%s:' % (c, a[c-1]))
-
-        return a
+    def _exec_command(self, command, *args):
+        if len(args) >= 5:
+            luCommand2(self, *args)
+        elif len(args) >= 1:
+            if command == "sleep":
+                time.sleep(int(args[0]))
+            elif command == "include":
+                self.execTestFile(args[0])
 
     def execTestFile(self, tstFile):
-        if not os.path.isfile(tstFile):
-            self.log("unable to read: " + tstFile)
-            sys.exit(1)
-            return
-
-        f = open(tstFile, encoding="utf-8")
-
-        for line in f:
-            if len(line) <= 1:
-                continue
-
-            a = self.strToArray(line)
-            if len(a) >= 6:
-                luCommand2(self, a[1], a[2], a[3], a[4], a[5])
-            else:
+        with open(tstFile, encoding="utf-8") as f:
+            for line in f:
                 self.l_line += 1
                 self.log("%s:%s %s" % (self.l_filename, self.l_line, line))
-                if len(a) >= 2:
-                    if a[0] == "sleep":
-                        time.sleep(int(a[1]))
-                    elif a[0] == "include":
-                        self.execTestFile(a[1])
-        f.close()
+                try:
+                    self._exec_command(shlex.split(line))
+                except ValueError as error:
+                    self.outlog.error("Error parsing line '%s': %s", line, error)
 
     def command(self, target, command, regexp, op, result, returnJson, startt=None):
         if op in ("jsoncmp_pass", "jsoncmp_fail"):
@@ -409,21 +354,17 @@ mark = pytest.mark.usefixtures("unet")
 # Commands used by the pytest shim
 #
 def luStart(
-    request,
     targets,
     script_dir=".",
-    log_dir=".",
-    fout="output.log",
-    fsum="summary.txt",
+    outlog=None,
+    reslog=None,
     level=6,
 ):
     return LUtil(
-        request,
         targets,
         script_dir,
-        log_dir,
-        fout,
-        fsum,
+        outlog,
+        reslog,
         level,
     )
 

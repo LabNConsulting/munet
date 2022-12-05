@@ -1,0 +1,55 @@
+version: 1
+formatters:
+  brief:
+    format: '%(levelname)5s: %(message)s'
+  precise:
+    format: '%(asctime)s %(levelname)5s: %(name)s: %(message)s'
+  output:
+    format: '%(asctime)s %(levelname)5s: OUTPUT: %(message)s'
+  results:
+    format: '%(asctime)s %(levelname)5s: %(message)s'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: brief
+    stream: ext://sys.stderr
+  exec:
+    class: logging.FileHandler
+    formatter: precise
+    filename: mutest-exec.log
+    mode: w
+  output:
+    class: munet.logging.MultiFileHandler
+    root_path: "mutest.output"
+    formatter: output
+    filename: mutest-output.log
+    mode: w
+  results:
+    class: munet.logging.MultiFileHandler
+    root_path: "mutest.results"
+    formatter: results
+    filename: mutest-results.log
+    mode: w
+
+root:
+  level: DEBUG
+  handlers: [ "console", "exec" ]
+
+loggers:
+  main:
+    level: DEBUG
+    propagate: true
+  munet.base:
+    level: WARNING
+    propagate: true
+  munet.native:
+    level: WARNING
+  mutest.output:
+    level: DEBUG
+    handlers: ["output"]
+    propagate: no
+  mutest.results:
+    level: DEBUG
+    handlers: [ "console", "exec", "output", "results" ]
+    propagate: no
