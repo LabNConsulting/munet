@@ -38,6 +38,8 @@ extensions = [
 ]
 
 autodoc_member_order="bysource"
+autodoc_typehints="description"
+
 
 # Napoleon settings
 napoleon_google_docstring = True

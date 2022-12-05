@@ -49,11 +49,13 @@ particular variant (see each variants documentation for the specifics).
 The common variants are:
 
   - step :: Runs a command once on the target returning the output.
-  - step_json :: Runs a command once on the target returing a json value.
   - match_step :: Passes if the command output matches (when defaults are used)
-  - match_step_faling :: Passes if the command output does *not* match.
-  - match_step_json :: Passes if command output matches a json value.
-  - match_step_json_failing :: Passes if command output does *not* match a json value.
+  - wait_step :: Passes if the command output matches (when defaults are used)
+
+  - step_json :: Runs a command once on the target returning the output.
+  - match_step_json :: Passes if the command output matches (when defaults are used)
+  - wait_step_json :: Passes if the command output matches (when defaults are used)
+
 
 ** Sections
 
