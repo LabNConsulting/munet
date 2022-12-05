@@ -20,7 +20,7 @@ doc:
 	$(POETRYRUN) $(MAKE) -C doc html
 
 doc-start:
-	sudo podman run -it --rm -p 8080:80 -d --volume $(MAKE_DIR)/doc/build/html:/usr/share/nginx/html --name sphinx docker.io/nginx
+	sudo podman run -it --rm -p 8088:80 -d --volume $(MAKE_DIR)/doc/build/html:/usr/share/nginx/html --name sphinx docker.io/nginx
 
 doc-stop:
 	sudo podman stop sphinx
