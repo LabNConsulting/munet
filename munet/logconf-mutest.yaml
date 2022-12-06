@@ -11,21 +11,30 @@ formatters:
 
 handlers:
   console:
+    level: WARNING
+    class: logging.StreamHandler
+    formatter: brief
+    stream: ext://sys.stderr
+  result_console:
+    level: INFO
     class: logging.StreamHandler
     formatter: brief
     stream: ext://sys.stderr
   exec:
+    level: DEBUG
     class: logging.FileHandler
     formatter: precise
     filename: mutest-exec.log
     mode: w
   output:
+    level: DEBUG
     class: munet.logging.MultiFileHandler
     root_path: "mutest.output"
     formatter: output
     filename: mutest-output.log
     mode: w
   results:
+    level: DEBUG
     class: munet.logging.MultiFileHandler
     root_path: "mutest.results"
     formatter: results
@@ -41,15 +50,16 @@ loggers:
     level: DEBUG
     propagate: true
   munet.base:
-    level: WARNING
+    level: DEBUG
     propagate: true
   munet.native:
-    level: WARNING
+    level: DEBUG
+    propagate: true
   mutest.output:
     level: DEBUG
     handlers: ["output"]
     propagate: no
   mutest.results:
     level: DEBUG
-    handlers: [ "console", "exec", "output", "results" ]
+    handlers: [ "result_console", "exec", "output", "results" ]
     propagate: no
