@@ -15,7 +15,50 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-"""Implement setest functioality."""
+"""Mutest is a simple send/expect based testing framework.
+
+This module implements the basic send/expect functionality for mutest. The test
+developer writes test case scripts which are composed of calls to the functions defined
+below. In short these are:
+
+Send/Expect functions:
+
+ - :py:func:`step`
+ - :py:func:`step_json`
+ - :py:func:`match_step`
+ - :py:func:`match_step_json`
+ - :py:func:`wait_step`
+ - :py:func:`wait_step_json`
+
+Control/Utility functions:
+
+ - :py:func:`include`
+ - :py:func:`log`
+
+Test case scripts are located by the :command:`mutest` command by their name.
+The name of a test case script should take the form ``mutest_TESTNAME.py`` where
+``TESTNAME`` is replaced with a user chosen name for the test case.
+
+Here's a simple example test case script which first checks that a specific forwarding
+entry is in the FIB for the IP destination ``10.0.1.1``. Then it checks repeatedly for
+up to 10 seconds for a second forwarding entry in the FIB for the IP destination
+``10.0.2.1``.
+
+.. code-block:: python
+
+    match_step("r1", 'vtysh -c "show ip fib 10.0.1.1"', "Routing entry for 10.0.1.0/24",
+               "Check for FIB entry for 10.0.1.1")
+    wait_step("r1",
+              'vtysh -c "show ip fib 10.0.2.1"',
+              "Routing entry for 10.0.2.0/24",
+              desc="Check for FIB entry for 10.0.2.1",
+              timeout=10)
+
+Notice that the call arguments can be specified by their correct position in the list or
+using keyword names, and they can also be specified over multiple lines if preferred.
+
+All of the functions are documented and defined below.
+"""
 
 # pylint: disable=global-statement
 
@@ -511,8 +554,7 @@ def step(target: str, cmd: str) -> str:
         cmd: string to execute on the target.
 
     Returns:
-        Returns ``re.Match.groups()`` if non-empty, otherwise the ``str`` output
-          of the ``cmd``.
+        Returns the ``str`` output of the ``cmd``.
     """
     return TestCase.g_tc.step(target, cmd)
 
@@ -680,6 +722,42 @@ def wait_step_json(
     return TestCase.g_tc.wait_step_json(
         target, cmd, match, desc, timeout, interval, expect_fail
     )
+
+
+def luInclude(filename, CallOnFail=None):
+    """Backward compatible API, do not use in new tests."""
+    return include(filename, CallOnFail)
+
+
+def luCommand(
+    target,
+    cmd,
+    regexp=".",
+    op="none",
+    result="",
+    ltime=10,
+    returnJson=False,
+    wait_time=0.5,
+):
+    """Backward compatible API, do not use in new tests."""
+    if op == "wait":
+        if returnJson:
+            return wait_step_json(target, cmd, regexp, result, ltime, wait_time)
+        return wait_step(target, cmd, regexp, result, ltime, wait_time)
+
+    if op == "none":
+        if returnJson:
+            return step_json(target, cmd)
+        return step(target, cmd)
+
+    if returnJson and op in ("jsoncmp_fail", "jsoncmp_pass"):
+        expect_fail = op == "jsoncmp_fail"
+        return match_step_json(target, cmd, regexp, result, expect_fail)
+
+    assert not returnJson
+    assert op in ("fail", "pass")
+    expect_fail = op == "fail"
+    return match_step(target, cmd, regexp, result, expect_fail)
 
 
 # for testing
