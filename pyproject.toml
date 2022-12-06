@@ -41,13 +41,11 @@ pytest-xdist = "^3.0.2"
 [tool.poetry.group.ide.dependencies]
 autoflake = "^1.7.7"
 black = "^22.10.0"
-flake8 = "^5.0.4"
 importmagic = "^0.1.7"
 isort = "^5.10.1"
-pycodestyle = "^2.9.1"
 pylint = "^2.15.6"
-python-language-server = "^0.36.2"
 astunparse = "^1.6.3"
+python-lsp-server = {extras = ["flake8", "pydocstyle", "pylint"], version = "^1.6.0"}
 
 
 [tool.poetry.group.doc.dependencies]
@@ -78,6 +76,7 @@ exclude = '''
   | \.hg
   | \.mypy_cache
   | \.tox
+  | \.poetryvenv
   | \.venv
   | _build
   | buck-out
@@ -115,6 +114,10 @@ disable = [
   "unknown-option-value",
 ]
 max-line-length = 88
+
+[tool.pydocstyle]
+convention = "google"
+add_ignore = "D102,D103"
 
 [tool.pylint.design]
 # limiting the number of returns might discourage

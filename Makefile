@@ -32,6 +32,7 @@ doc-apidoc:
 prepare-publish: $(YANG_SCHEMA)
 
 lint:
+	$(POETRYRUN) pydocstyle ./munet
 	$(POETRYRUN) pylint ./munet $(shell find ./tests/*/* -name '*.py')
 
 ci-lint:
