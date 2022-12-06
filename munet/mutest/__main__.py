@@ -183,8 +183,9 @@ async def execute_test(unet, test, args):  # pylint: disable=W0613
     test_name = testname_from_path(test)
     script = open(f"{test}", "r", encoding="utf-8").read()
 
-    outlog = logging.getLogger(f"mutest.output.{test_name}.output")
+    logger = logging.getLogger(f"mutest.output.{test_name}.output")
     reslog = logging.getLogger(f"mutest.results.{test_name}.result")
+
     reslog.info("=" * 70)
     reslog.info("EXEC: %s", test_name)
     reslog.info("-" * 70)
@@ -196,20 +197,19 @@ async def execute_test(unet, test, args):  # pylint: disable=W0613
     else:
         level = logging.WARNING
 
-    tc = uapi.TestCase(
-        unet.hosts,
-        outlog=outlog,
-        reslog=reslog,
-        level=level,
-    )
+    tc = uapi.TestCase(unet.hosts, unet.config_dirname, logger, reslog, level)
 
-    # pylint: disable=possibly-unused-variable
+    # pylint: disable=possibly-unused-variable,exec-used
     step = tc.step
+    step_json = tc.step_json
     match_step = tc.match_step
+    match_step_json = tc.match_step_json
     wait_step = tc.wait_step
+    wait_step_json = tc.wait_step_json
     include = tc.include
+
     try:
-        exec(script, globals(), locals())  # pylint: disable=W0122
+        exec(script, globals(), locals())
     except Exception as error:
         logging.error("Unexpected exception during test %s: %s", test_name, error)
     finally:
