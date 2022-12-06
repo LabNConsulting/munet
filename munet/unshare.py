@@ -62,8 +62,8 @@ def pidfd_open(pid, flags=0):
     return fd
 
 
-def setns(fd, nstype):
-    """see setns(2)"""
+def setns(fd, nstype):  # noqa: D402
+    """See setns(2) manpage."""
     if not libc:
         _load_libc()
 
@@ -71,8 +71,8 @@ def setns(fd, nstype):
         raise_oserror(ctypes.get_errno())
 
 
-def unshare(flags):
-    """see unshare(2)"""
+def unshare(flags):  # noqa: D402
+    """See unshare(2) manpage."""
     if not libc:
         _load_libc()
 

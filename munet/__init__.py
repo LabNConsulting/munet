@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module to import various objects to root namespace"
+"""A module to import various objects to root namespace."""
 from .base import BaseMunet
 from .base import Bridge
 from .base import Commander

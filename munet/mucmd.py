@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A command that allows external command execution inside nodes."
+"""A command that allows external command execution inside nodes."""
 import argparse
 import json
 import os

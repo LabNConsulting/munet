@@ -162,7 +162,7 @@ class TestCase:
         target: str,
         cmd: str,
     ) -> dict:
-        """Execute a json ``cmd`` and return json result
+        """Execute a json ``cmd`` and return json result.
 
         Args:
             target: the target to execute the command on.
@@ -280,8 +280,7 @@ class TestCase:
         interval: float = 0.5,
         desc: str = "",
     ) -> Union[str, dict]:
-        """Execute a command repeatedly waiting for result until timeout"""
-
+        """Execute a command repeatedly waiting for result until timeout."""
         found = False
         startt = time.time()
         endt = startt + timeout
@@ -305,8 +304,7 @@ class TestCase:
     # ---------------------
 
     def include(self, pathname: str, call_on_fail: Callable[[], None] = None):
-        "See :py:func:`~munet.mutest.userapi.include`"
-
+        """See :py:func:`~munet.mutest.userapi.include`."""
         test_file = self.__script_dir.joinpath(pathname)
         self.__push_filename(pathname)
         if call_on_fail is not None:
@@ -335,8 +333,7 @@ class TestCase:
         self.__pop_filename()
 
     def step(self, target: str, cmd: str) -> str:
-        "See :py:func:`~munet.mutest.userapi.step`"
-
+        """See :py:func:`~munet.mutest.userapi.step`."""
         self.logf(
             "#%s:%s:STEP:%s:%s",
             self.steps + 1,
@@ -347,8 +344,7 @@ class TestCase:
         return self._command(target, cmd)
 
     def step_json(self, target: str, cmd: str) -> dict:
-        "See :py:func:`~munet.mutest.userapi.step_json`"
-
+        """See :py:func:`~munet.mutest.userapi.step_json`."""
         self.logf(
             "#%s:%s:STEP_JSON:%s:%s",
             self.steps + 1,
@@ -366,8 +362,7 @@ class TestCase:
         desc: str = "",
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
-        "See :py:func:`~munet.mutest.userapi.match_step`"
-
+        """See :py:func:`~munet.mutest.userapi.match_step`."""
         self.logf(
             "#%s:%s:MATCH_STEP:%s:%s:%s:%s:%s",
             self.steps + 1,
@@ -390,8 +385,7 @@ class TestCase:
         desc: str = "",
         expect_fail: bool = False,
     ) -> (bool, Union[str, dict]):
-        "See :py:func:`~munet.mutest.userapi.match_step_json`"
-
+        """See :py:func:`~munet.mutest.userapi.match_step_json`."""
         self.logf(
             "#%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
             self.steps + 1,
@@ -416,8 +410,7 @@ class TestCase:
         interval=0.5,
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
-        "See :py:func:`~munet.mutest.userapi.wait_step`"
-
+        """See :py:func:`~munet.mutest.userapi.wait_step`."""
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
@@ -446,8 +439,7 @@ class TestCase:
         interval=None,
         expect_fail: bool = False,
     ) -> (bool, Union[str, dict]):
-        "See :py:func:`~munet.mutest.userapi.wait_step_json`"
-
+        """See :py:func:`~munet.mutest.userapi.wait_step_json`."""
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
@@ -479,13 +471,12 @@ def log(fmt, *args, **kwargs):
 
 
 def include(pathname: str, call_on_fail: Callable[[], None] = None):
-    """Include a file as part of testcase
+    """Include a file as part of testcase.
 
     Args:
         pathname: the file to include.
         call_on_fail: function to call on step failures.
     """
-
     return TestCase.g_tc.include(pathname, call_on_fail)
 
 
@@ -495,6 +486,7 @@ def step(target: str, cmd: str) -> str:
     Args:
         target: the target to execute the ``cmd`` on.
         cmd: string to execute on the target.
+
     Returns:
         Returns ``re.Match.groups()`` if non-empty, otherwise the ``str`` output
           of the ``cmd``.
@@ -508,6 +500,7 @@ def step_json(target: str, cmd: str) -> dict:
     Args:
         target: the target to execute the ``cmd`` on.
         cmd: string to execute on the target.
+
     Returns:
         Returns the json object after parsing the ``cmd`` output.
 
@@ -661,7 +654,6 @@ def wait_step_json(
 
         If json parse fails, a warning is logged and an empty ``dict`` is used.
     """
-
     return TestCase.g_tc.wait_step_json(
         target, cmd, match, desc, timeout, interval, expect_fail
     )

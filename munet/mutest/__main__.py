@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"""Command to execute mutests"""
+"""Command to execute mutests."""
 
 import argparse
 import asyncio
@@ -50,6 +50,7 @@ async def get_unet(config: dict, rundir: Union[str, Path], unshare: bool = True)
           value will be modified and stored in the built ``Munet`` object.
         rundir: the path to the run directory for this topology.
         unshare: True to unshare the process into it's own private namespace.
+
     Yields:
         Munet: The constructed and running topology.
     """
@@ -88,7 +89,7 @@ async def get_unet(config: dict, rundir: Union[str, Path], unshare: bool = True)
 
 
 def common_root(path1: Union[str, Path], path2: Union[str, Path]) -> Path:
-    """Find the common root between 2 paths
+    """Find the common root between 2 paths.
 
     Args:
         path1: Path

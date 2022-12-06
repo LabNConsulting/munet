@@ -117,7 +117,7 @@ max-line-length = 88
 
 [tool.pydocstyle]
 convention = "google"
-add_ignore = "D102,D103"
+add_ignore = "D102,D103,D105,D107"
 
 [tool.pylint.design]
 # limiting the number of returns might discourage

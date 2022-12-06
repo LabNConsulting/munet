@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"The main function for standalone operation."
+"""The main function for standalone operation."""
 import argparse
 import asyncio
 import logging
