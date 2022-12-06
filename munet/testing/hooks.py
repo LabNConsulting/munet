@@ -131,8 +131,7 @@ def pytest_configure(config):
 
 
 def pytest_runtest_makereport(item, call):
-    "Pause or invoke CLI as directed by config"
-
+    """Pause or invoke CLI as directed by config."""
     isatty = sys.stdout.isatty()
     pause = bool(item.config.getoption("--pause"))
     skipped = False

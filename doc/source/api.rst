@@ -18,3 +18,4 @@ API
    api/config
    api/compat
    api/unshare
+   api/mutest.userapi

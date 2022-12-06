@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module that provides functionality to cleanup processes on posix systems."
+"""Provides functionality to cleanup processes on posix systems."""
 import glob
 import logging
 import os

@@ -18,11 +18,11 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"Provide compatible APIs"
+"""Provide compatible APIs."""
 
 
 class PytestConfig:
-    "Pytest config duck-type-compatible object using argprase args"
+    """Pytest config duck-type-compatible object using argprase args."""
 
     def __init__(self, args):
         self.args = vars(args)

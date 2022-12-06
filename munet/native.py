@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module that defines objects for standalone use."
+"""A module that defines objects for standalone use."""
 import asyncio
 import errno
 import ipaddress
@@ -51,7 +51,7 @@ from .config import merge_kind_config
 
 
 class L3ContainerNotRunningError(MunetError):
-    "Exception if no running container exists"
+    """Exception if no running container exists."""
 
 
 def get_loopback_ips(c, nid):
@@ -106,7 +106,7 @@ def read_sym_basename(path):
 
 
 async def to_thread(func):
-    """to_thread for python < 3.9"""
+    """to_thread for python < 3.9."""
     try:
         return await asyncio.to_thread(func)
     except AttributeError:
@@ -115,26 +115,20 @@ async def to_thread(func):
 
 
 class L2Bridge(Bridge):
-    """
-    A linux bridge with no IP network address.
-    """
+    """A linux bridge with no IP network address."""
 
     def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
         """Create a linux Bridge."""
-
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
 
 
 class L3Bridge(Bridge):
-    """
-    A linux bridge with associated IP network address.
-    """
+    """A linux bridge with associated IP network address."""
 
     def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
         """Create a linux Bridge."""
-
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
@@ -159,7 +153,7 @@ class L3Bridge(Bridge):
 
     async def _async_delete(self):
         if type(self) == L3Bridge:  # pylint: disable=C0123
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3Bridge sub-class _async_delete", self)
 
@@ -173,9 +167,7 @@ class L3Bridge(Bridge):
 
 
 class L3Node(LinuxNamespace):
-    """
-    A linux namespace with IP attributes.
-    """
+    """A linux namespace with IP attributes."""
 
     next_ord = 1
 
@@ -188,7 +180,6 @@ class L3Node(LinuxNamespace):
 
     def __init__(self, name, config=None, unet=None, **kwargs):
         """Create a linux Bridge."""
-
         self.config = config if config else {}
         config = self.config
 
@@ -261,7 +252,7 @@ fe00::0\tip6-localnet
 ff00::0\tip6-mcastprefix
 ff02::1\tip6-allnodes
 ff02::2\tip6-allrouters
-"""
+."""
                 )
         self.bind_mount(hosts_file, "/etc/hosts")
 
@@ -283,8 +274,7 @@ ff02::2\tip6-allrouters
         trace=True,
         **kwargs,
     ):
-        """
-        Create a REPL (read-eval-print-loop) driving a console.
+        """Create a REPL (read-eval-print-loop) driving a console.
 
         Args:
             concmd: string or list to popen with, or an already open socket
@@ -299,10 +289,10 @@ ff02::2\tip6-allrouters
             use_pty: true for pty based expect, otherwise uses popen (pipes/files)
             will_echo: bash is buggy in that it echo's to non-tty unlike any other
                 sh/ksh, set this value to true if running back
+            logfile_prefix: prefix for 3 logfiles opened to track the console i/o
             trace: trace the send/expect sequence
             **kwargs: kwargs passed on the _spawn.
         """
-
         lfname = os.path.join(self.rundir, f"{logfile_prefix}-log.txt")
         logfile = open(lfname, "a+", encoding="utf-8")
         logfile.write("-- start logging for: '{}' --\n".format(concmd))
@@ -386,8 +376,7 @@ ff02::2\tip6-allrouters
         return None
 
     async def run_cmd(self):
-        """Run the configured commands for this node"""
-
+        """Run the configured commands for this node."""
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
@@ -449,11 +438,10 @@ ff02::2\tip6-allrouters
         return self.cmd_p
 
     async def _async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node
+        """Run the configured cleanup commands for this node.
 
         This function is called by subclass' async_cleanup_cmd
         """
-
         self.cleanup_called = True
 
         cmd = self.config.get("cleanup_cmd", "").strip()
@@ -506,7 +494,7 @@ ff02::2\tip6-allrouters
         return rc
 
     async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node"""
+        """Run the configured cleanup commands for this node."""
         return await self._async_cleanup_cmd()
 
     def cmd_completed(self, future):
@@ -545,15 +533,14 @@ ff02::2\tip6-allrouters
                 self.cmd_raises(f"ip route add default via {switch.ip_address}")
 
     def pytest_hook_run_cmd(self, stdout, stderr):
-        """
-        Handle pytest options related to running the node cmd:
+        """Handle pytest options related to running the node cmd.
 
         This function does things such as launch tail'ing windows
         on the given files if requested by the user.
 
-        Args
-           stdout, stderr - objects with `name` attribute otherwise
-                            path string to file for stdout, stderr
+        Args:
+            stdout: file-like object with a ``name`` attribute, or a path to a file.
+            stderr: file-like object with a ``name`` attribute, or a path to a file.
         """
         if not self.unet or not self.unet.pytest_config:
             return
@@ -631,7 +618,7 @@ ff02::2\tip6-allrouters
         del self.host_intfs[hname]
 
     async def add_phy_intf(self, devaddr, lname):
-        """Add a physical inteface (i.e. mv it to vfio-pci driver
+        """Add a physical inteface (i.e. mv it to vfio-pci driver.
 
         This is primarily useful for Qemu, but also for things like TREX or DPDK
         """
@@ -721,7 +708,7 @@ ff02::2\tip6-allrouters
             )
 
     async def rem_phy_intf(self, devaddr):
-        """Remove a physical inteface (i.e. mv it away from vfio-pci driver
+        """Remove a physical inteface (i.e. mv it away from vfio-pci driver.
 
         This is primarily useful for Qemu, but also for things like TREX or DPDK
         """
@@ -758,7 +745,7 @@ ff02::2\tip6-allrouters
         if type(self) == L3Node:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3Node sub-class _async_delete", self)
 
@@ -788,9 +775,7 @@ ff02::2\tip6-allrouters
 
 
 class L3ContainerNode(L3Node):
-    """
-    An container (podman) based L3Node.
-    """
+    """An container (podman) based L3Node."""
 
     def __init__(self, name, config, **kwargs):
         """Create a Container Node."""
@@ -1004,7 +989,7 @@ class L3ContainerNode(L3Node):
             self.extra_mounts += args
 
     async def run_cmd(self):
-        """Run the configured commands for this node"""
+        """Run the configured commands for this node."""
         self.logger.debug("%s: starting container", self.name)
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
@@ -1180,8 +1165,7 @@ class L3ContainerNode(L3Node):
         return self.cmd_p
 
     async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node"""
-
+        """Run the configured cleanup commands for this node."""
         self.cleanup_called = True
 
         if "cleanup_cmd" not in self.config:
@@ -1217,7 +1201,7 @@ class L3ContainerNode(L3Node):
         if type(self) == L3ContainerNode:  # pylint: disable=C0123
             # Used to use info here as the top level delete but the user doesn't care,
             # right?
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3ContainerNode delete", self)
 
@@ -1262,9 +1246,7 @@ class L3ContainerNode(L3Node):
 
 
 class L3QemuVM(L3Node):
-    """
-    An container (podman) based L3Node.
-    """
+    """An container (podman) based L3Node."""
 
     def __init__(self, name, config, **kwargs):
         """Create a Container Node."""
@@ -1298,7 +1280,7 @@ class L3QemuVM(L3Node):
         return True
 
     async def moncmd(self):
-        "Uses internal REPL to send cmmand to qemu monitor and get reply"
+        """Uses internal REPL to send cmmand to qemu monitor and get reply."""
 
     def tmpfs_mount(self, inner):
         # eventually would be nice to support live mounting
@@ -1320,7 +1302,7 @@ class L3QemuVM(L3Node):
     #     self.extra_mounts.append((outer, inner, ""))
 
     def mount_volumes(self):
-        """Mount volumes from the config"""
+        """Mount volumes from the config."""
         args = []
         for m in self.config.get("volumes", []):
             if not isinstance(m, str):
@@ -1369,8 +1351,7 @@ class L3QemuVM(L3Node):
             self.extra_mounts += args
 
     async def run_cmd(self):
-        """Run the configured commands for this node inside VM"""
-
+        """Run the configured commands for this node inside VM."""
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
@@ -1417,7 +1398,7 @@ class L3QemuVM(L3Node):
             cmds = cmd
 
         # class future_proc:
-        #     """Treat awaitable minimally as a proc"""
+        #     """Treat awaitable minimally as a proc."""
         #     def __init__(self, aw):
         #         self.aw = aw
         #         # XXX would be nice to have a real value here
@@ -1428,7 +1409,7 @@ class L3QemuVM(L3Node):
         #         return None
 
         class now_proc:
-            """Treat awaitable minimally as a proc"""
+            """Treat awaitable minimally as a proc."""
 
             def __init__(self, output):
                 self.output = output
@@ -1537,7 +1518,7 @@ class L3QemuVM(L3Node):
         ]
 
     async def mount_mounts(self):
-        """Mount any shared directories"""
+        """Mount any shared directories."""
         self.logger.info("Mounting shared directories")
         con = self.conrepl
         for i, m in enumerate(self.extra_mounts):
@@ -1591,8 +1572,7 @@ class L3QemuVM(L3Node):
         sends=None,
         timeout=-1,
     ):
-        "Open consoles based on socket file names"
-
+        """Open consoles based on socket file names."""
         timeo = Timeout(timeout)
         cons = []
         for cname in cnames:
@@ -1659,7 +1639,7 @@ class L3QemuVM(L3Node):
         return cons
 
     async def launch(self):
-        "Launch qemu"
+        """Launch qemu."""
         self.logger.info("%s: Launch Qemu", self)
 
         qc = self.qemu_config
@@ -1904,13 +1884,12 @@ class L3QemuVM(L3Node):
             )
 
     async def cleanup_qemu(self):
-        "Launch qemu"
+        """Launch qemu."""
         if self.launch_p:
             await self.async_cleanup_proc(self.launch_p)
 
     async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node"""
-
+        """Run the configured cleanup commands for this node."""
         self.cleanup_called = True
 
         if "cleanup_cmd" not in self.config:
@@ -1925,7 +1904,7 @@ class L3QemuVM(L3Node):
 
     async def _async_delete(self):
         if type(self) == L3QemuVM:  # pylint: disable=C0123
-            self.logger.info("%s: deleting", self)
+            self.logger.debug("%s: deleting", self)
         else:
             self.logger.debug("%s: L3QemuVM _async_delete", self)
 
@@ -1953,9 +1932,7 @@ class L3QemuVM(L3Node):
 
 
 class Munet(BaseMunet):
-    """
-    Munet.
-    """
+    """Munet."""
 
     def __init__(self, rundir=None, config=None, pytestconfig=None, **kwargs):
         super().__init__(**kwargs)
@@ -2087,7 +2064,7 @@ class Munet(BaseMunet):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
     def __del__(self):
-        "Catch case of build object but not async_deleted"
+        """Catch case of build object but not async_deleted."""
         if hasattr(self, "built"):
             if not self.deleting:
                 logging.critical(
@@ -2098,8 +2075,7 @@ class Munet(BaseMunet):
             s.__del__(self)
 
     async def _async_build(self, logger=None):
-        """Build the topology based on config"""
-
+        """Build the topology based on config."""
         if self.built:
             self.logger.warning("%s: is already built", self)
             return
@@ -2252,7 +2228,6 @@ class Munet(BaseMunet):
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
-
         if config and config.get("image"):
             cls = L3ContainerNode
         elif config and config.get("qemu"):
@@ -2335,7 +2310,7 @@ class Munet(BaseMunet):
         from munet.testing.util import async_pause_test  # pylint: disable=C0415
 
         if type(self) == Munet:  # pylint: disable=C0123
-            self.logger.info("%s: deleting.", self)
+            self.logger.debug("%s: deleting.", self)
         else:
             self.logger.debug("%s: Munet sub-class munet deleting.", self)
 

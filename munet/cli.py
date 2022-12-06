@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module that implements a CLI."
+"""A module that implements a CLI."""
 import argparse
 import asyncio
 import concurrent.futures
@@ -110,7 +110,7 @@ def get_host_regex(restr):
 
 
 def host_in(restr, names):
-    "Determine if matcher is a regex that matches one of names"
+    """Determine if matcher is a regex that matches one of names."""
     if not (regexp := get_host_regex(restr)):
         return restr in names
     for name in names:
@@ -120,7 +120,7 @@ def host_in(restr, names):
 
 
 def expand_host(restr, names):
-    "Expand name or regexp into list of hosts"
+    """Expand name or regexp into list of hosts."""
     hosts = []
     regexp = get_host_regex(restr)
     if not regexp:
@@ -134,7 +134,7 @@ def expand_host(restr, names):
 
 
 def expand_hosts(restrs, names):
-    "Expand list of host names or regex into list of hosts"
+    """Expand list of host names or regex into list of hosts."""
     hosts = []
     for restr in restrs:
         hosts += expand_host(restr, names)
@@ -256,9 +256,9 @@ Basic Commands:
     - '.' for the parent munet
     - a regex specified between '/' (e.g., '/rtr.*/')
 
-New Window Commands:\n"""
+New Window Commands:\n."""
         + "\n".join([f"  {ww[v][0]}\t:: {ww[v][1]}" for v in w])
-        + """\nInline Commands:\n"""
+        + """\nInline Commands:\n."""
         + "\n".join([f"  {uu[v][0]}\t:: {uu[v][1]}" for v in u])
         + "\n"
     )
@@ -410,7 +410,7 @@ cli_builtins = ["cli", "help", "hosts", "quit"]
 
 
 class Completer:
-    "A completer class for the CLI"
+    """A completer class for the CLI."""
 
     def __init__(self, unet):
         self.unet = unet
@@ -577,7 +577,7 @@ async def doline(
 
 
 async def cli_client(sockpath, prompt="munet> "):
-    """Implement the user-facing CLI for a remote munet reached by a socket"""
+    """Implement the user-facing CLI for a remote munet reached by a socket."""
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(10)
     sock.connect(sockpath)
@@ -617,8 +617,7 @@ async def cli_client(sockpath, prompt="munet> "):
 
 
 async def local_cli(unet, outf, prompt, histfile, background):
-    """Implement the user-side CLI for local munet"""
-
+    """Implement the user-side CLI for local munet."""
     if unet:
         completer = Completer(unet)
         readline.parse_and_bind("tab: complete")
@@ -680,7 +679,7 @@ async def cli_client_connected(unet, background, reader, writer):
 
 
 async def remote_cli(unet, prompt, title, background):
-    "Open a CLI in a new window"
+    """Open a CLI in a new window."""
     try:
         if not unet.cli_sockpath:
             sockpath = os.path.join(tempfile.mkdtemp("-sockdir", "pty-"), "cli.sock")
@@ -807,7 +806,6 @@ def add_cli_config(unet, config):
         unet: unet object
         config: dictionary of cli config
     """
-
     for cli_cmd in config.get("commands", []):
         name = cli_cmd.get("name", None)
         helpfmt = cli_cmd.get("format", "")

@@ -52,12 +52,9 @@ PEXPECT_CONTINUATION_PROMPT = "PEXPECT_PROMPT+"
 
 root_hostname = subprocess.check_output("hostname")
 
-# This allows us to cleanup any leftovers later on
-os.environ["MUNET_PID"] = str(os.getpid())
-
 
 class MunetError(Exception):
-    "A generic munet error"
+    """A generic munet error."""
 
 
 class Timeout:
@@ -205,9 +202,7 @@ def _get_exec_path(binary, cmdf, cache):
 
 
 class Commander:  # pylint: disable=R0904
-    """
-    An object that can execute commands.
-    """
+    """An object that can execute commands."""
 
     tmux_wait_gen = 0
 
@@ -303,13 +298,13 @@ class Commander:  # pylint: disable=R0904
         return get_exec_path_host(binary)
 
     def test(self, flags, arg):
-        """Run test binary, with flags and arg"""
+        """Run test binary, with flags and arg."""
         test_path = self.get_exec_path(["test"])
         rc, _, _ = self.cmd_status([test_path, flags, arg], warn=False)
         return not rc
 
     def test_host(self, flags, arg):
-        """Run test binary, with flags and arg"""
+        """Run test binary, with flags and arg."""
         test_path = self.get_exec_path(["test"])
         rc, _, _ = self.cmd_status_host([test_path, flags, arg], warn=False)
         return not rc
@@ -456,8 +451,7 @@ class Commander:  # pylint: disable=R0904
         trace=None,
         **kwargs,
     ):
-        """
-        Create a spawned send/expect process.
+        """Create a spawned send/expect process.
 
         Args:
             cmd: list of args to exec/popen with, or an already open socket
@@ -470,14 +464,15 @@ class Commander:  # pylint: disable=R0904
             use_pty: true for pty based expect, otherwise uses popen (pipes/files)
             trace: if true then log send/expects
             **kwargs - kwargs passed on the _spawn.
+
         Returns:
             A pexpect process.
+
         Raises:
             pexpect.TIMEOUT, pexpect.EOF as documented in `pexpect`
             subprocess.CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
-
         if is_file_like(cmd):
             assert not use_pty
             ac = "*socket*"
@@ -571,8 +566,7 @@ class Commander:  # pylint: disable=R0904
         is_bourne=True,
         **kwargs,
     ):
-        """
-        Create a shell REPL (read-eval-print-loop).
+        """Create a shell REPL (read-eval-print-loop).
 
         Args:
             cmd: shell and list of args to popen with, or an already open socket
@@ -623,8 +617,7 @@ class Commander:  # pylint: disable=R0904
         return ShellWrapper(p, ps1, ps2, extra_init_cmd=extra, will_echo=will_echo)
 
     def popen(self, cmd, **kwargs):
-        """
-        Creates a pipe with the given `command`.
+        """Creates a pipe with the given `command`.
 
         Args:
             cmd: `str` or `list` of command to open a pipe with.
@@ -638,8 +631,7 @@ class Commander:  # pylint: disable=R0904
         return self._popen("popen", cmd, **kwargs)[0]
 
     def popen_host(self, cmd, **kwargs):
-        """
-        Creates a pipe with the given `command`.
+        """Creates a pipe with the given `command`.
 
         Args:
             cmd: `str` or `list` of command to open a pipe with.
@@ -734,7 +726,7 @@ class Commander:  # pylint: disable=R0904
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
     def cmd_get_cmd_list(self, cmd):
-        """Given a list or string return a list form for execution
+        """Given a list or string return a list form for execution.
 
         If `cmd` is a string then the returned list uses bash and looks
         like this: ["/bin/bash", "-c", cmd]. Some node types override
@@ -743,6 +735,7 @@ class Commander:  # pylint: disable=R0904
 
         Args:
             cmd: list or string representing the command to execute.
+
         Returns:
             list of commands to execute.
         """
@@ -755,7 +748,7 @@ class Commander:  # pylint: disable=R0904
         return cmds
 
     def cmd_nostatus(self, cmd, **kwargs):
-        """Run given command returning output[s]
+        """Run given command returning output[s].
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -764,6 +757,7 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
                 then will be invoked with `bash -c`, otherwise `command` is a list and
                 will be invoked without a shell.
+
         Returns:
             if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
             both stdout and stderr are returned, otherwise stderr is combined
@@ -784,7 +778,7 @@ class Commander:  # pylint: disable=R0904
         return o
 
     def cmd_status(self, cmd, **kwargs):
-        """Run given command returning status and outputs
+        """Run given command returning status and outputs.
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -793,6 +787,7 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
                 then will be invoked with `bash -c`, otherwise `command` is a list and
                 will be invoked without a shell.
+
         Returns:
             (status, output, error) are returned
             status: the returncode of the command.
@@ -808,7 +803,7 @@ class Commander:  # pylint: disable=R0904
         return self._cmd_status(cmds, **kwargs)
 
     def cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors
+        """Execute a command. Raise an exception on errors.
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -817,13 +812,13 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
                 then will be invoked with `bash -c`, otherwise `command` is a list and
                 will be invoked without a shell.
+
         Returns:
             output: stdout as a string from the command.
 
         Raises:
             CalledProcessError: on non-zero exit status
         """
-
         _, stdout, _ = self.cmd_status(cmd, raises=True, **kwargs)
         return stdout
 
@@ -836,7 +831,7 @@ class Commander:  # pylint: disable=R0904
         return Commander.cmd_status(self, cmd, raises=True, **kwargs)
 
     async def async_cmd_status(self, cmd, **kwargs):
-        """Run given command returning status and outputs
+        """Run given command returning status and outputs.
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -845,6 +840,7 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
                 `cmd` is a string then will be invoked with `bash -c`, otherwise
                 `cmd` is a list and will be invoked without a shell.
+
         Returns:
             (status, output, error) are returned
             status: the returncode of the command.
@@ -860,7 +856,7 @@ class Commander:  # pylint: disable=R0904
         return await self._async_cmd_status(cmds, **kwargs)
 
     async def async_cmd_nostatus(self, cmd, **kwargs):
-        """Run given command returning output[s]
+        """Run given command returning output[s].
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -869,6 +865,7 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
                 `cmd` is a string then will be invoked with `bash -c`, otherwise
                 `cmd` is a list and will be invoked without a shell.
+
         Returns:
             if "stderr" is in kwargs and not equal to subprocess.STDOUT, then
             both stdout and stderr are returned, otherwise stderr is combined
@@ -885,7 +882,7 @@ class Commander:  # pylint: disable=R0904
         return o
 
     async def async_cmd_raises(self, cmd, **kwargs):
-        """Execute a command. Raise an exception on errors
+        """Execute a command. Raise an exception on errors.
 
         Args:
             cmd: `str` or `list` of the command to execute.  If a string is given
@@ -894,6 +891,7 @@ class Commander:  # pylint: disable=R0904
             **kwargs: kwargs is eventually passed on to create_subprocess_exec. If
                 `cmd` is a string then will be invoked with `bash -c`, otherwise
                 `cmd` is a list and will be invoked without a shell.
+
         Returns:
             output: stdout as a string from the command.
 
@@ -916,7 +914,6 @@ class Commander:  # pylint: disable=R0904
 
     def cmd_legacy(self, cmd, **kwargs):
         """Execute a command with stdout and stderr joined, *IGNORES ERROR*."""
-
         defaults = {"stderr": subprocess.STDOUT}
         defaults.update(kwargs)
         _, stdout, _ = self.cmd_status(cmd, raises=False, **defaults)
@@ -935,8 +932,7 @@ class Commander:  # pylint: disable=R0904
         tmux_target=None,
         on_host=False,
     ):
-        """
-        Run a command in a new window (TMUX, Screen or XTerm).
+        """Run a command in a new window (TMUX, Screen or XTerm).
 
         Args:
             wait_for: True to wait for exit from command or `str` as channel neme to
@@ -951,7 +947,6 @@ class Commander:  # pylint: disable=R0904
         Returns:
             the pane/window identifier from TMUX (depends on `new_window`)
         """
-
         channel = None
         if isinstance(wait_for, str):
             channel = wait_for
@@ -1072,7 +1067,7 @@ class Commander:  # pylint: disable=R0904
         return pane_info
 
     def delete(self):
-        "Calls self.async_delete within an exec loop"
+        """Calls self.async_delete within an exec loop."""
         asyncio.run(self.async_delete())
 
     async def _async_delete(self):
@@ -1087,7 +1082,7 @@ class Commander:  # pylint: disable=R0904
         self.logger.info("%s: deleted", self)
 
     async def async_delete(self):
-        """Delete the Commander (or derived object)
+        """Delete the Commander (or derived object).
 
         The actual implementation for any class should be in `_async_delete`
         new derived classes should look at the documentation for that function.
@@ -1146,7 +1141,7 @@ class InterfaceMixin:
             self.net_intfs[netname] = ifname
 
     def get_linux_tc_args(self, ifname, config):
-        """Get interface constraints (jitter, delay, rate) for linux TC
+        """Get interface constraints (jitter, delay, rate) for linux TC.
 
         The keys and their values are as follows:
 
@@ -1241,6 +1236,7 @@ class InterfaceMixin:
         be cleared.
 
         Args:
+            ifname: the name of the interface
             delay (int): number of microseconds.
             jitter (int): number of microseconds.
             jitter-correlation (float): Percent correlation to previous (default 10%).
@@ -1264,7 +1260,7 @@ class InterfaceMixin:
 
 
 class SSHRemote(Commander):
-    """SSHRemote a node representing an ssh connection to something"""
+    """SSHRemote a node representing an ssh connection to something."""
 
     def __init__(
         self, name, server, port=22, user=None, password=None, unet=None, **kwargs
@@ -1311,7 +1307,7 @@ class SSHRemote(Commander):
         self.logger.info("%s: created", self)
 
     def cmd_get_cmd_list(self, cmd):
-        """Given a list or string return a list form for execution
+        """Given a list or string return a list form for execution.
 
         If cmd is a string then [cmd] is returned, for most other
         node types ["bash", "-c", cmd] is returned but in our case
@@ -1328,8 +1324,7 @@ class SSHRemote(Commander):
 
 
 class LinuxNamespace(Commander, InterfaceMixin):
-    """
-    A linux Namespace.
+    """A linux Namespace.
 
     An object that creates and executes commands in a linux namespace
     """
@@ -1350,8 +1345,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         private_mounts=None,
         logger=None,
     ):
-        """
-        Create a new linux namespace.
+        """Create a new linux namespace.
 
         Args:
             name: Internal name for the namespace.
@@ -1368,6 +1362,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 "[/external/path:]/internal/path. If no external path is specified a
                 tmpfs is mounted on the internal path. Any paths specified are first
                 passed to `mkdir -p`.
+            unshare_inline: Unshare the process itself rather than using a proxy.
             logger: Passed to superclass.
         """
         super().__init__(name=name, logger=logger)
@@ -1828,19 +1823,19 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
 
 class SharedNamespace(Commander):
-    """
-    Share another namespace.
+    """Share another namespace.
 
     An object that executes commands in an existing pid's linux namespace
     """
 
     def __init__(self, name, pid, aflags=("-a",), logger=None):
-        """
-        Share a linux namespace.
+        """Share a linux namespace.
 
         Args:
             name: Internal name for the namespace.
             pid: PID of the process to share with.
+            aflags: nsenter flags to pass to inherit namespaces from
+            logger: logger to use for this object.
         """
         super().__init__(name=name, logger=logger)
 
@@ -1864,9 +1859,7 @@ class SharedNamespace(Commander):
 
 
 class Bridge(SharedNamespace, InterfaceMixin):
-    """
-    A linux bridge.
-    """
+    """A linux bridge."""
 
     next_ord = 1
 
@@ -1879,7 +1872,6 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
     def __init__(self, name=None, unet=None, logger=None, mtu=None, **kwargs):
         """Create a linux Bridge."""
-
         self.id = self._get_next_id()
         if not name:
             name = "br{}".format(self.id)
@@ -1934,13 +1926,10 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
 
 class BaseMunet(LinuxNamespace):
-    """
-    Munet.
-    """
+    """Munet."""
 
     def __init__(self, isolated=True, **kwargs):
         """Create a Munet."""
-
         self.hosts = {}
         self.switches = {}
         self.links = {}
@@ -1956,6 +1945,16 @@ class BaseMunet(LinuxNamespace):
 
         super().__init__(name="munet", mount=True, net=isolated, uts=isolated, **kwargs)
 
+        # This allows us to cleanup any leftover running munet's
+        if "MUNET_PID" in os.environ:
+            if os.environ["MUNET_PID"] != str(os.getpid()):
+                logging.error(
+                    "Found env MUNET_PID != our pid %s, instead its %s, changing",
+                    os.getpid(),
+                    os.environ["MUNET_PID"],
+                )
+            os.environ["MUNET_PID"] = str(os.getpid())
+
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:
             BaseMunet.g_unet = self
@@ -1969,7 +1968,6 @@ class BaseMunet(LinuxNamespace):
 
     def add_host(self, name, cls=LinuxNamespace, **kwargs):
         """Add a host to munet."""
-
         self.logger.debug("%s: add_host %s(%s)", self, cls.__name__, name)
 
         self.hosts[name] = cls(name, **kwargs)
@@ -2097,7 +2095,6 @@ class BaseMunet(LinuxNamespace):
 
     def add_switch(self, name, cls=Bridge, **kwargs):
         """Add a switch to munet."""
-
         self.logger.debug("%s: add_switch %s(%s)", self, cls.__name__, name)
         self.switches[name] = cls(name, unet=self, **kwargs)
         return self.switches[name]
@@ -2201,8 +2198,7 @@ BaseMunet.g_unet = None
 if True:  # pylint: disable=using-constant-test
 
     class ShellWrapper:
-        """
-        A Read-Execute-Print-Loop (REPL) interface
+        """A Read-Execute-Print-Loop (REPL) interface.
 
         A newline or prompt changing command should be sent to the
         spawned child prior to creation as the `prompt` will be `expect`ed
@@ -2281,7 +2277,7 @@ if True:  # pylint: disable=using-constant-test
             return output
 
         def cmd_nostatus(self, cmd, timeout=-1):
-            """Execute a shell command
+            r"""Execute a shell command.
 
             Returns:
                 (strip/cleaned \r) output
@@ -2304,12 +2300,11 @@ if True:  # pylint: disable=using-constant-test
             return output.replace("\r", "").strip()
 
         def cmd_status(self, cmd, timeout=-1):
-            """Execute a shell command
+            r"""Execute a shell command.
 
             Returns:
                 status and (strip/cleaned \r) output
             """
-
             # Run the command getting the output
             output = self.cmd_nostatus(cmd, timeout)
 
@@ -2347,7 +2342,7 @@ if True:  # pylint: disable=using-constant-test
             return rc, output
 
         def cmd_raises(self, cmd, timeout=-1):
-            """Execute a shell command.
+            r"""Execute a shell command.
 
             Returns:
                 (strip/cleaned \r) ouptut

@@ -1,0 +1,9 @@
+
+topology:
+  networks:
+    - name: mgmt0
+  nodes:
+    - name: r1
+      connections: ["mgmt0"]
+    - name: host1
+      connections: ["mgmt0"]

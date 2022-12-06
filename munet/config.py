@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module that defines common configuration utility functions."
+"""A module that defines common configuration utility functions."""
 import logging
 
 from collections.abc import Iterable
@@ -135,11 +135,11 @@ def config_subst(config: Iterable, **kwargs) -> Iterable:
 
 
 def value_merge_deepcopy(s1, s2):
-    """
+    """Merge values using deepcopy.
+
     Create a deepcopy of the result of merging the values from dicts ``s1`` and ``s2``.
     If a key exists in both ``s1`` and ``s2`` the value from ``s2`` is used."
     """
-
     d = {}
     for k, v in s1.items():
         if k in s2:

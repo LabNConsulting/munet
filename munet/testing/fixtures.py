@@ -191,7 +191,8 @@ async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
 
 @pytest.fixture(scope="module")
 async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W0621
-    """
+    """A unet creating fixutre.
+
     This share variant keeps munet from unsharing the process to a new namespace so that
     root level commands and actions are execute on the host, normally they are executed
     in the munet namespace which allowing things like scapy inline in tests to work.
@@ -222,7 +223,8 @@ def function_autouse(request):
 @pytest.fixture(scope="function")
 def stepf(pytestconfig):
     class Stepnum:
-        "Track the stepnum in closure"
+        """Track the stepnum in closure."""
+
         num = 0
 
         def inc(self):
@@ -244,7 +246,8 @@ def stepf(pytestconfig):
 @pytest_asyncio.fixture(scope="function")
 async def astepf(pytestconfig):
     class Stepnum:
-        "Track the stepnum in closure"
+        """Track the stepnum in closure."""
+
         num = 0
 
         def inc(self):
@@ -286,8 +289,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture
 async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
-    """
-    Build unet per test function with an optional topology basename parameter
+    """Build unet per test function with an optional topology basename parameter.
 
     The fixture can be parameterized to choose different config files.
     For example, use as follows to run the test with unet_perfunc configured
@@ -306,8 +308,7 @@ async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
 
 @pytest.fixture
 async def unet_perfunc_share(request, rundir, pytestconfig):  # pylint: disable=W0621
-    """
-    Build unet per test function with an optional topology basename parameter
+    """Build unet per test function with an optional topology basename parameter.
 
     This share variant keeps munet from unsharing the process to a new namespace so that
     root level commands and actions are execute on the host, normally they are executed

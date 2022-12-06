@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"A module that implements the standalone parser."
+"""A module that implements the standalone parser."""
 import asyncio
 import importlib.resources
 import json
@@ -104,7 +104,7 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
     return config
 
 
-def setup_logging(args):
+def setup_logging(args, config_base="logconf"):
     # Create rundir and arrange for future commands to run in it.
 
     # Change CWD to the rundir prior to parsing config
@@ -112,19 +112,31 @@ def setup_logging(args):
     os.chdir(args.rundir)
     try:
         search = [old]
-        with importlib.resources.path("munet", "logconf.yaml") as datapath:
+        with importlib.resources.path("munet", config_base + ".yaml") as datapath:
             search.append(str(datapath.parent))
 
         def logf(msg, *p, **k):
             if args.verbose:
                 print("PRELOG: " + msg % p, **k, file=sys.stderr)
 
-        config = get_config(args.log_config, "logconf", search, logf=logf)
+        config = get_config(args.log_config, config_base, search, logf=logf)
         pathname = config["config_pathname"]
         del config["config_pathname"]
 
-        if args.verbose:
+        if args.verbose > 1:
             config["handlers"]["console"]["level"] = "DEBUG"
+            config["handlers"]["result_console"]["level"] = "DEBUG"
+        elif args.verbose:
+            config["handlers"]["console"]["level"] = "INFO"
+            config["handlers"]["result_console"]["level"] = "DEBUG"
+
+        # add the rundir path to the filenames
+        for v in config["handlers"].values():
+            filename = v.get("filename")
+            if not filename:
+                continue
+            v["filename"] = os.path.join(args.rundir, filename)
+
         logging.config.dictConfig(dict(config))
         logging.info("Loaded logging config %s", pathname)
     finally:

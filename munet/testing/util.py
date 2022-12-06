@@ -66,8 +66,7 @@ def pause_test(desc=""):
 
 
 def retry(retry_timeout, initial_wait=0, expected=True):
-    """
-    decorator: retry while function return value is not None or it raises an exception.
+    """decorator: retry while functions return is not None or raises an exception.
 
     * `retry_timeout`: Retry for at least this many seconds; after waiting
                        initial_wait seconds
