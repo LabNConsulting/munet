@@ -19,6 +19,7 @@ toml = {version = "^0.10.2", optional = true}
 [tool.poetry.scripts]
 munet = "munet.__main__:main"
 mucmd = "munet.mucmd:main"
+mutest = "munet.mutest:main"
 
 [tool.poetry.group.schemadev.dependencies]
 pyang = "^2.5.3"
@@ -34,6 +35,7 @@ pytest-asyncio = "^0.20.2"
 pytest-cov = "^4.0.0"
 requests = "^2.28.1"
 toml = "^0.10.2"
+pytest-xdist = "^3.0.2"
 
 
 [tool.poetry.group.ide.dependencies]
@@ -131,6 +133,9 @@ testpaths = [
 log_level = "INFO"
 log_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
+
+python_functions = ["test*", "setest*"]
+# python_files = ["test*.py"]
 
 # If verbose is specifyied log_cli will be set to 1, it can also be specified
 # here or on the CLI.
