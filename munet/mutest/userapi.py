@@ -1,6 +1,6 @@
-#!/usr/bin/env python
-
-# Copyright 2017, LabN Consulting, L.L.C.
+# -*- coding: utf-8 eval: (blacken-mode 1) -*-
+#
+# Copyright 2017, 2022, LabN Consulting, L.L.C.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -28,30 +28,18 @@ import sys
 import time
 
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable
+from typing import Union
 
 from deepdiff import DeepDiff as json_cmp
-
-
-# L utility functions
-#
-# These functions are inteneted to provide support for CI testing within munet
-# environments.
-
-#
-# This code expects the following API availability.
-# a dictionary like object ``targets'' which is keyed on the target name.
-#
-# The target object must include a method ``cmd_nostatus'' which returns
-# the output of the command's output (stdout+stderr using the same file).
-#
 
 
 class TestCase:
     """A mutest testcase.
 
-    This is meant to be used internally by the mutest command to implement
-    the user API. See README-mutest.org for details on the user API.
+    This is normally meant to be used internally by the mutest command to
+    implement the user API. See README-mutest.org for usage details on the
+    user API.
 
     Args:
         targets: a dictionary of objects which implement ``cmd_nostatus(str)``
@@ -65,6 +53,7 @@ class TestCase:
         passed: number of passing steps.
         failed: number of failing steps.
     """
+
     sum_hfmt = "{:4.4s} {:>6.6s} {:4.4s} {}"
     sum_dfmt = "{:4d} {:^6.6s} {:4.4s} {}"
 
@@ -483,8 +472,11 @@ TestCase.g_tc = None
 
 # pylint: disable=protected-access
 
+
 def log(fmt, *args, **kwargs):
+    """Log a message in the testcase output log."""
     return TestCase.g_tc.logf(fmt, *args, **kwargs)
+
 
 def include(pathname: str, call_on_fail: Callable[[], None] = None):
     """Include a file as part of testcase
