@@ -1,9 +1,18 @@
-step("r1", "ls -l /home")
-wait_step("r1", "ls -l /home", "xhopps", "fail", "Look for xhopps", timeout=1, interval=.25)
-wait_step("r1", "ls -l /home", "chopps", "pass", "Look for chopps", timeout=1, interval=.25)
-wait_step("r1", "ls -l /", "root", "pass", "Look for root", timeout=1, interval=.25)
+# pylint: disable=line-too-long
+"""A test of json steps"""
+from munet.mutest.userapi import include, log, step_json, match_step_json, wait_step_json
 
-step("host1", "ls -l /")
-wait_step("host1", "ls -l /home", "xhopps", "fail", "Look for xhopps", timeout=1, interval=.25)
-wait_step("host1", "ls -l /home", "chopps", "pass", "Look for chopps", timeout=1, interval=.25)
-wait_step("host1", "ls -l /", "root", "pass", "Look for root", timeout=1, interval=.25)
+js = step_json("r1", 'echo { "name": "chopps" }')
+log("SIMPLE JSON: %s", js)
+
+# expect passing tests
+match_step_json("r1",'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps")
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", 1, .25)
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", 1, .25, False)
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", 1, interval=.25)
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", 1, interval=.25, expect_fail=False)
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", timeout=1, interval=.25)
+wait_step_json("r1", 'echo \'{ "name": "chopps" }\'', '{ "name": "chopps"}', "Look for chopps", timeout=1, interval=.25, expect_fail=False)
+
+# expect failing tests
+include("inc_b_fail.py")
