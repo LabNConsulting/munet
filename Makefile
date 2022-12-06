@@ -36,6 +36,7 @@ lint:
 	$(POETRYRUN) pylint ./munet $(shell find ./tests/*/* -name '*.py')
 
 ci-lint:
+	$(POETRYRUN) pydocstyle ./munet
 	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
 
 test: test-validate ci-lint
