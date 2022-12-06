@@ -20,12 +20,13 @@
 #
 """Command to execute mutests."""
 
-import argparse
 import asyncio
 import logging
 import os
 import subprocess
 
+from argparse import ArgumentParser
+from argparse import Namespace
 from copy import deepcopy
 from pathlib import Path
 from typing import Union
@@ -34,6 +35,7 @@ from munet import parser
 from munet.base import Bridge
 from munet.mutest import userapi as uapi
 from munet.native import L3Node
+from munet.native import Munet
 from munet.parser import async_build_topology
 from munet.parser import get_config
 
@@ -114,7 +116,7 @@ def common_root(path1: Union[str, Path], path2: Union[str, Path]) -> Path:
     return common
 
 
-async def collect(args):
+async def collect(args: Namespace):
     """Collect test files.
 
     Files must match the pattern ``mutest_*.py``, and their containing
@@ -179,7 +181,17 @@ async def collect(args):
     return common, tests, configs
 
 
-async def execute_test(unet, test, args):  # pylint: disable=W0613
+async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
+    """Execute a test case script.
+
+    Using the built and running topology in ``unet`` for targets
+    execute the test case script file ``test``.
+
+    Args:
+        unet: a running topology.
+        test: path to the test case script file
+        args: argparse results
+    """
     test_name = testname_from_path(test)
     script = open(f"{test}", "r", encoding="utf-8").read()
 
@@ -224,7 +236,6 @@ def testname_from_path(path: Union[str, Path]) -> str:
 
     Returns:
        str: the name of the test.
-
     """
     return str(Path(path).stem).replace("/", ".")
 
@@ -247,7 +258,7 @@ async def async_main(args):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = ArgumentParser()
     ap.add_argument(
         "--dist",
         type=int,
