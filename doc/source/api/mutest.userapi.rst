@@ -20,13 +20,9 @@
 Mutest User API
 ===============
 
-.. currentmodule:: munet.mutest.userapi
-.. autofunction:: step
-.. autofunction:: step_json
-.. autofunction:: match_step
-.. autofunction:: match_step_json
-.. autofunction:: wait_step
-.. autofunction:: wait_step_json
-.. autofunction:: include
+.. automodule:: munet.mutest.userapi
+   :exclude-members: Testcase
+   :members:
 
-.. autoclass:: TestCase
+.. autoclass:: munet.mutest.userapi.TestCase
+   :private-members: +step,step_json,match_step,match_step_json,wait_step,wait_step_json

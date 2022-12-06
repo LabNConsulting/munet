@@ -52,6 +52,8 @@ class TestCase:
         steps: total steps executed so far.
         passed: number of passing steps.
         failed: number of failing steps.
+
+    :meta private:
     """
 
     sum_hfmt = "{:4.4s} {:>6.6s} {:4.4s} {}"
@@ -304,7 +306,10 @@ class TestCase:
     # ---------------------
 
     def include(self, pathname: str, call_on_fail: Callable[[], None] = None):
-        """See :py:func:`~munet.mutest.userapi.include`."""
+        """See :py:func:`~munet.mutest.userapi.include`.
+
+        :meta private:
+        """
         test_file = self.__script_dir.joinpath(pathname)
         self.__push_filename(pathname)
         if call_on_fail is not None:
@@ -333,7 +338,10 @@ class TestCase:
         self.__pop_filename()
 
     def step(self, target: str, cmd: str) -> str:
-        """See :py:func:`~munet.mutest.userapi.step`."""
+        """See :py:func:`~munet.mutest.userapi.step`.
+
+        :meta private:
+        """
         self.logf(
             "#%s:%s:STEP:%s:%s",
             self.steps + 1,
@@ -344,7 +352,10 @@ class TestCase:
         return self._command(target, cmd)
 
     def step_json(self, target: str, cmd: str) -> dict:
-        """See :py:func:`~munet.mutest.userapi.step_json`."""
+        """See :py:func:`~munet.mutest.userapi.step_json`.
+
+        :meta private:
+        """
         self.logf(
             "#%s:%s:STEP_JSON:%s:%s",
             self.steps + 1,
@@ -362,7 +373,10 @@ class TestCase:
         desc: str = "",
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
-        """See :py:func:`~munet.mutest.userapi.match_step`."""
+        """See :py:func:`~munet.mutest.userapi.match_step`.
+
+        :meta private:
+        """
         self.logf(
             "#%s:%s:MATCH_STEP:%s:%s:%s:%s:%s",
             self.steps + 1,
@@ -385,7 +399,10 @@ class TestCase:
         desc: str = "",
         expect_fail: bool = False,
     ) -> (bool, Union[str, dict]):
-        """See :py:func:`~munet.mutest.userapi.match_step_json`."""
+        """See :py:func:`~munet.mutest.userapi.match_step_json`.
+
+        :meta private:
+        """
         self.logf(
             "#%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
             self.steps + 1,
@@ -410,7 +427,10 @@ class TestCase:
         interval=0.5,
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
-        """See :py:func:`~munet.mutest.userapi.wait_step`."""
+        """See :py:func:`~munet.mutest.userapi.wait_step`.
+
+        :meta private:
+        """
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
@@ -439,7 +459,10 @@ class TestCase:
         interval=None,
         expect_fail: bool = False,
     ) -> (bool, Union[str, dict]):
-        """See :py:func:`~munet.mutest.userapi.wait_step_json`."""
+        """See :py:func:`~munet.mutest.userapi.wait_step_json`.
+
+        :meta private:
+        """
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
