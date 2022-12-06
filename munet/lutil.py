@@ -19,14 +19,19 @@
 
 # pylint: disable=global-statement
 
+import json
+import logging
+import math
 import os
 import re
 import sys
 import time
-import json
-import math
-import logging
+
+import pytest
+
 from deepdiff import DeepDiff as json_cmp
+from pytest import StashKey
+
 
 # L utility functions
 #
@@ -41,7 +46,6 @@ from deepdiff import DeepDiff as json_cmp
 # the output of the command's output (stdout+stderr using the same file).
 #
 
-
 class LUtil:
     """Base class of setest functionality."""
 
@@ -53,25 +57,25 @@ class LUtil:
     l_line = 0
     l_dotall_experiment = False
     l_last_nl = None
-
+    sum_hfmt = "{:4.4s} {:>6.6s} {:56.56s} {:4.4s} {:4.4s}"
+    sum_dfmt = "{:4d} {:^6.6s} {:56.56s} {:4d} {:4d}"
 
     def __init__(
         self,
+        request,
         targets,
-        baseScriptDir=".",
-        baseLogDir=".",
+        script_dir=".",
+        log_dir=".",
         fout="output.log",
         fsum="summary.txt",
         level=6,
     ):
-        self.base_script_dir = baseScriptDir
-        self.base_log_dir = baseLogDir
-        if fout:
-            self.fout_name = baseLogDir + "/" + fout
-        if fsum:
-            self.fsum_name = baseLogDir + "/" + fsum
-        if level is not None:
-            self.l_level = level
+        assert os.path.isdir(script_dir)
+        self.script_dir = script_dir
+        self.log_dir = log_dir
+        self.fout_name = os.path.join(log_dir, fout) if fout else None
+        self.fsum_name = os.path.join(log_dir, fsum) if fsum else None
+        self.l_level = level
         self.l_dotall_experiment = False
         self.l_dotall_experiment = True
 
@@ -80,30 +84,33 @@ class LUtil:
         self.__fout = None
         self.__fsum = None
 
+        self.request = request
+        self.item = request.node
+        # store a pointer to us in the pytest request
+        # print("Fixname:", request.fixturename)
+        # print("Fixscope:", request.scope)
+        # print("Fixnode:", request.node)
+        # print("Fixfunc:", request.function)
+        # print("Fixsess:", request.session)
+        self.item.stash[g_stash_key] = self
+
     def log(self, lstr: str, level: int = 6) -> None:
         if self.l_level > 0:
             if not self.__fout:
                 self.__fout = open(self.fout_name, "w", encoding="utf-8")
             self.__fout.write(lstr + "\n")
         if level <= self.l_level:
-            # XXX print
-            print(lstr)
+            logging.debug("%s", lstr)
 
     def summary(self, sstr: str) -> None:
-        if self.__fsum == "":
+        if not self.__fsum:
             self.__fsum = open(self.fsum_name, "w", encoding="utf-8")
-            self.__fsum.write(
-                "\
-******************************************************************************\n"
+            self.__fsum.write("*" * 79 + "\n")
+            header = "{!s:4.4} {!s:6.6} {!s:56.56s} {:4.4s} {:4.4s}\n".format(
+                "Step", "Target", "Summary", "Pass", "Fail"
             )
-            self.__fsum.write(
-                "\
-Test Target Summary                                                  Pass Fail\n"
-            )
-            self.__fsum.write(
-                "\
-******************************************************************************\n"
-            )
+            self.__fsum.write(header)
+            self.__fsum.write("-" * 79 + "\n")
         self.__fsum.write(sstr + "\n")
 
     def result(self, target, success, rstr, logstr=None):
@@ -120,29 +127,30 @@ Test Target Summary                                                  Pass Fail\n
         self.l_total += 1
         if logstr is not None:
             self.log("R:%d %s: %s" % (self.l_total, sstr, logstr))
-        res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, rstr, p, f)
+        # res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, rstr, p, f)
+        res = self.sum_dfmt.format(self.l_total, target, rstr, p, f)
         self.log("R:" + res)
         self.summary(res)
+        self.item.user_properties.append((self.l_total, res))
         if f == 1 and self.__call_on_fail:
             self.__call_on_fail()
 
-    def closeFiles(self):
+    def close_files(self):
         ret = (
-            "\
-******************************************************************************\n\
-Total %-4d                                                           %-4d %d\n\
-******************************************************************************"
-            % (self.l_total, self.l_pass, self.l_fail)
+            "-" * 79
+            + "\n"
+            + f"Total: {self.l_total:<5d}"
+            + " " * 57
+            + f"{self.l_pass:4d} {self.l_fail:4d}"
         )
         if self.__fsum:
             self.__fsum.write(ret + "\n")
             self.__fsum.close()
             self.__fsum = None
         if self.__fout:
-            if os.path.isfile(self.__fout):
-                r = open(self.fsum_name, "r", encoding="utf-8")
-                self.__fout.write(r.read())
-                r.close()
+            if os.path.isfile(self.fsum_name):
+                with open(self.fsum_name, "r", encoding="utf-8") as f:
+                    self.__fout.write(f.read())
             self.__fout.close()
             self.__fout = None
         return ret
@@ -202,7 +210,7 @@ Total %-4d                                                           %-4d %d\n\
 
             a = self.strToArray(line)
             if len(a) >= 6:
-                luCommand(a[1], a[2], a[3], a[4], a[5])
+                luCommand2(self, a[1], a[2], a[3], a[4], a[5])
             else:
                 self.l_line += 1
                 self.log("%s:%s %s" % (self.l_filename, self.l_line, line))
@@ -277,6 +285,7 @@ Total %-4d                                                           %-4d %d\n\
             self.result(target, success, result)
             if js is not None:
                 return js
+            # ret is unset if no json diff
             return ret
 
         # Experiment: can we achieve the same match behavior via DOTALL
@@ -314,11 +323,13 @@ Total %-4d                                                           %-4d %d\n\
                     9,
                 )
         if startt is not None:
+            # In a wait loop
             if js is not None or ret is not False:
                 delta = time.time() - startt
                 self.result(target, success, "%s +%4.2f secs" % (result, delta))
         elif op in ("pass", "fail"):
             self.result(target, success, result)
+
         if js is not None:
             return js
         return ret
@@ -364,7 +375,7 @@ Total %-4d                                                           %-4d %d\n\
         return found
 
     def do_include(self, filename, call_on_fail=None):
-        tstFile = self.base_script_dir + "/" + filename
+        tstFile = self.script_dir + "/" + filename
         self.__set_filename(filename)
         if call_on_fail is not None:
             old_call_on_fail = self.__call_on_fail
@@ -389,36 +400,52 @@ Total %-4d                                                           %-4d %d\n\
         return self.l_last
 
 
-# initialized by luStart
-g_lutil = None
+g_stash_key = StashKey[LUtil]()
 
-# entry calls
+mark = pytest.mark.usefixtures("unet")
+
+
+#
+# Commands used by the pytest shim
+#
 def luStart(
+    request,
     targets,
-    baseScriptDir=".",
-    baseLogDir=".",
+    script_dir=".",
+    log_dir=".",
     fout="output.log",
     fsum="summary.txt",
-    level=None,
+    level=6,
 ):
-
-    global g_lutil
-
-    g_lutil = LUtil(
+    return LUtil(
+        request,
         targets,
-        baseScriptDir,
-        baseLogDir,
+        script_dir,
+        log_dir,
         fout,
         fsum,
         level,
     )
 
 
-def luInclude(filename, call_on_fail=None):
-    return g_lutil.do_include(filename, call_on_fail)
+def luFinish(lutil):
+    ret = lutil.close_files()
+    return ret
 
 
-def luCommand(
+#
+# Commands used (indirectly) by the user script. For the user script
+# in the shim code, partial objects are created with names that don't include the `2'
+# suffix and supply the create lutil object for that script.
+#
+
+
+def luInclude2(lutil, filename, call_on_fail=None):
+    return lutil.do_include(filename, call_on_fail)
+
+
+def luCommand2(
+    lutil,
     target,
     command,
     regexp=".",
@@ -429,59 +456,50 @@ def luCommand(
     wait_time=0.5,
 ):
     if op != "wait":
-        return g_lutil.command(target, command, regexp, op, result, returnJson)
-    return g_lutil.wait(
-        target, command, regexp, op, result, ltime, returnJson, wait_time
-    )
+        return lutil.command(target, command, regexp, op, result, returnJson)
+    return lutil.wait(target, command, regexp, op, result, ltime, returnJson, wait_time)
 
 
-def luLast(usenl=False):
-    return g_lutil.do_last(usenl)
+# def luLast2(lutil, usenl=False):
+#     return lutil.do_last(usenl)
 
 
-def luFinish():
-    global g_lutil
-    ret = g_lutil.closeFiles()
-    g_lutil = None
-    return ret
+# def luNumFail2(lutil):
+#     return lutil.l_fail
 
 
-def luNumFail():
-    return g_lutil.l_fail
+# def luNumPass2(lutil):
+#     return lutil.l_pass
 
 
-def luNumPass():
-    return g_lutil.l_pass
+# def luResult2(lutil, target, success, rstr, logstr=None):
+#     return lutil.result(target, success, rstr, logstr)
 
 
-def luResult(target, success, rstr, logstr=None):
-    return g_lutil.result(target, success, rstr, logstr)
+# def luShowResults2(lutil, prFunction):
+#     sf = open(lutil.fsum_name, "r", encoding="utf-8")
+#     for line in sf:
+#         prFunction(line.rstrip())
+#     sf.close()
 
 
-def luShowResults(prFunction):
-    sf = open(g_lutil.fsum_name, "r", encoding="utf-8")
-    for line in sf:
-        prFunction(line.rstrip())
-    sf.close()
-
-
-def luShowFail():
-    printed = 0
-    sf = open(g_lutil.fsum_name, "r", encoding="utf-8")
-    for line in sf:
-        if line[-2] != "0":
-            printed += 1
-            logging.error(line.rstrip())
-    sf.close()
-    if printed > 0:
-        logging.error("See %s for details of errors", g_lutil.fout_name)
+# def luShowFail2(lutil):
+#     printed = 0
+#     sf = open(lutil.fsum_name, "r", encoding="utf-8")
+#     for line in sf:
+#         if line[-2] != "0":
+#             printed += 1
+#             logging.error(line.rstrip())
+#     sf.close()
+#     if printed > 0:
+#         logging.error("See %s for details of errors", g_lutil.fout_name)
 
 
 # for testing
 if __name__ == "__main__":
     print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/lib")
-    luStart(None)
+    local_lutil = luStart(None)
     for arg in sys.argv[1:]:
-        luInclude(arg)
-    luFinish()
+        luInclude2(local_lutil, arg)
+    luFinish(local_lutil)
     sys.exit(0)
