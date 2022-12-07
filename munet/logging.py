@@ -88,6 +88,7 @@ class MultiFileHandler(logging.FileHandler):
             if newname not in self.__added:
                 self.__added.add(newname)
                 h = logging.FileHandler(filename=newname, **self.__kwargs)
+                h.setFormatter(self.formatter)
                 logging.getLogger(record.name).addHandler(h)
                 h.emit(record)
         super().emit(record)
