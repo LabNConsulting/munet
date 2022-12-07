@@ -223,7 +223,9 @@ async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
     include = tc.include
 
     try:
-        exec(script, globals(), locals())
+        s2 = f"async def _{test_name}():\n " + script.replace("\n", "\n ") + "\n"
+        exec(s2)
+        await locals()[f"_{test_name}"]()
     except Exception as error:
         logging.error("Unexpected exception during test %s: %s", test_name, error)
     finally:
