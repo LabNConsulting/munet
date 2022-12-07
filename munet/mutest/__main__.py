@@ -209,7 +209,9 @@ async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
     else:
         level = logging.WARNING
 
-    tc = uapi.TestCase(unet.hosts, unet.config_dirname, logger, reslog, level)
+    targets = dict(unet.hosts.items())
+    targets["."] = unet
+    tc = uapi.TestCase(targets, unet.config_dirname, logger, reslog, level)
 
     # pylint: disable=possibly-unused-variable,exec-used
     step = tc.step
