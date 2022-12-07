@@ -92,6 +92,7 @@ class TestCase:
         level: the logging level for most messages sent to the ``output_logger``.
 
     Attributes:
+        targets: dictionary of targets.
         steps: total steps executed so far.
         passed: number of passing steps.
         failed: number of failing steps.
@@ -111,7 +112,7 @@ class TestCase:
         level: int = logging.INFO,
     ):
 
-        self.__targets = targets
+        self.targets = targets
         self.__script_dir = Path(script_dir)
         self.__filename = ""
         self.__old_filenames = []
@@ -194,7 +195,8 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execut on the target.
         """
-        out = self.__targets[target].cmd_nostatus(cmd).rstrip()
+        out = self.targets[target].cmd_nostatus(cmd)
+        out = out.rstrip()
         report = out
         if not out:
             report = "<no output>"
@@ -213,7 +215,8 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execut on the target.
         """
-        out = self.__targets[target].cmd_nostatus(cmd).rstrip()
+        out = self.targets[target].cmd_nostatus(cmd)
+        out = out.rstrip()
         try:
             js = json.loads(out)
         except Exception as error:
@@ -240,7 +243,8 @@ class TestCase:
             match: regex to ``re.search()`` for in output.
             expect_fail: if True then succeed when the regexp doesn't match.
         """
-        out = self.__targets[target].cmd_nostatus(cmd).rstrip()
+        out = self.targets[target].cmd_nostatus(cmd)
+        out = out.rstrip()
         report = out
         if not out:
             report = "<no output>"
