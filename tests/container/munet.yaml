@@ -20,5 +20,5 @@ topology:
           tmpfs-size: 512M
           destination: /mytmp
         - type: bind
-          src: /etc
+          src: "%RUNDIR%/mybind"
           destination: /mybind
