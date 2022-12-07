@@ -768,13 +768,17 @@ class Commander:  # pylint: disable=R0904
         # override sync cmd behavior simply override this function and *not* the other
         # variations, unless you are changing only that variation's behavior
         #
+
+        # XXX change this back to _cmd_status instead of cmd_status when we
+        # consolidate and cleanup the container overrides of *cmd_* functions
+
         cmds = cmd
         if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
-            _, o, e = self._cmd_status(cmds, **kwargs)
+            _, o, e = self.cmd_status(cmds, **kwargs)
             return o, e
         if "stderr" in kwargs:
             del kwargs["stderr"]
-        _, o, _ = self._cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
+        _, o, _ = self.cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
         return o
 
     def cmd_status(self, cmd, **kwargs):
@@ -872,13 +876,17 @@ class Commander:  # pylint: disable=R0904
             with stdout and only stdout is returned.
 
         """
+
+        # XXX change this back to _async_cmd_status instead of cmd_status when we
+        # consolidate and cleanup the container overrides of *cmd_* functions
+
         cmds = cmd
         if "stderr" in kwargs and kwargs["stderr"] != subprocess.STDOUT:
-            _, o, e = await self._async_cmd_status(cmds, **kwargs)
+            _, o, e = await self.async_cmd_status(cmds, **kwargs)
             return o, e
         if "stderr" in kwargs:
             del kwargs["stderr"]
-        _, o, _ = await self._async_cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
+        _, o, _ = await self.async_cmd_status(cmds, stderr=subprocess.STDOUT, **kwargs)
         return o
 
     async def async_cmd_raises(self, cmd, **kwargs):
