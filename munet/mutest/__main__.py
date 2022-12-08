@@ -214,8 +214,8 @@ async def execute_test(
     script = open(f"{test}", "r", encoding="utf-8").read()
 
     # Get test case loggers
-    logger = logging.getLogger(f"mutest.output.{test_name}.output")
-    reslog = logging.getLogger(f"mutest.results.{test_name}.result")
+    logger = logging.getLogger(f"mutest.output.{test_name}")
+    reslog = logging.getLogger(f"mutest.results.{test_name}")
     logger.addHandler(exec_handler)
     reslog.addHandler(exec_handler)
 
@@ -294,7 +294,9 @@ async def run_tests(args):
             rundir = args.rundir.joinpath(test_name)
 
             # Add an test case exec file handler to the root logger and result logger
-            exec_handler = logging.FileHandler(rundir.joinpath("exec.log"), "w")
+            exec_path = rundir.joinpath("mutest-exec.log")
+            exec_path.parent.mkdir(parents=True, exist_ok=True)
+            exec_handler = logging.FileHandler(exec_path, "w")
             exec_handler.setFormatter(exec_formatter)
             root_logger.addHandler(exec_handler)
 

@@ -28,26 +28,26 @@ from pathlib import Path
 class MultiFileHandler(logging.FileHandler):
     """A logging handler that logs to new files based on the logger name.
 
-    The MultiFileHandler operates as a FileHandler with additional
-    functionality. In addition to logging to the specified logging file
-    MultiFileHandler also creates new FileHandlers for child loggers
-    based on a root logging name path.
+    The MultiFileHandler operates as a FileHandler with additional functionality. In
+    addition to logging to the specified logging file MultiFileHandler also creates new
+    FileHandlers for child loggers based on a root logging name path.
 
-    The ``root_path`` determines when to create a new FileHandler. For each
-    received log record, ``root_path`` is removed from the logger name and the
-    resulting path name (if any) determines the log file to also emit the
-    record to. The path of the new logfile is determined by converting "." to
-    "/" and appending ".log" to the final compoenent (the filename) it is
-    opened relative to the directory for the common base filename.
+    The ``root_path`` determines when to create a new FileHandler. For each received log
+    record, ``root_path`` is removed from the logger name of the record if present, and
+    the resulting channel path (if any) determines the directory for a new log file to
+    also emit the record to. The new file path is constructed by starting with the
+    directory ``filename`` resides in, then joining the path determined above after
+    converting "." to "/" and finally by adding back the basename of ``filename``.
 
-    For example: "<rootpath>.server1.output" would become "server1/output.log"
-    and if filename was "/tmp/unet-mutest/output.log" the full path to
-    the new FileHandler would be "/tmp/unet-mutest/server1/output.log"
+      record logger path => mutest.output.testingfoo
+      root_path => mutest.output
+      base filename => /tmp/unet-mutest/mutest-exec.log
+      new logfile => /tmp/unet-mutest/testingfoo/mutest-exec.log
 
     All messages are also emitted to the common FileLogger for ``filename``.
 
-    If a log record is from a logger that does not start with ``root_path``
-    no file is created and the normal emit occurs.
+    If a log record is from a logger that does not start with ``root_path`` no file is
+    created and the normal emit occurs.
 
     Args:
         root_path: the logging path of the root level for this handler.
@@ -57,6 +57,7 @@ class MultiFileHandler(logging.FileHandler):
 
     def __init__(self, root_path, filename=None, **kwargs):
         self.__root_path = root_path
+        self.__basename = Path(filename).name
         if root_path[-1] != ".":
             self.__root_path += "."
         self.__root_pathlen = len(self.__root_path)
@@ -75,8 +76,9 @@ class MultiFileHandler(logging.FileHandler):
             newname = None
         else:
             newname = name[self.__root_pathlen :]
-            newname = newname.replace(".", "/") + ".log"
+            newname = Path(newname.replace(".", "/"))
             newname = self.__log_dir.joinpath(newname)
+            newname = newname.joinpath(self.__basename)
             self.__filenames[name] = newname
 
         self.__filenames[name] = newname
