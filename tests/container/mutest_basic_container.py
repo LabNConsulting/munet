@@ -1,5 +1,5 @@
 """TestCase: basic container functionality"""
-from munet.mutest.userapi import log, match_step, step, wait_step
+from munet.mutest.userapi import match_step, step
 
 # from munet.base import BaseMunet
 # from munet.cli import async_cli
