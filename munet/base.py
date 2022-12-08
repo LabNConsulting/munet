@@ -876,7 +876,6 @@ class Commander:  # pylint: disable=R0904
             with stdout and only stdout is returned.
 
         """
-
         # XXX change this back to _async_cmd_status instead of cmd_status when we
         # consolidate and cleanup the container overrides of *cmd_* functions
 
