@@ -96,9 +96,16 @@ class TestCase:
         number: identity of the test in a run
         name: the name of the test
         targets: dictionary of targets.
+
         steps: total steps executed so far.
         passed: number of passing steps.
         failed: number of failing steps.
+
+        last: the last command output.
+        last_m: the last result of re.search during a matching step on the output with
+            newlines converted to spaces.
+        last_m_nl: the last result of re.search during a matching step based on an
+            unconverted source string (i.e., newlines present).
 
     :meta private:
     """
@@ -126,16 +133,18 @@ class TestCase:
         self.__call_on_fail = None
         assert self.__script_dir.is_dir()
 
+        self.last = ""
+        self.last_m = None
+        self.last_m_nl = None
+        # This is a holdover.
+        self.l_dotall_experiment = True
+
         self.rlog = result_logger
         self.olog = output_logger
         self.logf = functools.partial(self.olog.log, logging.INFO)
         self.steps = 0
         self.passed = 0
         self.failed = 0
-
-        # self.l_last = None
-        # self.l_last_nl = None
-        # self.l_dotall_experiment = True
 
         assert TestCase.g_tc is None
         TestCase.g_tc = self
@@ -227,11 +236,8 @@ class TestCase:
             cmd: string to execut on the target.
         """
         out = self.targets[target].cmd_nostatus(cmd)
-        out = out.rstrip()
-        report = out
-        if not out:
-            report = "<no output>"
-
+        self.last = out = out.rstrip()
+        report = out if out else "<no output>"
         self.logf("COMMAND OUTPUT:\n%s", report)
         return out
 
@@ -247,7 +253,7 @@ class TestCase:
             cmd: string to execut on the target.
         """
         out = self.targets[target].cmd_nostatus(cmd)
-        out = out.rstrip()
+        self.last = out = out.rstrip()
         try:
             js = json.loads(out)
         except Exception as error:
@@ -273,46 +279,44 @@ class TestCase:
             cmd: string to execute on the target.
             match: regex to ``re.search()`` for in output.
             expect_fail: if True then succeed when the regexp doesn't match.
-        """
-        out = self.targets[target].cmd_nostatus(cmd)
-        out = out.rstrip()
-        report = out
-        if not out:
-            report = "<no output>"
-        self.logf("COMMAND OUTPUT:\n%s", report)
 
-        # # Experiment: can we achieve the same match behavior via DOTALL
-        # # without converting newlines to spaces?
-        # out_nl = out
-        # search_nl = re.search(match, out_nl, re.DOTALL)
-        # self.l_last_nl = search_nl
-        # # Set up for comparison
-        # if search_nl is not None:
-        #     group_nl = search_nl.group()
-        #     group_nl_converted = " ".join(group_nl.splitlines())
-        # else:
-        #     group_nl_converted = None
+        Returns:
+            (success, matches): if the match fails then "matches" will be None,
+            otherwise if there were matching groups then groups() will be returned in
+            ``matches`` otherwise group(0) (i.e., the matching text).
+        """
+        out = self._command(target, cmd)
+        # Experiment: can we achieve the same match behavior via DOTALL
+        # without converting newlines to spaces?
+        search_nl = re.search(match, out, re.DOTALL)
+        self.last_m_nl = search_nl
+        # Set up for comparison
+        if search_nl is not None:
+            group_nl_conv = " ".join(search_nl.group(0).splitlines())
+        else:
+            group_nl_conv = None
 
         split_out = " ".join(out.splitlines())
         search = re.search(match, split_out)
+        self.last_m = search
         if search is None:
             success = expect_fail
-            ret = out
+            ret = None
         else:
             success = not expect_fail
             ret = search.groups()
             if not ret:
-                ret = out
+                ret = search.group(0)
 
-            # level = logging.DEBUG if success else logging.WARNING
-            # self.olog.log(level, "found:%s:" % ret)
-            # # Experiment: compare matched strings obtained each way
-            # if self.l_dotall_experiment and (group_nl_converted != ret):
-            #     self.logf(
-            #         "DOTALL experiment: strings differ dotall=[%s] orig=[%s]"
-            #         % (group_nl_converted, ret),
-            #         9,
-            #     )
+            level = logging.DEBUG if success else logging.WARNING
+            self.olog.log(level, "matched:%s:", ret)
+            # Experiment: compare matched strings obtained each way
+            if self.l_dotall_experiment and (group_nl_conv != search.group(0)):
+                logging.warning(
+                    "DOTALL experiment: strings differ dotall=[%s] orig=[%s]",
+                    group_nl_conv,
+                    search.group(0),
+                )
         return success, ret
 
     def _match_command_json(
@@ -652,7 +656,7 @@ def match_step(
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
         The second value will be a list from ``re.Match.groups()`` if non-empty,
-        otherwise ``str`` output of the ``cmd``.
+        otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
     return TestCase.g_tc.match_step(target, cmd, match, desc, expect_fail)
 
@@ -719,7 +723,7 @@ def wait_step(
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
         The second value will be a list from ``re.Match.groups()`` if non-empty,
-        otherwise ``str`` output of the ``cmd``.
+        otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
     return TestCase.g_tc.wait_step(
         target, cmd, match, desc, timeout, interval, expect_fail
@@ -780,6 +784,11 @@ def luInclude(filename, CallOnFail=None):
     return include(filename, CallOnFail)
 
 
+def luLast(usenl=False):
+    """Backward compatible API, do not use in new tests."""
+    return TestCase.g_tc.last_m_nl if usenl else TestCase.g_tc.last_m
+
+
 def luCommand(
     target,
     cmd,
@@ -790,11 +799,25 @@ def luCommand(
     returnJson=False,
     wait_time=0.5,
 ):
-    """Backward compatible API, do not use in new tests."""
+    """Backward compatible API, do not use in new tests.
+
+    Only non-json is verified to any degree of confidence by code inspection.
+
+    For non-json should return match.group() if match else return bool(op == "fail").
+
+    For json if no diff return the json else diff return bool(op == "jsoncmp_fail")
+     bug if no json from output (fail parse) could maybe generate diff, which could
+     then return
+    """
     if op == "wait":
         if returnJson:
             return wait_step_json(target, cmd, regexp, result, ltime, wait_time)
-        return wait_step(target, cmd, regexp, result, ltime, wait_time)
+
+        success, _ = wait_step(target, cmd, regexp, result, ltime, wait_time)
+        match = luLast()
+        if success and match is not None:
+            return match.group()
+        return success
 
     if op == "none":
         if returnJson:
@@ -808,7 +831,11 @@ def luCommand(
     assert not returnJson
     assert op in ("fail", "pass")
     expect_fail = op == "fail"
-    return match_step(target, cmd, regexp, result, expect_fail)
+    success, _ = match_step(target, cmd, regexp, result, expect_fail)
+    match = luLast()
+    if success and match is not None:
+        return match.group()
+    return success
 
 
 # for testing
