@@ -130,10 +130,12 @@ class TestCase:
         # self.l_last_nl = None
         # self.l_dotall_experiment = True
 
+        assert TestCase.g_tc is None
         TestCase.g_tc = self
 
     def __del__(self):
         if TestCase.g_tc is self:
+            logging.error("Internal error, TestCase.end_test() was not called!")
             TestCase.g_tc = None
 
     def __push_filename(self, filename):
@@ -183,6 +185,11 @@ class TestCase:
         # self.rlog.close()
         self.olog = None
         self.rlog = None
+
+        assert (
+            TestCase.g_tc == self
+        ), "TestCase global unexpectedly someon else in end_test"
+        TestCase.g_tc = None
 
     def _command(
         self,
