@@ -85,13 +85,16 @@ class TestCase:
     user API.
 
     Args:
+        number: identity of the test in a run.
+        name: the name of the test case
+        path: the test file that is being executed.
         targets: a dictionary of objects which implement ``cmd_nostatus(str)``
-        script_dir: the directory from which include statements should be based.
         output_logger: a logger for output and other messages from the test.
         result_logger: a logger to output the results of test steps to.
-        level: the logging level for most messages sent to the ``output_logger``.
 
     Attributes:
+        number: identity of the test in a run
+        name: the name of the test
         targets: dictionary of targets.
         steps: total steps executed so far.
         passed: number of passing steps.
@@ -100,28 +103,32 @@ class TestCase:
     :meta private:
     """
 
-    sum_hfmt = "{:4.4s} {:>6.6s} {:4.4s} {}"
-    sum_dfmt = "{:4d} {:^6.6s} {:4.4s} {}"
+    # sum_hfmt = "{:5.5s} {:4.4s} {:>6.6s} {}"
+    # sum_dfmt = "{:5s} {:4.4s} {:^6.6s} {}"
+    sum_fmt = "%6.6s %4.4s %{}s %6s  %s"
 
     def __init__(
         self,
+        number: int,
+        name: str,
+        path: Path,
         targets: dict,
-        script_dir: Union[str, Path] = ".",
         output_logger: logging.Logger = None,
         result_logger: logging.Logger = None,
-        level: int = logging.INFO,
     ):
 
+        self.number = number
+        self.name = name
         self.targets = targets
-        self.__script_dir = Path(script_dir)
-        self.__filename = ""
+        self.__filename = path.absolute()
+        self.__script_dir = self.__filename.parent
         self.__old_filenames = []
         self.__call_on_fail = None
         assert self.__script_dir.is_dir()
 
         self.rlog = result_logger
         self.olog = output_logger
-        self.logf = functools.partial(self.olog.log, level)
+        self.logf = functools.partial(self.olog.log, logging.INFO)
         self.steps = 0
         self.passed = 0
         self.failed = 0
@@ -133,53 +140,68 @@ class TestCase:
         assert TestCase.g_tc is None
         TestCase.g_tc = self
 
+        # find the longerst target name and make target field that wide
+        nmax = max(len(x) for x in targets)
+        nmax = max(nmax, len("TARGET"))
+
+        self.sum_fmt = TestCase.sum_fmt.format(nmax)
+        self.rlog.info(self.sum_fmt, "NUMBER", "STAT", "TARGET", "TIME", "DESCRIPTION")
+        self.rlog.info("-" * 70)
+
+        # start counting time for first step
+        self.start_time = time.time()
+
     def __del__(self):
         if TestCase.g_tc is self:
             logging.error("Internal error, TestCase.end_test() was not called!")
             TestCase.g_tc = None
 
     def __push_filename(self, filename):
-        fstr = "EXEC FILE: " + filename
+        fstr = "include: " + str(filename)
         self.logf(fstr)
-        self.rlog.info(fstr)
         self.__old_filenames.append(self.__filename)
         self.__filename = filename
 
     def __pop_filename(self):
         self.__filename = self.__old_filenames.pop()
-        fstr = "RETURN TO FILE: " + self.__filename
+        fstr = "return: " + str(self.__filename)
         self.logf(fstr)
-        self.rlog.info(fstr)
 
     def post_result(self, target, success, rstr, logstr=None):
         if success:
             self.passed += 1
-            sstr = "PASS"
+            status = "PASS"
             outlf = self.logf
             reslf = self.rlog.info
         else:
             self.failed += 1
-            sstr = "FAIL"
-            outlf = self.olog.error
-            reslf = self.rlog.error
+            status = "FAIL"
+            outlf = self.olog.warning
+            reslf = self.rlog.warning
 
         self.steps += 1
         if logstr is not None:
-            outlf("R:%d %s: %s" % (self.steps, sstr, logstr))
-        res = self.sum_dfmt.format(self.steps, target, sstr, rstr)
-        reslf(res)
+            outlf("R:%d %s: %s" % (self.steps, status, logstr))
+
+        run_time = time.time() - self.start_time
+
+        stepstr = f"{self.number}.{self.steps}"
+        rtimes = _delta_time_str(run_time)
+        reslf(self.sum_fmt, stepstr, status, target, rtimes, rstr)
         if not success and self.__call_on_fail:
             self.__call_on_fail()
 
-    def end_test(self):
-        """End the test log final results."""
-        self.rlog.info("-" * 70)
-        self.rlog.info(
-            "END TEST: Total steps: %d Passed: %d Failed: %d",
-            self.steps,
-            self.passed,
-            self.failed,
-        )
+        # start counting for next step now
+        self.start_time = time.time()
+
+    def end_test(self) -> (int, int):
+        """End the test log final results.
+
+        Returns:
+            number of steps, number passed, number failed, run time.
+        """
+        passed, failed = self.passed, self.failed
+
         # No close for loggers
         # self.olog.close()
         # self.rlog.close()
@@ -190,6 +212,8 @@ class TestCase:
             TestCase.g_tc == self
         ), "TestCase global unexpectedly someon else in end_test"
         TestCase.g_tc = None
+
+        return passed, failed
 
     def _command(
         self,
@@ -351,8 +375,7 @@ class TestCase:
             if not success:
                 time.sleep(interval)
 
-        delta = time.time() - startt
-        self.post_result(target, success, "%s +%4.2f secs" % (desc, delta))
+        self.post_result(target, success, desc)
         return found, ret
 
     # ---------------------
@@ -369,7 +392,6 @@ class TestCase:
         if call_on_fail is not None:
             old_call_on_fail, self.__call_on_fail = self.__call_on_fail, call_on_fail
 
-        self.logf("include: %s", test_file)
         try:
             script = open(test_file, "r", encoding="utf-8").read()
 
@@ -397,7 +419,8 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%s:%s:STEP:%s:%s",
+            "#%d.%d:%s:STEP:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -411,7 +434,8 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%s:%s:STEP_JSON:%s:%s",
+            "#%d.%d:%s:STEP_JSON:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -432,7 +456,8 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%s:%s:MATCH_STEP:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:MATCH_STEP:%s:%s:%s:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -458,7 +483,8 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -488,7 +514,8 @@ class TestCase:
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
-            "#%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -520,7 +547,8 @@ class TestCase:
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
-            "#%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            self.number,
             self.steps + 1,
             self.__filename,
             target,
@@ -540,6 +568,18 @@ class TestCase:
 TestCase.g_tc = None
 
 # pylint: disable=protected-access
+
+
+def _delta_time_str(run_time: float) -> str:
+    if run_time < 0.001:
+        return f"{run_time:1.4f}"
+    if run_time < 0.01:
+        return f"{run_time:2.3f}"
+    if run_time < 0.1:
+        return f"{run_time:3.2f}"
+    if run_time < 1000:
+        return f"{run_time:4.1f}"
+    return f"{run_time:5f}s"
 
 
 def log(fmt, *args, **kwargs):

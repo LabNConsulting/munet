@@ -15,17 +15,18 @@ handlers:
     class: logging.FileHandler
     formatter: precise
     level: DEBUG
-    filename: exec.log
+    filename: munet-exec.log
     mode: w
 
 root:
   level: DEBUG
   handlers: [ "console", "file" ]
 
-loggers:
-  main:
-    level: DEBUG
-    propagate: true
-  munet.base:
-    level: DEBUG
-    propagate: true
+# these are some loggers that get used.
+# loggers:
+#   munet:
+#     level: DEBUG
+#     propagate: true
+#   munet.base.commander
+#     level: DEBUG
+#      propagate: true

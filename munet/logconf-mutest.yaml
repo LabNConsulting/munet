@@ -2,12 +2,13 @@ version: 1
 formatters:
   brief:
     format: '%(levelname)5s: %(message)s'
-  precise:
+  exec:
     format: '%(asctime)s %(levelname)5s: %(name)s: %(message)s'
   output:
     format: '%(asctime)s %(levelname)5s: OUTPUT: %(message)s'
   results:
-    format: '%(asctime)s %(levelname)5s: %(message)s'
+    # format: '%(asctime)s %(levelname)5s: %(message)s'
+    format: '%(message)s'
 
 handlers:
   console:
@@ -15,7 +16,7 @@ handlers:
     class: logging.StreamHandler
     formatter: brief
     stream: ext://sys.stderr
-  result_console:
+  info_console:
     level: INFO
     class: logging.StreamHandler
     formatter: brief
@@ -23,7 +24,7 @@ handlers:
   exec:
     level: DEBUG
     class: logging.FileHandler
-    formatter: precise
+    formatter: exec
     filename: mutest-exec.log
     mode: w
   output:
@@ -46,20 +47,23 @@ root:
   handlers: [ "console", "exec" ]
 
 loggers:
-  main:
-    level: DEBUG
-    propagate: true
-  munet.base:
-    level: DEBUG
-    propagate: true
-  munet.native:
-    level: DEBUG
-    propagate: true
+  # These are some loggers that get used...
+  # munet:
+  #   level: DEBUG
+  #   propagate: true
+  # munet.base.commander
+  #   level: DEBUG
+  #   propagate: true
+  # mutest.error:
+  #   level: DEBUG
+  #   propagate: true
   mutest.output:
     level: DEBUG
-    handlers: ["output"]
-    propagate: no
+    handlers: ["output", "exec"]
+    propagate: false
   mutest.results:
     level: DEBUG
-    handlers: [ "result_console", "exec", "output", "results" ]
-    propagate: no
+    handlers: [ "info_console", "exec", "output", "results" ]
+    # We don't propagate this b/c we want a lower level accept on the console
+    # Instead we use info_console and exec to cover what root would log to.
+    propagate: false

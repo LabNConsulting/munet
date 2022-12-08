@@ -139,6 +139,8 @@ def setup_logging(args, config_base="logconf"):
 
         logging.config.dictConfig(dict(config))
         logging.info("Loaded logging config %s", pathname)
+
+        return config
     finally:
         os.chdir(old)
 

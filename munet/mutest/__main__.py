@@ -24,6 +24,8 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
+import time
 
 from argparse import ArgumentParser
 from argparse import Namespace
@@ -40,7 +42,13 @@ from munet.parser import async_build_topology
 from munet.parser import get_config
 
 
-async def get_unet(config: dict, rundir: Union[str, Path], unshare: bool = True):
+# We want all but critical to fit in 5 characters for alignment
+logging.addLevelName(logging.WARNING, "WARN")
+root_logger = logging.getLogger("")
+exec_formatter = logging.Formatter("%(asctime)s %(levelname)5s: %(name)s: %(message)s")
+
+
+async def get_unet(config: dict, rundir: Path, unshare: bool = True):
     """Create and run a new Munet topology.
 
     The topology is built from the given ``config`` to run inside the path indicated
@@ -57,7 +65,9 @@ async def get_unet(config: dict, rundir: Union[str, Path], unshare: bool = True)
         Munet: The constructed and running topology.
     """
     try:
-        unet = await async_build_topology(config, rundir=rundir, unshare_inline=unshare)
+        unet = await async_build_topology(
+            config, rundir=str(rundir), unshare_inline=unshare
+        )
     except Exception as error:
         logging.debug("unet build failed: %s", error, exc_info=True)
         raise
@@ -135,7 +145,7 @@ async def collect(args: Namespace):
         on its containing directory path. The directory paths are relative to a
         common ancestor.
     """
-    file_select = "mutest_*.py"
+    file_select = args.file_select
     upaths = args.paths if args.paths else ["."]
     globpaths = set()
     for upath in (Path(x) for x in upaths):
@@ -181,7 +191,13 @@ async def collect(args: Namespace):
     return common, tests, configs
 
 
-async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
+async def execute_test(
+    unet: Munet,
+    test: Path,
+    args: Namespace,
+    test_num: int,
+    exec_handler: logging.Handler,
+) -> (int, int, int, Exception):
     """Execute a test case script.
 
     Using the built and running topology in ``unet`` for targets
@@ -189,29 +205,26 @@ async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
 
     Args:
         unet: a running topology.
-        test: path to the test case script file
-        args: argparse results
+        test: path to the test case script file.
+        args: argparse results.
+        test_num: the number of this test case in the run.
+        exec_handler: exec file handler to add to test loggers which do not propagate.
     """
     test_name = testname_from_path(test)
     script = open(f"{test}", "r", encoding="utf-8").read()
 
+    # Get test case loggers
     logger = logging.getLogger(f"mutest.output.{test_name}.output")
     reslog = logging.getLogger(f"mutest.results.{test_name}.result")
+    logger.addHandler(exec_handler)
+    reslog.addHandler(exec_handler)
 
-    reslog.info("=" * 70)
-    reslog.info("EXEC: %s", test_name)
-    reslog.info("-" * 70)
-
-    if args.verbose >= 2:
-        level = logging.DEBUG
-    elif args.verbose == 1:
-        level = logging.INFO
-    else:
-        level = logging.WARNING
+    # reslog.info("-" * 70)
+    reslog.info("START: %s:%s from %s", test_num, test_name, test.stem)
 
     targets = dict(unet.hosts.items())
     targets["."] = unet
-    tc = uapi.TestCase(targets, unet.config_dirname, logger, reslog, level)
+    tc = uapi.TestCase(test_num, test_name, test, targets, logger, reslog)
 
     # pylint: disable=possibly-unused-variable,exec-used
     step = tc.step
@@ -222,17 +235,35 @@ async def execute_test(unet: Munet, test: Union[str, Path], args: Namespace):
     wait_step_json = tc.wait_step_json
     include = tc.include
 
+    start_time = time.time()
+    e = None
     try:
         s2 = f"async def _{test_name}():\n " + script.replace("\n", "\n ") + "\n"
         exec(s2)
         await locals()[f"_{test_name}"]()
     except Exception as error:
         logging.error("Unexpected exception during test %s: %s", test_name, error)
+        e = error
     finally:
-        tc.end_test()
+        passed, failed = tc.end_test()
+
+    run_time = time.time() - start_time
+    status = "PASS" if not failed else "FAIL"
+    reslog.info(
+        "stats: %s:%s:  %d pass, %d fail, %4.2fs elapsed",
+        test_num,
+        test_name,
+        passed,
+        failed,
+        run_time,
+    )
+    reslog.info("-" * 70)
+    reslog.info("END: %s %s:%s\n", status, test_num, test_name)
+
+    return passed, failed, e
 
 
-def testname_from_path(path: Union[str, Path]) -> str:
+def testname_from_path(path: Path) -> str:
     """Return test name based on the path to the test file.
 
     Args:
@@ -244,21 +275,98 @@ def testname_from_path(path: Union[str, Path]) -> str:
     return str(Path(path).stem).replace("/", ".")
 
 
-async def async_main(args):
+async def run_tests(args):
+    reslog = logging.getLogger("mutest.results")
+    sheader = "=== RUN START "
+    reslog.info(sheader + sheader[0] * (70 - len(sheader)) + "\n")
+
     _, tests, configs = await collect(args)
+    results = []
+    errlog = logging.getLogger("mutest.error")
+    tnum = 0
+    start_time = time.time()
     for dirpath in tests:
         test_files = tests[dirpath]
         for test in test_files:
+            tnum += 1
             config = deepcopy(configs[dirpath])
             test_name = testname_from_path(test)
-            rundir = os.path.join("/tmp/unet-mutest", test_name)
-            async for unet in get_unet(config, rundir):
-                try:
-                    await execute_test(unet, test, args)
-                except Exception as error:
-                    logging.error(
-                        "Unexpected exception in execute_test: %s", error, exc_info=True
+            rundir = args.rundir.joinpath(test_name)
+
+            # Add an test case exec file handler to the root logger and result logger
+            exec_handler = logging.FileHandler(rundir.joinpath("exec.log"), "w")
+            exec_handler.setFormatter(exec_formatter)
+            root_logger.addHandler(exec_handler)
+
+            try:
+                async for unet in get_unet(config, rundir):
+                    passed, failed, e = await execute_test(
+                        unet, test, args, tnum, exec_handler
                     )
+            except Exception as error:
+                errlog.error("Error executing test %s: %s", test, error, exc_info=True)
+                passed, failed, e = 0, 0, error
+
+            # Remove the test case exec file handler form the root logger.
+            root_logger.removeHandler(exec_handler)
+
+            results.append((test_name, passed, failed, e))
+    run_time = time.time() - start_time
+
+    sheader = "--- RUN SUMMARY "
+    reslog.info(sheader + sheader[0] * (70 - len(sheader)))
+
+    tnum = 0
+    tpassed = 0
+    tfailed = 0
+    texc = 0
+
+    snum = 0
+    spassed = 0
+    sfailed = 0
+    for result in results:
+        test_name, passed, failed, e = result
+        tnum += 1
+        spassed += passed
+        sfailed += failed
+        if e:
+            texc += 1
+        if failed or e:
+            s = "FAIL"
+            tfailed += 1
+        else:
+            s = "PASS"
+            tpassed += 1
+
+        reslog.info(" %s  %s:%s", s, tnum, test_name)
+
+    reslog.info(
+        "run stats: %s steps, %s pass, %s fail, %s abort, %4.2fs elapsed",
+        spassed + sfailed,
+        spassed,
+        sfailed,
+        texc,
+        run_time,
+    )
+    reslog.info("-" * 70)
+    reslog.info("END RUN: %s tests, %s pass, %s fail", tnum, tpassed, tfailed)
+
+    return 1 if tfailed else 0
+
+
+async def async_main(args):
+    status = 3
+    try:
+        # For some reson we are not catching exceptions raised inside
+        status = await run_tests(args)
+    except KeyboardInterrupt:
+        logging.info("Exiting (async_main), received KeyboardInterrupt in main")
+    except Exception as error:
+        logging.info(
+            "Exiting (async_main), unexpected exception %s", error, exc_info=True
+        )
+    logging.debug("async_main returns %s", status)
+    return status
 
 
 def main():
@@ -274,6 +382,9 @@ def main():
         help="Run in parallel, value is num. of threads or no value for auto",
     )
     ap.add_argument("-d", "--rundir", help="runtime directory for tempfiles, logs, etc")
+    ap.add_argument(
+        "--file-select", default="mutest_*.py", help="shell glob for finding tests"
+    )
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
     ap.add_argument(
         "-v", dest="verbose", action="count", default=0, help="More -v's, more verbose"
@@ -282,20 +393,27 @@ def main():
     args = ap.parse_args()
 
     rundir = args.rundir if args.rundir else "/tmp/unet-mutest"
-    args.rundir = rundir
+    args.rundir = Path(rundir)
     os.environ["MUNET_RUNDIR"] = rundir
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
-    parser.setup_logging(args, config_base="logconf-mutest")
+
+    config = parser.setup_logging(args, config_base="logconf-mutest")
+    # Grab the exec formatter from the logging config
+    if fconfig := config.get("formatters", {}).get("exec"):
+        global exec_formatter  # pylint: disable=W291
+        exec_formatter = logging.Formatter(
+            fconfig.get("format"), fconfig.get("datefmt")
+        )
 
     status = 4
     try:
         status = asyncio.run(async_main(args))
     except KeyboardInterrupt:
-        logging.info("Exiting, received KeyboardInterrupt in main")
+        logging.info("Exiting (main), received KeyboardInterrupt in main")
     except Exception as error:
-        logging.info("Exiting, unexpected exception %s", error, exc_info=True)
+        logging.info("Exiting (main), unexpected exception %s", error, exc_info=True)
 
-    return status
+    sys.exit(status)
 
 
 if __name__ == "__main__":

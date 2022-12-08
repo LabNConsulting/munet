@@ -180,7 +180,7 @@ def main(*args):
     parser.setup_logging(args)
 
     global logger  # pylint: disable=W0603
-    logger = logging.getLogger("main")
+    logger = logging.getLogger("munet")
 
     config = parser.get_config(args.config)
     logger.info("Loaded config from %s", config["config_pathname"])

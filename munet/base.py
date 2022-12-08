@@ -1503,7 +1503,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                start_new_session=True,  # detach from pgid so signals don't propogate
+                start_new_session=True,  # detach from pgid so signals don't propagate
                 shell=False,
             )
             self.pid = p.pid
