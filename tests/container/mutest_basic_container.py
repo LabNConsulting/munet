@@ -27,6 +27,6 @@ match_step("r2", "cat /mytmp/foobar.txt", "foobar", "verify tmpfs mount works")
 
 step("r2", "echo foobar > /mybind/foobar.txt")
 match_step(".",
-           "cat /tmp/unet-mutest/mutest_basic_container/r2/mybind/foobar.txt",
+           "cat /tmp/mutest/mutest_basic_container/r2/mybind/foobar.txt",
            "foobar",
            "verify bind mount works")

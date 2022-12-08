@@ -41,8 +41,8 @@ class MultiFileHandler(logging.FileHandler):
 
       record logger path => mutest.output.testingfoo
       root_path => mutest.output
-      base filename => /tmp/unet-mutest/mutest-exec.log
-      new logfile => /tmp/unet-mutest/testingfoo/mutest-exec.log
+      base filename => /tmp/mutest/mutest-exec.log
+      new logfile => /tmp/mutest/testingfoo/mutest-exec.log
 
     All messages are also emitted to the common FileLogger for ``filename``.
 

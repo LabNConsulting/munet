@@ -394,7 +394,7 @@ def main():
     ap.add_argument("paths", nargs="*", help="Paths to collect tests from")
     args = ap.parse_args()
 
-    rundir = args.rundir if args.rundir else "/tmp/unet-mutest"
+    rundir = args.rundir if args.rundir else "/tmp/mutest"
     args.rundir = Path(rundir)
     os.environ["MUNET_RUNDIR"] = rundir
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
