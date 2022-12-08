@@ -17,32 +17,38 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 """Mutest is a simple send/expect based testing framework.
 
-This module implements the basic send/expect functionality for mutest. The test
-developer writes test case scripts which are composed of calls to the functions defined
-below. In short these are:
+This module implements the basic send/expect functionality for mutest.  The test
+developer first creates a munet topology (:ref:`munet-config`) and then writes test
+scripts ("test cases") which are composed of calls to the functions defined below
+("steps").  In short these are:
 
 Send/Expect functions:
 
- - :py:func:`step`
- - :py:func:`step_json`
- - :py:func:`match_step`
- - :py:func:`match_step_json`
- - :py:func:`wait_step`
- - :py:func:`wait_step_json`
+    - :py:func:`step`
+
+    - :py:func:`step_json`
+
+    - :py:func:`match_step`
+
+    - :py:func:`match_step_json`
+
+    - :py:func:`wait_step`
+
+    - :py:func:`wait_step_json`
 
 Control/Utility functions:
 
- - :py:func:`include`
- - :py:func:`log`
+    - :py:func:`include`
 
-Test case scripts are located by the :command:`mutest` command by their name.
-The name of a test case script should take the form ``mutest_TESTNAME.py`` where
-``TESTNAME`` is replaced with a user chosen name for the test case.
+    - :py:func:`log`
 
-Here's a simple example test case script which first checks that a specific forwarding
-entry is in the FIB for the IP destination ``10.0.1.1``. Then it checks repeatedly for
-up to 10 seconds for a second forwarding entry in the FIB for the IP destination
-``10.0.2.1``.
+Test scripts are located by the :command:`mutest` command by their name.  The name of a
+test script should take the form ``mutest_TESTNAME.py`` where ``TESTNAME`` is replaced
+with a user chosen name for the test case.
+
+Here's a simple example test script which first checks that a specific forwarding entry
+is in the FIB for the IP destination ``10.0.1.1``.  Then it checks repeatedly for up to
+10 seconds for a second forwarding entry in the FIB for the IP destination ``10.0.2.1``.
 
 .. code-block:: python
 
