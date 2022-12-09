@@ -22,7 +22,7 @@
 Mutest (μtest)
 ==============
 
-~mutest~ is a simplified testing framework designed for use by test developers
+Mutest is a simplified testing framework designed for use by test developers
 of any skill level. The test developer writes test cases, one per file, which
 are made up of steps. Normally, these steps are commands to send (perhaps
 repeatedly) to a target and a matching regular expression for the command output
@@ -46,12 +46,44 @@ topology with the given configuration file and execute each test on the
 resulting topology. The munet topology is launched at the start and brought down
 at the end of each test script.
 
+Log Files
+---------
+
+A run of mutest generates 3 log files, ``mutest-exec.log``,
+``mutest-output.log`` and ``mutest-results.log``. They are created in the root
+of the mutest run directory which by default is ``/tmp/mutest``. These same 3
+log files are also generated per test case (script) within the test case
+directories which are named after the tests and also reside in ``/tmp/mutest``.
+
+The log files have the following content:
+
+``mutest-exec.log``
+    Contains all logging for the execution of mutest and munet (i.e., from
+    the root logger), as well as the logging from the other 2 log files.
+
+``mutest-output.log``
+    Contains the all the test commands and their output.
+
+``mutest-results.log``
+    Contains the results in an easy to read format, for each test
+    step, test case and finally the entire run.
+
+For the advanced user this logging can be customized with python logging
+configuration. The logging channels are the root logger for
+``mutest-exec.log``, ``mutest.output`` and it's sub-loggers for
+``mutest-output.log``, and ``mutest.results`` and it's sub-loggers for
+``mutest-results.log``.
+
+
 Writing Mutest Tests
 --------------------
 
 .. currentmodule:: munet.mutest.userapi
 
-Probably the most common step that is specified is a call to :py:func:`match_step`
+As described earlier, a test script is a collection of steps. Each step is a
+call to a mutest API function. One common step is a call to
+:py:func:`match_step`. This step sends a command to a target and applies a
+regular expression search on the output. If a match is found the step succeeds.
 
 Here is a simple example test case:
 
