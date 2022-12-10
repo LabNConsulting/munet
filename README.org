@@ -25,8 +25,9 @@ of this document. Below is an tree diagram of the overal format of a config file
 
 #+NAME: Munet standalone config YANG tree diagram
 #+CALL: generate-tree(module=labn-munet-config)
+# Remove the #+RESULTS: before pushing to git, github is broken and
+# won't render it
 
-#+RESULTS: Munet standalone config YANG tree diagram
 #+begin_example
 module: labn-munet-config
   +--rw cli
@@ -886,7 +887,7 @@ munet>
 
 #+NAME: generate-tree
 #+HEADER: :var dep1=dep-babel
-#+begin_src shell :results output verbatim replace :wrap example :exports results
+#+begin_src shell :results output verbatim replace :wrap "src tree" :exports both
   [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc" #
   $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
 #+end_src
