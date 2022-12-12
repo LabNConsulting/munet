@@ -1624,20 +1624,50 @@ class L3QemuVM(L3Node):
         self.logger.info("Renumbering interfaces")
         con = self.conrepl
         con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
-        for ifname in sorted(self.intf_addrs):
-            ifaddr = self.intf_addrs[ifname]
-            conn = find_with_kv(self.config.get("connections"), "name", ifname)
-            mtu = conn.get("mtu")
-            if not mtu and conn["to"] in self.unet.switches:
-                mtu = self.unet.switches[conn["to"]].config.get("mtu")
-            if mtu:
-                con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
-            con.cmd_raises(f"ip link set {ifname} up")
-            con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
+        try:
+            for ifname in sorted(self.intf_addrs):
+                ifaddr = self.intf_addrs[ifname]
+                conn = find_with_kv(self.config.get("connections"), "name", ifname)
+                mtu = conn.get("mtu")
+                if not mtu and conn["to"] in self.unet.switches:
+                    mtu = self.unet.switches[conn["to"]].config.get("mtu")
+                if mtu:
+                    con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
+                con.cmd_raises(f"ip link set {ifname} up")
+                con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
 
-            # # XXX
-            # if hasattr(switch, "is_nat") and switch.is_nat:
-            #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+                # tcp-segmentation-offload
+
+                # This is very specific to TFS.
+                output = con.cmd_raises(
+                    f"ethtool -k {ifname} | egrep 'gro|gso|generic|segment'"
+                )
+                self.logger.info("BEFORE: %s ethernet features: %s", ifname, output)
+
+                for opt in [
+                    # These are both required on my machine to get rid of GSO
+                    "generic-receive-offload",
+                    "rx-gro-hw",
+                    # These are not required to get rid of GSO in iptfs path
+                    # "generic-segmentation-offload",
+                    # "tcp-segmentation-offload",
+                    # "tx-gso-partial",
+                ]:
+                    output = con.cmd_status(f"ethtool -K {ifname} {opt} off")
+
+                output = con.cmd_raises(
+                    f"ethtool -k {ifname} | egrep 'gro|gso|generic|segment'"
+                )
+                self.logger.info("AFTER: %s ethernet features: %s", ifname, output)
+
+                # # XXX
+                # if hasattr(switch, "is_nat") and switch.is_nat:
+                #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+        except Exception as error:
+            logging.critical(
+                "Something wrong with renumber/ethtool: %s", error, exc_info=True
+            )
+            raise
         con.cmd_raises("ip link set lo up")
 
     async def _opencons(
