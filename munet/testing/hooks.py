@@ -46,6 +46,18 @@ def pytest_addoption(parser):
         action="store_true",
         help="CLI on test failure",
     )
+
+    parser.addoption(
+        "--gdb",
+        metavar="HOST[,HOST...]",
+        help="Comma-separated list of nodes to launch gdb on, or 'all'",
+    )
+    parser.addoption(
+        "--gdb-breakpoints",
+        metavar="BREAKPOINT[,BREAKPOINT...]",
+        help="Comma-separated list of breakpoints",
+    )
+
     parser.addoption(
         "--pcap",
         metavar="NET[,NET...]",

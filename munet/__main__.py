@@ -107,6 +107,8 @@ def main(*args):
     ap.add_argument(
         "-k", "--kinds-config", help="kinds config file (yaml, toml, json, ...)"
     )
+    ap.add_argument("--gdb", help="comma-sep list of hosts to run gdb on")
+    ap.add_argument("--gdb-breakpoints", help="comma-sep list of breakpoints to set")
     ap.add_argument(
         "--host",
         action="store_true",

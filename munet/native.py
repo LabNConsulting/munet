@@ -256,7 +256,7 @@ ff02::2\tip6-allrouters
                 )
         self.bind_mount(hosts_file, "/etc/hosts")
 
-        if not self.is_container:
+        if not self.is_container and not self.is_vm:
             self.pytest_hook_open_shell()
 
     async def console(
@@ -561,6 +561,20 @@ ff02::2\tip6-allrouters
     def pytest_hook_open_shell(self):
         if not self.unet or not self.unet.pytest_config:
             return
+
+        gdbcmd = self.config.get("gdb-cmd")
+        shellopt = self.unet.pytest_config.getoption("--gdb", "")
+        if gdbcmd and (shellopt == "all" or self.name in shellopt.split(",")):
+            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
+            for bp in bps:
+                gdbcmd += f" '-ex=b {bp}'"
+
+            runcmds = self.config.get("gdb-run-cmd", [])
+            for runcmd in runcmds:
+                gdbcmd += f" '-ex={runcmd}'"
+
+            self.run_in_window(gdbcmd)
+
         shellopt = self.unet.pytest_config.getoption("--shell")
         shellopt = shellopt if shellopt is not None else ""
         if shellopt == "all" or self.name in shellopt.split(","):
@@ -2096,7 +2110,9 @@ class Munet(BaseMunet):
             if kind := conf.get("kind"):
                 if kconf := kinds[kind]:
                     conf = merge_kind_config(kconf, conf)
-            conf = config_subst(conf, name=name, rundir=self.rundir)
+            conf = config_subst(
+                conf, name=name, rundir=self.rundir, configdir=self.config_dirname
+            )
             if "ip" not in conf and autonumber:
                 conf["ip"] = "auto"
             topoconf["networks"][name] = conf
@@ -2111,7 +2127,12 @@ class Munet(BaseMunet):
                 if kconf := kinds[kind]:
                     conf = merge_kind_config(kconf, conf)
 
-            conf = config_subst(conf, name=name, rundir=os.path.join(self.rundir, name))
+            conf = config_subst(
+                conf,
+                name=name,
+                rundir=os.path.join(self.rundir, name),
+                configdir=self.config_dirname,
+            )
             topoconf["nodes"][name] = conf
             self.add_l3_node(name, conf, logger=logger)
 
