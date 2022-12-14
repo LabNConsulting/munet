@@ -89,6 +89,8 @@ module: labn-munet-config
   |  +--rw env* [name]
   |  |  +--rw name     string
   |  |  +--rw value?   string
+  |  +--rw gdb-cmd?       string
+  |  +--rw gdb-run-cmd*   string
   |  +--rw init?          union
   |  +--rw mounts* [destination]
   |  |  +--rw destination    string
@@ -155,6 +157,8 @@ module: labn-munet-config
   |     +--rw env* [name]
   |     |  +--rw name     string
   |     |  +--rw value?   string
+  |     +--rw gdb-cmd?       string
+  |     +--rw gdb-run-cmd*   string
   |     +--rw init?          union
   |     +--rw mounts* [destination]
   |     |  +--rw destination    string
@@ -171,7 +175,32 @@ module: labn-munet-config
 #+end_example
 
 ** Examples
+*** Two Hosts Topology
+
+A very simple config with 2 hosts connected to a mgmt network.
+
+In this config the networks are autonumbered which starts with
+~10.0.0.0/24~. So, ~h1~ will have an ~eth0~ interface with IP
+~10.0.0.1~ and ~h2~ will likewise have an ~eth0~ interface, and an IP
+of ~10.0.0.2~.
+
+#+begin_src yaml
+  topology:
+  networks-autonumber: true
+  networks:
+    - name: net0
+  nodes:
+    - name: h1
+      connections: ["net0"]
+    - name: h2
+      connections: ["net0"]
+#+end_src
+
 *** Router VM
+
+NOTE: This example is testing the boundaries of what munet can do
+with a node. Its really here to document how to do this very complex
+thing. Beginners should probably skip it.
 
 Router VMs are very different from standard unix-like OSs. Munet does a lot of
 automatic configuration assuming a unix-like (and mostly Linux) OS. Various
@@ -646,6 +675,15 @@ munet>
           type string;
           description "Environment variable value.";
         }
+      }
+      leaf gdb-cmd {
+        type string;
+        description "Command to execute when --gdb option specified" ;
+      }
+      leaf-list gdb-run-cmd {
+        type string;
+        description
+          "GDB commands to send to gdb (e.g., to start the process running)" ;
       }
       leaf init {
         type union {

@@ -250,6 +250,15 @@
               }
             }
           },
+          "gdb-cmd": {
+            "type": "string"
+          },
+          "gdb-run-cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "init": {
             "oneOf": [
               {
@@ -532,6 +541,15 @@
                       "type": "string"
                     }
                   }
+                }
+              },
+              "gdb-cmd": {
+                "type": "string"
+              },
+              "gdb-run-cmd": {
+                "type": "array",
+                "items": {
+                  "type": "string"
                 }
               },
               "init": {
