@@ -887,7 +887,7 @@ munet>
 
 #+NAME: generate-tree
 #+HEADER: :var dep1=dep-babel
-#+begin_src shell :results output verbatim replace :wrap "src tree" :exports both
+#+begin_src shell :results output verbatim replace :wrap example :exports results
   [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc" #
   $DOCKER pyang --tree-line-length=69 -f tree ${module} 2> err.out;
 #+end_src
