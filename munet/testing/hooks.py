@@ -59,6 +59,11 @@ def pytest_addoption(parser):
         metavar="BREAKPOINT[,BREAKPOINT...]",
         help="Comma-separated list of breakpoints",
     )
+    parser.addoption(
+        "--gdb-use-emacs",
+        action="store_true",
+        help="Use emacsclient to run gdb instead of a shell",
+    )
 
     parser.addoption(
         "--pcap",

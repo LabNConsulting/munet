@@ -29,6 +29,7 @@ import re
 import shlex
 import socket
 import subprocess
+import time
 
 from . import cli
 from .base import BaseMunet
@@ -564,16 +565,80 @@ ff02::2\tip6-allrouters
 
         gdbcmd = self.config.get("gdb-cmd")
         shellopt = self.unet.pytest_config.getoption("--gdb", "")
-        if gdbcmd and (shellopt == "all" or self.name in shellopt.split(",")):
+        should_gdb = gdbcmd and (shellopt == "all" or self.name in shellopt.split(","))
+        use_emacs = self.unet.pytest_config.getoption("--gdb-use-emacs", False)
+
+        if should_gdb and not use_emacs:
+            cmds = self.config.get("gdb-target-cmds", [])
+            for cmd in cmds:
+                gdbcmd += f" '-ex={cmd}'"
+
             bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
             for bp in bps:
                 gdbcmd += f" '-ex=b {bp}'"
 
-            runcmds = self.config.get("gdb-run-cmd", [])
-            for runcmd in runcmds:
-                gdbcmd += f" '-ex={runcmd}'"
+            cmds = self.config.get("gdb-run-cmd", [])
+            for cmd in cmds:
+                gdbcmd += f" '-ex={cmd}'"
 
             self.run_in_window(gdbcmd)
+        elif should_gdb and use_emacs:
+            gdbcmd = gdbcmd.replace("gdb ", "gdb -i=mi ")
+            ecbin = self.get_exec_path("emacsclient")
+            # output = self.cmd_raises(
+            #     [ecbin, "--eval", f"(gdb \"{gdbcmd} -ex='p 123456'\")"]
+            # )
+            _ = self.cmd_raises([ecbin, "--eval", f'(gdb "{gdbcmd}")'])
+
+            # can't figure out how to wait until symbols are loaded, until we do we just
+            # have to wait "long enough" for the symbol load to finish :/
+            # for _ in range(100):
+            #     output = self.cmd_raises(
+            #         [
+            #             ecbin,
+            #             "--eval",
+            #             f"gdb-first-prompt",
+            #         ]
+            #     )
+            #     if output == "nil\n":
+            #         break
+            #     time.sleep(0.25)
+
+            time.sleep(10)
+
+            cmds = self.config.get("gdb-target-cmds", [])
+            for cmd in cmds:
+                # we may want to quote quotes in the cmd string
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+
+            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
+            for bp in bps:
+                cmd = f"br {bp}"
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+
+            cmds = self.config.get("gdb-run-cmds", [])
+            for cmd in cmds:
+                # we may want to quote quotes in the cmd string
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+                gdbcmd += f" '-ex={cmd}'"
 
         shellopt = self.unet.pytest_config.getoption("--shell")
         shellopt = shellopt if shellopt is not None else ""
