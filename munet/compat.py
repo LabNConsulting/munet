@@ -32,4 +32,6 @@ class PytestConfig:
         if name.startswith("--"):
             name = name[2:]
         name = name.replace("-", "_")
-        return self.args[name] if name in self.args else default
+        if name in self.args:
+            return self.args[name] if self.args[name] is not None else default
+        return default

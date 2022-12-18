@@ -49,17 +49,20 @@ def pytest_addoption(parser):
 
     parser.addoption(
         "--gdb",
+        default="",
         metavar="HOST[,HOST...]",
         help="Comma-separated list of nodes to launch gdb on, or 'all'",
     )
     parser.addoption(
         "--gdb-breakpoints",
+        default="",
         metavar="BREAKPOINT[,BREAKPOINT...]",
         help="Comma-separated list of breakpoints",
     )
 
     parser.addoption(
         "--pcap",
+        default="",
         metavar="NET[,NET...]",
         help="Comma-separated list of networks to capture packets on, or 'all'",
     )
@@ -88,18 +91,21 @@ def pytest_addoption(parser):
 
     parser.addoption(
         "--shell",
+        default="",
         metavar="NODE[,NODE...]",
         help="Comma-separated list of nodes to spawn shell on, or 'all'",
     )
 
     parser.addoption(
         "--stdout",
+        default="",
         metavar="NODE[,NODE...]",
         help="Comma-separated list of nodes to open tail-f stdout window on, or 'all'",
     )
 
     parser.addoption(
         "--stderr",
+        default="",
         metavar="NODE[,NODE...]",
         help="Comma-separated list of nodes to open tail-f stderr window on, or 'all'",
     )
