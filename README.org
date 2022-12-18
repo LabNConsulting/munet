@@ -680,7 +680,12 @@ munet>
         type string;
         description "Command to execute when --gdb option specified" ;
       }
-      leaf-list gdb-run-cmd {
+      leaf-list gdb-target-cmds {
+        type string;
+        description
+          "GDB commands to execute to prior to setting breakpoints" ;
+      }
+      leaf-list gdb-run-cmds {
         type string;
         description
           "GDB commands to send to gdb (e.g., to start the process running)" ;
