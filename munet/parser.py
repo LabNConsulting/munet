@@ -29,12 +29,14 @@ import subprocess
 import sys
 import tempfile
 
+from pathlib import Path
+
 import jsonschema  # pylint: disable=C0415
 import jsonschema.validators  # pylint: disable=C0415
 
 from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
 
-from .config import config_to_dict_with_key
+from .config import list_to_dict_with_key
 from .native import Munet
 
 
@@ -48,15 +50,56 @@ def get_schema():
 
 get_schema.schema = None
 
+project_root_contains = [
+    ".git",
+    "pyproject.toml",
+    "tox.ini",
+    "setup.cfg",
+    "setup.py",
+    "pytest.ini",
+    ".projectile",
+]
+
+
+def is_project_root(path: Path) -> bool:
+
+    for contains in project_root_contains:
+        if path.joinpath(contains).exists():
+            return True
+    return False
+
+
+def find_project_root(config_path: Path, project_root=None):
+    if project_root is not None:
+        project_root = Path(project_root)
+        if project_root in config_path.parents:
+            return project_root
+        logging.warning(
+            "project_root %s is not a common ancestor of config file %s",
+            project_root,
+            config_path,
+        )
+        return config_path.parent
+    for ppath in config_path.parents:
+        if is_project_root(ppath):
+            return ppath
+    return config_path.parent
+
 
 def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
 
+    cwd = os.getcwd()
+
     if not search:
-        search = [os.getcwd()]
-    elif isinstance(search, str):
+        search = [cwd]
+    elif isinstance(search, (str, Path)):
         search = [search]
 
-    if not pathname:
+    if pathname:
+        pathname = os.path.join(cwd, pathname)
+        if not os.path.exists(pathname):
+            raise FileNotFoundError(pathname)
+    else:
         for d in search:
             logf("%s", f'searching in "{d}" for "{basename}".{{yaml, toml, json}}')
             for ext in ("yaml", "toml", "json"):
@@ -69,21 +112,6 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
             break
         else:
             raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
-    else:
-        if not os.path.exists(pathname):
-            if pathname[0] == "/":
-                # if we have an absolute path, raise an error
-                raise FileNotFoundError(pathname)
-
-            # look in the places we know about
-            for d in search:
-                if os.path.exists(os.path.join(d, pathname)):
-                    pathname = os.path.join(d, pathname)
-                    logf("%s", f'Found "{pathname}"')
-                    break
-                continue
-            else:
-                raise FileNotFoundError(pathname + " in " + f"{search}")
 
     _, ext = pathname.rsplit(".", 1)
 
@@ -182,28 +210,54 @@ def validate_config(config, logger, args):
             os.chdir(old)
 
 
-def load_kinds(args):
+def load_kinds(args, search=None):
     # Change CWD to the rundir prior to parsing config
-    old = os.getcwd()
+    cwd = os.getcwd()
     if args:
         os.chdir(args.rundir)
 
     args_config = args.kinds_config if args else None
     try:
-        search = [old]
+        if search is None:
+            search = [cwd]
         with importlib.resources.path("munet", "kinds.yaml") as datapath:
             search.append(str(datapath.parent))
 
-        config = get_config(args_config, "kinds", search)
+        configs = []
+        if args_config:
+            configs.append(get_config(args_config, "kinds", search=[]))
+        else:
+            # prefer directories at the front of the list
+            for kdir in search:
+                try:
+                    configs.append(get_config(basename="kinds", search=[kdir]))
+                except FileNotFoundError:
+                    continue
 
-        if config is not None:
+        kinds = {}
+        for config in configs:
             validator = jsonschema.validators.Draft202012Validator(get_schema())
             validator.validate(instance=config)
 
-            if os.path.exists(config["config_pathname"]):
-                logging.info("Loaded kinds config %s", config["config_pathname"])
+            kinds_list = config.get("kinds", [])
+            kinds_dict = list_to_dict_with_key(kinds_list, "name")
+            if kinds_dict:
+                logging.info("Loading kinds config from %s", config["config_pathname"])
+                if "kinds" in kinds:
+                    kinds["kinds"].update(**kinds_dict)
+                else:
+                    kinds["kinds"] = kinds_dict
 
-        return config_to_dict_with_key(config, "kinds", "name")
+            cli_list = config.get("cli", {}).get("commands", [])
+            if cli_list:
+                logging.info("Loading cli comands from %s", config["config_pathname"])
+                if "cli" not in kinds:
+                    kinds["cli"] = {}
+                if "commands" not in kinds["cli"]:
+                    kinds["cli"]["commands"] = []
+                kinds["cli"]["commands"].extend(cli_list)
+
+        return kinds
     except FileNotFoundError as error:
         # if we have kinds in args but the file doesn't exist, raise the error
         if args_config is not None:
@@ -211,7 +265,7 @@ def load_kinds(args):
         return {}
     finally:
         if args:
-            os.chdir(old)
+            os.chdir(cwd)
 
 
 async def async_build_topology(
@@ -221,6 +275,7 @@ async def async_build_topology(
     args=None,
     unshare_inline=True,
     pytestconfig=None,
+    search_root=None,
 ):
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
@@ -230,10 +285,37 @@ async def async_build_topology(
     if not config:
         config = get_config(basename="munet")
 
-    kinds = load_kinds(args)
-    kinds = {**kinds, **config_to_dict_with_key(config, "kinds", "name")}
-    config_to_dict_with_key(kinds, "env", "name")  # convert list of env objects to dict
-    config["kinds"] = kinds
+    # create search directories from common root if given
+    cpath = Path(config["config_pathname"]).absolute()
+    project_root = args.project_root if args else None
+    if not search_root:
+        search_root = find_project_root(cpath, project_root)
+    if not search_root:
+        search = [cpath.parent]
+    else:
+        search_root = Path(search_root).absolute()
+        if search_root in cpath.parents:
+            search = list(cpath.parents)
+            if remcount := len(search_root.parents):
+                search = search[0:-remcount]
+
+    # load kinds along search path and merge into config
+    kinds = load_kinds(args, search=search)
+    config_kinds_dict = list_to_dict_with_key(config.get("kinds", []), "name")
+    config["kinds"] = {**kinds.get("kinds", {}), **config_kinds_dict}
+
+    # mere CLI command from kinds into config as well.
+    kinds_cli_list = kinds.get("cli", {}).get("commands", [])
+    config_cli_list = config.get("cli", {}).get("commands", [])
+    if config_cli_list:
+        if kinds_cli_list:
+            config_cli_list.extend(list(kinds_cli_list))
+    elif kinds_cli_list:
+        if "cli" not in config:
+            config["cli"] = {}
+        if "commands" not in config["cli"]:
+            config["cli"]["commands"] = []
+        config["cli"]["commands"].extend(list(kinds_cli_list))
 
     unet = Munet(
         rundir=rundir,

@@ -48,7 +48,7 @@ root_logger = logging.getLogger("")
 exec_formatter = logging.Formatter("%(asctime)s %(levelname)5s: %(name)s: %(message)s")
 
 
-async def get_unet(config: dict, rundir: Path, unshare: bool = True):
+async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = True):
     """Create and run a new Munet topology.
 
     The topology is built from the given ``config`` to run inside the path indicated
@@ -58,6 +58,7 @@ async def get_unet(config: dict, rundir: Path, unshare: bool = True):
     Args:
         config: a config dictionary obtained from ``munet.parser.get_config``. This
           value will be modified and stored in the built ``Munet`` object.
+        croot: common root of all tests, used to search for ``kinds.yaml`` files.
         rundir: the path to the run directory for this topology.
         unshare: True to unshare the process into it's own private namespace.
 
@@ -280,7 +281,7 @@ async def run_tests(args):
     sheader = "=== RUN START "
     reslog.info(sheader + sheader[0] * (70 - len(sheader)) + "\n")
 
-    _, tests, configs = await collect(args)
+    common, tests, configs = await collect(args)
     results = []
     errlog = logging.getLogger("mutest.error")
     tnum = 0
@@ -301,7 +302,7 @@ async def run_tests(args):
             root_logger.addHandler(exec_handler)
 
             try:
-                async for unet in get_unet(config, rundir):
+                async for unet in get_unet(config, common, rundir):
                     passed, failed, e = await execute_test(
                         unet, test, args, tnum, exec_handler
                     )

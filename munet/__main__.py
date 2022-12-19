@@ -97,61 +97,83 @@ async def async_main(args, config):
 
 def main(*args):
     ap = argparse.ArgumentParser(args)
-    ap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
-    ap.add_argument(
+    cap = ap.add_argument_group(title="Config", description="config related options")
+
+    cap.add_argument("-c", "--config", help="config file (yaml, toml, json, ...)")
+    cap.add_argument(
+        "-d", "--rundir", help="runtime directory for tempfiles, logs, etc"
+    )
+    cap.add_argument(
+        "--kinds-config",
+        help="kinds config file, overrides default search (yaml, toml, json, ...)",
+    )
+    cap.add_argument(
+        "--project-root", help="directory to stop searching for kinds config at"
+    )
+    rap = ap.add_argument_group(title="Runtime", description="runtime related options")
+    rap.add_argument(
         "-C",
         "--cleanup",
         action="store_true",
         help="Remove the entire rundir (not just node subdirs) prior to running.",
     )
-    ap.add_argument(
-        "-k", "--kinds-config", help="kinds config file (yaml, toml, json, ...)"
+    rap.add_argument(
+        "--gdb", metavar="NODE-LIST", help="comma-sep list of hosts to run gdb on"
     )
-    ap.add_argument("--gdb", help="comma-sep list of hosts to run gdb on")
-    ap.add_argument("--gdb-breakpoints", help="comma-sep list of breakpoints to set")
-    ap.add_argument(
+    rap.add_argument(
+        "--gdb-breakpoints",
+        metavar="BREAKPOINT-LIST",
+        help="comma-sep list of breakpoints to set",
+    )
+    rap.add_argument(
         "--host",
         action="store_true",
         help="no isolation for top namespace, bridges exposed to default namespace",
     )
-    ap.add_argument("--unshare-inline", action="store_true", help=argparse.SUPPRESS)
-    ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
-    ap.add_argument(
-        "--no-kill",
-        action="store_true",
-        help="Do not kill previous running processes",
+    rap.add_argument(
+        "--pcap",
+        metavar="TARGET-LIST",
+        help="comma-sep list of capture targets (NETWORK or NODE:IFNAME)",
     )
-    ap.add_argument(
-        "--no-cli", action="store_true", help="Do not run the interactive CLI"
+    rap.add_argument(
+        "--shell", metavar="NODE-LIST", help="comma-sep list of nodes to open shells on"
     )
-    ap.add_argument("--no-wait", action="store_true", help="Exit after commands")
-    ap.add_argument("-d", "--rundir", help="runtime directory for tempfiles, logs, etc")
-    ap.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Validate the config against the schema definition",
+    rap.add_argument(
+        "--stderr",
+        metavar="NODE-LIST",
+        help="comma-sep list of nodes to open windows viewing stderr",
     )
-    ap.add_argument(
+    rap.add_argument(
+        "--stdout",
+        metavar="NODE-LIST",
+        help="comma-sep list of nodes to open windows viewing stdout",
+    )
+    rap.add_argument(
         "--topology-only",
         action="store_true",
         help="Do not run any node commands",
     )
-    ap.add_argument("-v", "--verbose", action="store_true", help="be verbose")
-    ap.add_argument(
+    rap.add_argument("--unshare-inline", action="store_true", help=argparse.SUPPRESS)
+    rap.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate the config against the schema definition",
+    )
+    rap.add_argument("-v", "--verbose", action="store_true", help="be verbose")
+    rap.add_argument(
         "-V", "--version", action="store_true", help="print the verison number and exit"
     )
-
-    # Runtime (pytest compat) things
-    ap.add_argument("--shell", help="comma-sep list of nodes to open shells for")
-    ap.add_argument(
-        "--stdout", help="comma-sep list of nodes to open windows on their stdout"
+    eap = ap.add_argument_group(title="Uncommon", description="uncommonly used options")
+    eap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
+    eap.add_argument(
+        "--no-kill",
+        action="store_true",
+        help="Do not kill previous running processes",
     )
-    ap.add_argument(
-        "--stderr", help="comma-sep list of nodes to open windows on their stderr"
+    eap.add_argument(
+        "--no-cli", action="store_true", help="Do not run the interactive CLI"
     )
-    ap.add_argument(
-        "--pcap", help="comma-sep list of network to open network captures on"
-    )
+    eap.add_argument("--no-wait", action="store_true", help="Exit after commands")
 
     args = ap.parse_args()
 

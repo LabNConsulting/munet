@@ -564,6 +564,7 @@ class Commander:  # pylint: disable=R0904
         use_pty=False,
         will_echo=False,
         is_bourne=True,
+        init_newline=False,
         **kwargs,
     ):
         """Create a shell REPL (read-eval-print-loop).
@@ -578,6 +579,8 @@ class Commander:  # pylint: disable=R0904
                 be the empty string to send nothing.
             is_bourne: if False then do not modify shell prompt for internal
                 parser friently format, and do not expect continuation prompts.
+            init_newline: send an initial newline for non-bourne shell spawns, otherwise
+                expect the prompt simply from running the command
             use_pty: true for pty based expect, otherwise uses popen (pipes/files)
             will_echo: bash is buggy in that it echo's to non-tty unlike any other
                 sh/ksh, set this value to true if running back
@@ -598,7 +601,8 @@ class Commander:  # pylint: disable=R0904
         assert not p.echo
 
         if not is_bourne:
-            p.send("\n")
+            if init_newline:
+                p.send("\n")
             return ShellWrapper(p, prompt, will_echo=will_echo)
 
         ps1 = PEXPECT_PROMPT

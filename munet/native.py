@@ -2184,13 +2184,13 @@ class Munet(BaseMunet):
             self.add_network(name, conf, logger=logger)
 
         for name, conf in config_to_dict_with_key(topoconf, "nodes", "name").items():
-            config_to_dict_with_key(
-                conf, "env", "name"
-            )  # convert list of env objects to dict
-
             if kind := conf.get("kind"):
                 if kconf := kinds[kind]:
                     conf = merge_kind_config(kconf, conf)
+
+            config_to_dict_with_key(
+                conf, "env", "name"
+            )  # convert list of env objects to dict
 
             conf = config_subst(
                 conf,
