@@ -1,0 +1,23 @@
+topology:
+  networks:
+    - name: mgmt0
+  nodes:
+    - name: a_host
+      kind: a_kind
+      connections: ["mgmt0"]
+    - name: c_host
+      kind: c_kind
+      connections: ["mgmt0"]
+    - name: z_host
+      kind: z_kind
+      connections: ["mgmt0"]
+      env:
+        - name: "MUENV:common"
+          value: "overridden in node config"
+
+cli:
+  commands:
+    - name: "testa-example-command"
+      exec: "echo 'an example Test command'"
+      format: "[HOST ...] testa-example-command"
+      help: "An example command for testing"

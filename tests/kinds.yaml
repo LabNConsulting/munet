@@ -1,0 +1,17 @@
+kinds:
+  - name: z_kind
+    cmd: |
+      echo "I'm a Z kind of host"
+      env | grep MUENV:
+    env:
+      - name: "MUENV:kindname"
+        value: "z_kind"
+      - name: "MUENV:common"
+        value: "z_kind_env"
+
+cli:
+  commands:
+    - name: "z-example-command"
+      exec: "echo 'an example command'"
+      format: "[HOST ...] z-example-command"
+      help: "An example command for testing"

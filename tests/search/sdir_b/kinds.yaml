@@ -1,0 +1,10 @@
+kinds:
+  - name: b_kind
+    cmd: |
+      echo "I'm a B kind of host"
+      env | grep MUENV:
+    env:
+      - name: "MUENV:kindname"
+        value: "b_kind"
+      - name: "MUENV:common"
+        value: "b_kind_env"

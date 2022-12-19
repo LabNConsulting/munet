@@ -1,0 +1,30 @@
+topology:
+  networks:
+    - name: mgmt0
+  nodes:
+    - name: b_host
+      kind: b_kind
+      connections: ["mgmt0"]
+    - name: c_host
+      kind: c_kind
+      connections: ["mgmt0"]
+      env:
+        - name: "MUENV:common"
+          value: "overridden in node config"
+    - name: d_host
+      kind: d_kind
+      connections: ["mgmt0"]
+      env:
+        - name: "MUENV:common"
+          value: "overridden in node config"
+
+kinds:
+  - name: d_kind
+    cmd: |
+      echo "I'm a D kind of host"
+      env | grep MUENV:
+    env:
+      - name: "MUENV:kindname"
+        value: "d_kind"
+      - name: "MUENV:common"
+        value: "d_kind_env"

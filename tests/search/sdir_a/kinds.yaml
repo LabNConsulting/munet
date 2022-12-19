@@ -1,0 +1,17 @@
+kinds:
+  - name: a_kind
+    cmd: |
+      echo "I'm an A kind of host"
+      env | grep MUENV:
+    env:
+      - name: "MUENV:kindname"
+        value: "a_kind"
+      - name: "MUENV:common"
+        value: "a_kind_env"
+
+cli:
+  commands:
+    - name: "a-example-command"
+      exec: "echo 'an example A command'"
+      format: "[HOST ...] a-example-command"
+      help: "An example command for testing"
