@@ -253,7 +253,13 @@
           "gdb-cmd": {
             "type": "string"
           },
-          "gdb-run-cmd": {
+          "gdb-target-cmds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gdb-run-cmds": {
             "type": "array",
             "items": {
               "type": "string"
@@ -546,7 +552,13 @@
               "gdb-cmd": {
                 "type": "string"
               },
-              "gdb-run-cmd": {
+              "gdb-target-cmds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "gdb-run-cmds": {
                 "type": "array",
                 "items": {
                   "type": "string"
