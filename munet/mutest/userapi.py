@@ -371,7 +371,6 @@ class TestCase:
         desc: str = "",
     ) -> Union[str, dict]:
         """Execute a command repeatedly waiting for result until timeout."""
-        found = False
         startt = time.time()
         endt = startt + timeout
 
@@ -386,7 +385,7 @@ class TestCase:
                 time.sleep(interval)
 
         self.post_result(target, success, desc)
-        return found, ret
+        return success, ret
 
     # ---------------------
     # Public APIs for User
