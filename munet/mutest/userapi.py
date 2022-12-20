@@ -277,8 +277,8 @@ class TestCase:
         target: str,
         cmd: str,
         match: str,
-        flags: int,
         expect_fail: bool,
+        flags: int,
     ) -> (bool, Union[str, list]):
         """Execute a ``cmd`` and check result.
 
@@ -286,8 +286,8 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execute on the target.
             match: regex to ``re.search()`` for in output.
-            flags: python regex flags to modify matching behavior
             expect_fail: if True then succeed when the regexp doesn't match.
+            flags: python regex flags to modify matching behavior
 
         Returns:
             (success, matches): if the match fails then "matches" will be None,
@@ -349,10 +349,10 @@ class TestCase:
         target: str,
         cmd: str,
         match: Union[str, dict],
-        expect_fail: bool,
         is_json: bool,
         timeout: float,
         interval: float,
+        expect_fail: bool,
         flags: int,
     ) -> Union[str, dict]:
         """Execute a command repeatedly waiting for result until timeout."""
@@ -366,7 +366,7 @@ class TestCase:
                 success, ret = self._match_command_json(target, cmd, match, expect_fail)
             else:
                 success, ret = self._match_command(
-                    target, cmd, match, flags, expect_fail
+                    target, cmd, match, expect_fail, flags
                 )
             if not success:
                 time.sleep(interval)
@@ -444,8 +444,8 @@ class TestCase:
         cmd: str,
         match: str,
         desc: str = "",
-        flags: int = re.DOTALL,
         expect_fail: bool = False,
+        flags: int = re.DOTALL,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.match_step`.
 
@@ -460,10 +460,10 @@ class TestCase:
             cmd,
             match,
             desc,
-            flags,
             expect_fail,
+            flags,
         )
-        success, ret = self._match_command(target, cmd, match, flags, expect_fail)
+        success, ret = self._match_command(target, cmd, match, expect_fail, flags)
         if desc:
             self.post_result(target, success, desc)
         return success, ret
@@ -514,8 +514,8 @@ class TestCase:
         desc: str = "",
         timeout=10,
         interval=0.5,
-        flags: int = re.DOTALL,
         expect_fail: bool = False,
+        flags: int = re.DOTALL,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.wait_step`.
 
@@ -534,11 +534,11 @@ class TestCase:
             timeout,
             interval,
             desc,
-            flags,
             expect_fail,
+            flags,
         )
         success, ret = self._wait(
-            target, cmd, match, expect_fail, False, timeout, interval, flags
+            target, cmd, match, False, timeout, interval, expect_fail, flags
         )
         if desc:
             self.post_result(target, success, desc)
@@ -574,7 +574,7 @@ class TestCase:
             expect_fail,
         )
         success, ret = self._wait(
-            target, cmd, match, expect_fail, True, timeout, interval, 0
+            target, cmd, match, True, timeout, interval, expect_fail, 0
         )
         if desc:
             self.post_result(target, success, desc)
@@ -673,8 +673,8 @@ def match_step(
     cmd: str,
     match: str,
     desc: str = "",
-    flags: int = re.DOTALL,
     expect_fail: bool = False,
+    flags: int = re.DOTALL,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` check result.
 
@@ -691,15 +691,15 @@ def match_step(
         cmd: string to execut on the ``target``.
         match: regex to match against output.
         desc: description of test, if no description then no result is logged.
-        flags: python regex flags to modify matching behavior
         expect_fail: if True then succeed when the regexp doesn't match.
+        flags: python regex flags to modify matching behavior
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
         The second value will be a list from ``re.Match.groups()`` if non-empty,
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
-    return TestCase.g_tc.match_step(target, cmd, match, desc, flags, expect_fail)
+    return TestCase.g_tc.match_step(target, cmd, match, desc, expect_fail, flags)
 
 
 def match_step_json(
@@ -740,8 +740,8 @@ def wait_step(
     desc: str = "",
     timeout: float = 10.0,
     interval: float = 0.5,
-    flags: int = re.DOTALL,
     expect_fail: bool = False,
+    flags: int = re.DOTALL,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` repeatedly, looking for a result.
 
@@ -760,8 +760,8 @@ def wait_step(
             average the cmd will execute 10 times. The minimum calculated interval
             is .25s, shorter values can be passed explicitly.
         desc: description of test, if no description then no result is logged.
-        flags: python regex flags to modify matching behavior
         expect_fail: if True then succeed when the regexp *doesn't* match.
+        flags: python regex flags to modify matching behavior
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
@@ -769,7 +769,7 @@ def wait_step(
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
     return TestCase.g_tc.wait_step(
-        target, cmd, match, desc, timeout, interval, flags, expect_fail
+        target, cmd, match, desc, timeout, interval, expect_fail, flags
     )
 
 
