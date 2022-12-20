@@ -38,9 +38,13 @@ Send/Expect functions:
 
 Control/Utility functions:
 
+    - :py:func:`script_dir`
+
     - :py:func:`include`
 
     - :py:func:`log`
+
+    - :py:func:`test`
 
 Test scripts are located by the :command:`mutest` command by their name.  The name of a
 test script should take the form ``mutest_TESTNAME.py`` where ``TESTNAME`` is replaced
@@ -75,6 +79,7 @@ import re
 import time
 
 from pathlib import Path
+from typing import Any
 from typing import Callable
 from typing import Union
 
@@ -462,6 +467,16 @@ class TestCase:
             self.post_result(target, success, desc)
         return success, ret
 
+    def test(self, expr_or_value: Any, desc: str):
+        """See :py:func:`~munet.mutest.userapi.test`.
+
+        :meta private:
+        """
+        success = bool(expr_or_value)
+        if success:
+            self.post_result("", success, desc)
+        return success
+
     def match_step_json(
         self,
         target: str,
@@ -633,6 +648,23 @@ def step_json(target: str, cmd: str) -> dict:
         If json parse fails, a warning is logged and an empty ``dict`` is used.
     """
     return TestCase.g_tc.step_json(target, cmd)
+
+
+def test(expr_or_value: Any, desc: str):
+    """Evaluates ``expr_or_value`` and posts a result base on it bool(expr)
+
+    If ``expr_or_value`` evaluates to a positive result (i.e., True, non-zero, non-None,
+    non-empty string, non-empty list, etc..) then a PASS result is recorded, otherwise
+    record a FAIL is recorded.
+
+    Args:
+        expr: an expression or value to evaluate
+        desc: description of this test step.
+
+    Returns:
+        A bool indicating the test PASS or FAIL result.
+    """
+    return TestCase.g_tc.test(expr_or_value, desc)
 
 
 def match_step(
