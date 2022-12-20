@@ -28,4 +28,4 @@ Mutest User API
    :members:
 
 .. autoclass:: munet.mutest.userapi.TestCase
-   :private-members: +step,step_json,match_step,match_step_json,wait_step,wait_step_json
+   :private-members: +step,step_json,match_step,match_step_json,wait_step,wait_step_json,+test
