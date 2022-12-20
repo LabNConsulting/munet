@@ -1,0 +1,3 @@
+Neighbor ID     Pri State           Dead Time Address         Interface                        RXmtL RqstL DBsmL
+1.1.2.2           1 Full/DROther       4.944s 10.1.3.102      tun2:10.1.3.101                      5     0     0
+1.1.1.5           1 Full/DROther       4.922s 10.1.1.5        rtr0:10.1.1.101                      3     0     0
