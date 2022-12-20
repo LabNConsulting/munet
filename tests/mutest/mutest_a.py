@@ -47,10 +47,10 @@ wait_step(
 )
 
 # expect failing tests
-match_step("host1", "ls -l /", " nodir", "Look for no /nodir", 0, True)
+match_step("host1", "ls -l /", " nodir", "Look for no /nodir", True)
 match_step("host1", "ls -l /", " nodir", "Look for no /nodir", expect_fail=True)
 wait_step("host1", "ls -l /", " nodir", "Look for no /nodir", 1, expect_fail=True)
-wait_step("host1", "ls -l /", " nodir", "Look for no /nodir", 1, 0.25, 0, True)
+wait_step("host1", "ls -l /", " nodir", "Look for no /nodir", 1, 0.25, True)
 wait_step(
     "host1",
     "ls -l /",
