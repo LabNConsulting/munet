@@ -86,6 +86,30 @@ from typing import Union
 from deepdiff import DeepDiff as json_cmp
 
 
+class TestCaseInfo:
+    """Object to hold nestable TestCase Results."""
+
+    def __init__(self, tag: str, level: int, name: str, path: Path):
+        self.filename = path.absolute()
+        self.script_dir = self.filename.parent
+        assert self.script_dir.is_dir()
+
+        self.basetag = tag
+        self.level = level
+        self.tag = f"{self.basetag}.{level}"
+        self.name = name
+        self.steps = 0
+        self.passed = 0
+        self.failed = 0
+        self.start_time = time.time()
+        self.step_start_time = self.start_time
+        self.run_time = None
+
+    def inclevel(self):
+        self.level += 1
+        self.tag = f"{self.basetag}.{self.level}"
+
+
 class TestCase:
     """A mutest testcase.
 
@@ -94,7 +118,7 @@ class TestCase:
     user API.
 
     Args:
-        number: identity of the test in a run.
+        tag: identity of the test in a run. (x.x...)
         name: the name of the test case
         path: the test file that is being executed.
         targets: a dictionary of objects which implement ``cmd_nostatus(str)``
@@ -102,7 +126,7 @@ class TestCase:
         result_logger: a logger to output the results of test steps to.
 
     Attributes:
-        number: identity of the test in a run
+        tag: identity of the test in a run
         name: the name of the test
         targets: dictionary of targets.
 
@@ -119,11 +143,11 @@ class TestCase:
 
     # sum_hfmt = "{:5.5s} {:4.4s} {:>6.6s} {}"
     # sum_dfmt = "{:5s} {:4.4s} {:^6.6s} {}"
-    sum_fmt = "%6.6s %4.4s %{}s %6s  %s"
+    sum_fmt = "%-8.8s %4.4s %{}s %6s  %s"
 
     def __init__(
         self,
-        number: int,
+        tag: int,
         name: str,
         path: Path,
         targets: dict,
@@ -131,14 +155,9 @@ class TestCase:
         result_logger: logging.Logger = None,
     ):
 
-        self.__filename = path.absolute()
-        self.__old_filenames = []
-        self.__call_on_fail = None
+        self.info = TestCaseInfo(tag, 1, name, path)
+        self.__saved_info = []
 
-        self.number = number
-        self.name = name
-        self.script_dir = self.__filename.parent
-        assert self.script_dir.is_dir()
         self.targets = targets
 
         self.last = ""
@@ -147,9 +166,6 @@ class TestCase:
         self.rlog = result_logger
         self.olog = output_logger
         self.logf = functools.partial(self.olog.log, logging.INFO)
-        self.steps = 0
-        self.passed = 0
-        self.failed = 0
 
         assert TestCase.g_tc is None
         TestCase.g_tc = self
@@ -157,66 +173,121 @@ class TestCase:
         # find the longerst target name and make target field that wide
         nmax = max(len(x) for x in targets)
         nmax = max(nmax, len("TARGET"))
-
         self.sum_fmt = TestCase.sum_fmt.format(nmax)
         self.rlog.info(self.sum_fmt, "NUMBER", "STAT", "TARGET", "TIME", "DESCRIPTION")
         self.rlog.info("-" * 70)
 
-        # start counting time for first step
-        self.start_time = time.time()
+    @property
+    def tag(self):
+        return self.info.tag
+
+    @property
+    def name(self):
+        return self.info.name
+
+    @property
+    def steps(self):
+        return self.info.steps
+
+    @property
+    def passed(self):
+        return self.info.passed
+
+    @property
+    def failed(self):
+        return self.info.failed
 
     def __del__(self):
         if TestCase.g_tc is self:
             logging.error("Internal error, TestCase.end_test() was not called!")
             TestCase.g_tc = None
 
-    def __push_filename(self, filename):
-        fstr = "include: " + str(filename)
-        self.logf(fstr)
-        self.__old_filenames.append(self.__filename)
-        self.__filename = filename
-        self.script_dir = filename.parent
+    def __push_execinfo(self, path: Path):
+        newname = self.name + path.stem
+        self.__saved_info.append(self.info)
+        self.info.inclevel()
+        self.info = TestCaseInfo(self.info.basetag, self.info.level, newname, path)
 
-    def __pop_filename(self):
-        self.__filename = self.__old_filenames.pop()
-        self.script_dir = self.__filename.parent
-        fstr = "return: " + str(self.__filename)
-        self.logf(fstr)
+    def __pop_execinfo(self):
+        # do something with tag?
+        finised_info = self.info
+        self.info = self.__saved_info.pop()
+        self.info.inclevel()
+        return finised_info
+
+    async def _exec_script(self, script):
+        # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
+        include = self.include
+        log = self.logf
+        match_step = self.match_step
+        match_step_json = self.match_step_json
+        step = self.step
+        step_json = self.step_json
+        test = self.test
+        wait_step = self.wait_step
+        wait_step_json = self.wait_step_json
+
+        self.info.start_time = time.time()
+
+        newname = self.name + self.tag
+        newname = newname.replace(".", "_")
+        e = None
+        _ok_result = "marker"
+        try:
+            script = script.strip()
+            s2 = (
+                f"async def _{newname}(ok_result):\n"
+                + " "
+                + script.replace("\n", "\n ")
+                + "\n return ok_result\n"
+                + "\n"
+            )
+            exec(s2)
+            result = await locals()[f"_{newname}"](_ok_result)
+        except Exception as error:
+            logging.error(
+                "Unexpected exception during test %s: %s", newname, error, exc_info=True
+            )
+            e = error
+        else:
+            if result is not _ok_result:
+                logging.info("Test %s returned early, result: %s", newname, result)
+
+        passed, failed = self.end_test()
+        return passed, failed, e
 
     def post_result(self, target, success, rstr, logstr=None):
         if success:
-            self.passed += 1
+            self.info.passed += 1
             status = "PASS"
             outlf = self.logf
             reslf = self.rlog.info
         else:
-            self.failed += 1
+            self.info.failed += 1
             status = "FAIL"
             outlf = self.olog.warning
             reslf = self.rlog.warning
 
-        self.steps += 1
+        self.info.steps += 1
         if logstr is not None:
             outlf("R:%d %s: %s" % (self.steps, status, logstr))
 
-        run_time = time.time() - self.start_time
+        run_time = time.time() - self.info.step_start_time
 
-        stepstr = f"{self.number}.{self.steps}"
+        stepstr = f"{self.tag}.{self.steps}"
         rtimes = _delta_time_str(run_time)
         reslf(self.sum_fmt, stepstr, status, target, rtimes, rstr)
-        if not success and self.__call_on_fail:
-            self.__call_on_fail()
 
         # start counting for next step now
-        self.start_time = time.time()
+        self.info.step_start_time = time.time()
 
-    def end_test(self) -> (int, int):
+    def end_test(self) -> (int, int, Exception):
         """End the test log final results.
 
         Returns:
             number of steps, number passed, number failed, run time.
         """
-        passed, failed = self.passed, self.failed
+        passed, failed = self.info.passed, self.info.failed
 
         # No close for loggers
         # self.olog.close()
@@ -229,6 +300,7 @@ class TestCase:
         ), "TestCase global unexpectedly someon else in end_test"
         TestCase.g_tc = None
 
+        self.info.run_time = time.time() - self.info.start_time
         return passed, failed
 
     def _command(
@@ -376,37 +448,41 @@ class TestCase:
     # Public APIs for User
     # ---------------------
 
-    def include(self, pathname: str, call_on_fail: Callable[[], None] = None):
+    async def execute(self, script):
+        return await self._exec_script(script)
+
+    def include(self, pathname: str, inline: bool = False):
         """See :py:func:`~munet.mutest.userapi.include`.
 
         :meta private:
         """
-        pathname = Path(pathname)
-        test_file = self.script_dir.joinpath(pathname)
-        self.__push_filename(pathname)
-        if call_on_fail is not None:
-            old_call_on_fail, self.__call_on_fail = self.__call_on_fail, call_on_fail
+        # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
+        include = self.include
+        log = self.logf
+        match_step = self.match_step
+        match_step_json = self.match_step_json
+        step = self.step
+        step_json = self.step_json
+        test = self.test
+        wait_step = self.wait_step
+        wait_step_json = self.wait_step_json
+
+        path = Path(pathname)
+        path = self.info.script_dir.joinpath(path)
+
+        if not inline:
+            self.__push_execinfo(path)
 
         try:
-            script = open(test_file, "r", encoding="utf-8").read()
 
-            # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
-            step = self.step
-            step_json = self.step_json
-            match_step = self.match_step
-            match_step_json = self.match_step_json
-            wait_step = self.wait_step
-            wait_step_json = self.wait_step_json
-            include = self.include
-            log = self.logf
-
+            script = open(path, "r", encoding="utf-8").read()
             exec(script, globals(), locals())
-        except Exception as error:
-            logging.error("Exception while including file: %s: %s", pathname, error)
 
-        if call_on_fail is not None:
-            self.__call_on_fail = old_call_on_fail
-        self.__pop_filename()
+        except Exception as error:
+            logging.error("Exception while including file: %s: %s", path, error)
+
+        if not inline:
+            self.__pop_execinfo()
 
     def step(self, target: str, cmd: str) -> str:
         """See :py:func:`~munet.mutest.userapi.step`.
@@ -414,10 +490,10 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%d.%d:%s:STEP:%s:%s",
-            self.number,
+            "#%s.%s:%s:STEP:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
         )
@@ -429,10 +505,10 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%d.%d:%s:STEP_JSON:%s:%s",
-            self.number,
+            "#%s.%s:%s:STEP_JSON:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
         )
@@ -452,10 +528,10 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%d.%d:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
-            self.number,
+            "#%s.%s:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
             match,
@@ -491,10 +567,10 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%d.%d:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
-            self.number,
+            "#%s.%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
             match,
@@ -524,10 +600,10 @@ class TestCase:
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
-            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s",
-            self.number,
+            "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
             match,
@@ -561,10 +637,10 @@ class TestCase:
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
-            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
-            self.number,
+            "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            self.tag,
             self.steps + 1,
-            self.__filename,
+            self.info.filename,
             target,
             cmd,
             match,
@@ -604,14 +680,14 @@ def log(fmt, *args, **kwargs):
     return TestCase.g_tc.logf(fmt, *args, **kwargs)
 
 
-def include(pathname: str, call_on_fail: Callable[[], None] = None):
+def include(pathname: str, inline=False):
     """Include a file as part of testcase.
 
     Args:
         pathname: the file to include.
-        call_on_fail: function to call on step failures.
+        inline: execute the script inline.
     """
-    return TestCase.g_tc.include(pathname, call_on_fail)
+    return TestCase.g_tc.include(pathname, inline)
 
 
 def script_dir() -> Path:
@@ -620,7 +696,7 @@ def script_dir() -> Path:
     When an include() is called the script_dir is updated to be current with the
     includeded file, and is reverted to the previous value when the include completes.
     """
-    return TestCase.g_tc.script_dir
+    return TestCase.g_tc.info.script_dir
 
 
 def step(target: str, cmd: str) -> str:

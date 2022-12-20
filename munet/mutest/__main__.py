@@ -225,31 +225,12 @@ async def execute_test(
 
     targets = dict(unet.hosts.items())
     targets["."] = unet
-    tc = uapi.TestCase(test_num, test_name, test, targets, logger, reslog)
 
-    # pylint: disable=possibly-unused-variable,exec-used
-    step = tc.step
-    step_json = tc.step_json
-    match_step = tc.match_step
-    match_step_json = tc.match_step_json
-    wait_step = tc.wait_step
-    wait_step_json = tc.wait_step_json
-    include = tc.include
+    tc = uapi.TestCase(str(test_num), test_name, test, targets, logger, reslog)
+    passed, failed, e = await tc.execute(script)
+    run_time = time.time() - tc.info.start_time
 
-    start_time = time.time()
-    e = None
-    try:
-        s2 = f"async def _{test_name}():\n " + script.replace("\n", "\n ") + "\n"
-        exec(s2)
-        await locals()[f"_{test_name}"]()
-    except Exception as error:
-        logging.error("Unexpected exception during test %s: %s", test_name, error)
-        e = error
-    finally:
-        passed, failed = tc.end_test()
-
-    run_time = time.time() - start_time
-    status = "PASS" if not failed else "FAIL"
+    status = "PASS" if not (failed or e) else "FAIL"
     reslog.info(
         "stats: %s:%s:  %d pass, %d fail, %4.2fs elapsed",
         test_num,
