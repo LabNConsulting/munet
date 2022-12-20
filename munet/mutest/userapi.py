@@ -71,9 +71,7 @@ All of the functions are documented and defined below.
 import functools
 import json
 import logging
-import os
 import re
-import sys
 import time
 
 from pathlib import Path
@@ -110,8 +108,6 @@ class TestCase:
         last: the last command output.
         last_m: the last result of re.search during a matching step on the output with
             newlines converted to spaces.
-        last_m_nl: the last result of re.search during a matching step based on an
-            unconverted source string (i.e., newlines present).
 
     :meta private:
     """
@@ -130,20 +126,18 @@ class TestCase:
         result_logger: logging.Logger = None,
     ):
 
-        self.number = number
-        self.name = name
-        self.targets = targets
         self.__filename = path.absolute()
-        self.__script_dir = self.__filename.parent
         self.__old_filenames = []
         self.__call_on_fail = None
-        assert self.__script_dir.is_dir()
+
+        self.number = number
+        self.name = name
+        self.script_dir = self.__filename.parent
+        assert self.script_dir.is_dir()
+        self.targets = targets
 
         self.last = ""
         self.last_m = None
-        self.last_m_nl = None
-        # This is a holdover.
-        self.l_dotall_experiment = True
 
         self.rlog = result_logger
         self.olog = output_logger
@@ -176,9 +170,11 @@ class TestCase:
         self.logf(fstr)
         self.__old_filenames.append(self.__filename)
         self.__filename = filename
+        self.script_dir = filename.parent
 
     def __pop_filename(self):
         self.__filename = self.__old_filenames.pop()
+        self.script_dir = self.__filename.parent
         fstr = "return: " + str(self.__filename)
         self.logf(fstr)
 
@@ -241,7 +237,7 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execut on the target.
         """
-        out = self.targets[target].cmd_nostatus(cmd)
+        out = self.targets[target].cmd_nostatus(cmd, warn=False)
         self.last = out = out.rstrip()
         report = out if out else "<no output>"
         self.logf("COMMAND OUTPUT:\n%s", report)
@@ -258,7 +254,7 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execut on the target.
         """
-        out = self.targets[target].cmd_nostatus(cmd)
+        out = self.targets[target].cmd_nostatus(cmd, warn=False)
         self.last = out = out.rstrip()
         try:
             js = json.loads(out)
@@ -276,6 +272,7 @@ class TestCase:
         target: str,
         cmd: str,
         match: str,
+        flags: int,
         expect_fail: bool,
     ) -> (bool, Union[str, list]):
         """Execute a ``cmd`` and check result.
@@ -284,26 +281,15 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execute on the target.
             match: regex to ``re.search()`` for in output.
+            flags: python regex flags to modify matching behavior
             expect_fail: if True then succeed when the regexp doesn't match.
-
         Returns:
             (success, matches): if the match fails then "matches" will be None,
             otherwise if there were matching groups then groups() will be returned in
             ``matches`` otherwise group(0) (i.e., the matching text).
         """
         out = self._command(target, cmd)
-        # Experiment: can we achieve the same match behavior via DOTALL
-        # without converting newlines to spaces?
-        search_nl = re.search(match, out, re.DOTALL)
-        self.last_m_nl = search_nl
-        # Set up for comparison
-        if search_nl is not None:
-            group_nl_conv = " ".join(search_nl.group(0).splitlines())
-        else:
-            group_nl_conv = None
-
-        split_out = " ".join(out.splitlines())
-        search = re.search(match, split_out)
+        search = re.search(match, out, flags)
         self.last_m = search
         if search is None:
             success = expect_fail
@@ -316,13 +302,6 @@ class TestCase:
 
             level = logging.DEBUG if success else logging.WARNING
             self.olog.log(level, "matched:%s:", ret)
-            # Experiment: compare matched strings obtained each way
-            if self.l_dotall_experiment and (group_nl_conv != search.group(0)):
-                logging.warning(
-                    "DOTALL experiment: strings differ dotall=[%s] orig=[%s]",
-                    group_nl_conv,
-                    search.group(0),
-                )
         return success, ret
 
     def _match_command_json(
@@ -364,11 +343,11 @@ class TestCase:
         target: str,
         cmd: str,
         match: Union[str, dict],
-        expect_fail: bool = False,
-        is_json: bool = False,
-        timeout: float = 2.0,
-        interval: float = 0.5,
-        desc: str = "",
+        expect_fail: bool,
+        is_json: bool,
+        timeout: float,
+        interval: float,
+        flags: int,
     ) -> Union[str, dict]:
         """Execute a command repeatedly waiting for result until timeout."""
         startt = time.time()
@@ -380,11 +359,11 @@ class TestCase:
             if is_json:
                 success, ret = self._match_command_json(target, cmd, match, expect_fail)
             else:
-                success, ret = self._match_command(target, cmd, match, expect_fail)
+                success, ret = self._match_command(
+                    target, cmd, match, flags, expect_fail
+                )
             if not success:
                 time.sleep(interval)
-
-        self.post_result(target, success, desc)
         return success, ret
 
     # ---------------------
@@ -396,7 +375,8 @@ class TestCase:
 
         :meta private:
         """
-        test_file = self.__script_dir.joinpath(pathname)
+        pathname = Path(pathname)
+        test_file = self.script_dir.joinpath(pathname)
         self.__push_filename(pathname)
         if call_on_fail is not None:
             old_call_on_fail, self.__call_on_fail = self.__call_on_fail, call_on_fail
@@ -458,6 +438,7 @@ class TestCase:
         cmd: str,
         match: str,
         desc: str = "",
+        flags: int = re.DOTALL,
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.match_step`.
@@ -465,7 +446,7 @@ class TestCase:
         :meta private:
         """
         self.logf(
-            "#%d.%d:%s:MATCH_STEP:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
             self.number,
             self.steps + 1,
             self.__filename,
@@ -473,10 +454,12 @@ class TestCase:
             cmd,
             match,
             desc,
+            flags,
             expect_fail,
         )
-        success, ret = self._match_command(target, cmd, match, expect_fail)
-        self.post_result(target, success, desc)
+        success, ret = self._match_command(target, cmd, match, flags, expect_fail)
+        if desc:
+            self.post_result(target, success, desc)
         return success, ret
 
     def match_step_json(
@@ -503,7 +486,8 @@ class TestCase:
             expect_fail,
         )
         success, ret = self._match_command_json(target, cmd, match, expect_fail)
-        self.post_result(target, success, desc)
+        if desc:
+            self.post_result(target, success, desc)
         return success, ret
 
     def wait_step(
@@ -514,6 +498,7 @@ class TestCase:
         desc: str = "",
         timeout=10,
         interval=0.5,
+        flags: int = re.DOTALL,
         expect_fail: bool = False,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.wait_step`.
@@ -523,7 +508,7 @@ class TestCase:
         if interval is None:
             interval = min(timeout / 20, 0.25)
         self.logf(
-            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
+            "#%d.%d:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s",
             self.number,
             self.steps + 1,
             self.__filename,
@@ -533,11 +518,15 @@ class TestCase:
             timeout,
             interval,
             desc,
+            flags,
             expect_fail,
         )
-        return self._wait(
-            target, cmd, match, expect_fail, False, timeout, interval, desc
+        success, ret = self._wait(
+            target, cmd, match, expect_fail, False, timeout, interval, flags
         )
+        if desc:
+            self.post_result(target, success, desc)
+        return success, ret
 
     def wait_step_json(
         self,
@@ -568,9 +557,12 @@ class TestCase:
             desc,
             expect_fail,
         )
-        return self._wait(
-            target, cmd, match, expect_fail, True, timeout, interval, desc
+        success, ret = self._wait(
+            target, cmd, match, expect_fail, True, timeout, interval, 0
         )
+        if desc:
+            self.post_result(target, success, desc)
+        return success, ret
 
 
 # A non-rentrant global to allow for simplified operations
@@ -606,6 +598,15 @@ def include(pathname: str, call_on_fail: Callable[[], None] = None):
     return TestCase.g_tc.include(pathname, call_on_fail)
 
 
+def script_dir() -> Path:
+    """The pathname to the directory containing the current script file.
+
+    When an include() is called the script_dir is updated to be current with the
+    includeded file, and is reverted to the previous value when the include completes.
+    """
+    return TestCase.g_tc.script_dir
+
+
 def step(target: str, cmd: str) -> str:
     """Execute a ``cmd`` on a ``target`` and return the output.
 
@@ -639,6 +640,7 @@ def match_step(
     cmd: str,
     match: str,
     desc: str = "",
+    flags: int = re.DOTALL,
     expect_fail: bool = False,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` check result.
@@ -656,6 +658,7 @@ def match_step(
         cmd: string to execut on the ``target``.
         match: regex to match against output.
         desc: description of this test step.
+        flags: python regex flags to modify matching behavior
         expect_fail: if True then succeed when the regexp doesn't match.
 
     Returns:
@@ -663,7 +666,7 @@ def match_step(
         The second value will be a list from ``re.Match.groups()`` if non-empty,
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
-    return TestCase.g_tc.match_step(target, cmd, match, desc, expect_fail)
+    return TestCase.g_tc.match_step(target, cmd, match, desc, flags, expect_fail)
 
 
 def match_step_json(
@@ -702,8 +705,9 @@ def wait_step(
     cmd: str,
     match: Union[str, dict],
     desc: str = "",
-    timeout=10,
-    interval=0.5,
+    timeout: float = 10.0,
+    interval: float = 0.5,
+    flags: int = re.DOTALL,
     expect_fail: bool = False,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` repeatedly, looking for a result.
@@ -723,6 +727,7 @@ def wait_step(
             average the cmd will execute 10 times. The minimum calculated interval
             is .25s, shorter values can be passed explicitly.
         desc: description of this test step.
+        flags: python regex flags to modify matching behavior
         expect_fail: if True then succeed when the regexp *doesn't* match.
 
     Returns:
@@ -731,7 +736,7 @@ def wait_step(
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
     return TestCase.g_tc.wait_step(
-        target, cmd, match, desc, timeout, interval, expect_fail
+        target, cmd, match, desc, timeout, interval, flags, expect_fail
     )
 
 
@@ -791,7 +796,7 @@ def luInclude(filename, CallOnFail=None):
 
 def luLast(usenl=False):
     """Backward compatible API, do not use in new tests."""
-    return TestCase.g_tc.last_m_nl if usenl else TestCase.g_tc.last_m
+    return TestCase.g_tc.last_m
 
 
 def luCommand(
@@ -841,13 +846,3 @@ def luCommand(
     if success and match is not None:
         return match.group()
     return success
-
-
-# for testing
-if __name__ == "__main__":
-    print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/lib")
-    tc = TestCase(None)
-    for arg in sys.argv[1:]:
-        tc.include(arg)
-    tc.end_test()
-    sys.exit(0)
