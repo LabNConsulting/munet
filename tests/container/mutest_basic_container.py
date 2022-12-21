@@ -1,4 +1,4 @@
-"""TestCase: basic container functionality"""
+"""Test basic container functionality."""
 from munet.mutest.userapi import match_step, step
 
 # from munet.base import BaseMunet

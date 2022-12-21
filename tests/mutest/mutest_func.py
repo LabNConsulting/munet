@@ -18,7 +18,7 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"""A file for testing the functionality of the mutest API functions."""
+"""Test command execution."""
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import script_dir
 from munet.mutest.userapi import test

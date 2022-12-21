@@ -1,12 +1,10 @@
-# TITLE: Test send/expect step functionality
-"""A file for testing send/expect steps"""
-from munet.mutest.userapi import match_step
-from munet.mutest.userapi import step
-from munet.mutest.userapi import wait_step
-
+"""Test match and wait send/expect step functionality."""
+from munet.mutest.userapi import match_step, step, test, wait_step
 
 step("r1", "ls -l /")
 step("host1", "ls -l /")
+
+test(True, "An always passing test", "any")
 
 # expect passing tests
 match_step("r1", "ls -l /dev/tty", "crw.* /dev/tty", "Look for /dev/tty")
