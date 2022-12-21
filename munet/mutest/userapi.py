@@ -89,14 +89,12 @@ from deepdiff import DeepDiff as json_cmp
 class TestCaseInfo:
     """Object to hold nestable TestCase Results."""
 
-    def __init__(self, tag: str, level: int, name: str, path: Path):
+    def __init__(self, tag: str, name: str, path: Path):
         self.filename = path.absolute()
         self.script_dir = self.filename.parent
         assert self.script_dir.is_dir()
 
-        self.basetag = tag
-        self.level = level
-        self.tag = f"{self.basetag}.{level}"
+        self.tag = tag
         self.name = name
         self.steps = 0
         self.passed = 0
@@ -104,10 +102,6 @@ class TestCaseInfo:
         self.start_time = time.time()
         self.step_start_time = self.start_time
         self.run_time = None
-
-    def inclevel(self):
-        self.level += 1
-        self.tag = f"{self.basetag}.{self.level}"
 
 
 class TestCase:
@@ -155,8 +149,10 @@ class TestCase:
         result_logger: logging.Logger = None,
     ):
 
-        self.info = TestCaseInfo(tag, 1, name, path)
+        self.info = TestCaseInfo(tag, name, path)
         self.__saved_info = []
+
+        self.__space_before_result = False
 
         self.targets = targets
 
@@ -174,8 +170,10 @@ class TestCase:
         nmax = max(len(x) for x in targets)
         nmax = max(nmax, len("TARGET"))
         self.sum_fmt = TestCase.sum_fmt.format(nmax)
-        self.rlog.info(self.sum_fmt, "NUMBER", "STAT", "TARGET", "TIME", "DESCRIPTION")
-        self.rlog.info("-" * 70)
+
+        # Let's keep this out of summary for now
+        self.rlog.debug(self.sum_fmt, "NUMBER", "STAT", "TARGET", "TIME", "DESCRIPTION")
+        self.rlog.debug("-" * 70)
 
     @property
     def tag(self):
@@ -204,15 +202,15 @@ class TestCase:
 
     def __push_execinfo(self, path: Path):
         newname = self.name + path.stem
+        self.info.steps += 1
         self.__saved_info.append(self.info)
-        self.info.inclevel()
-        self.info = TestCaseInfo(self.info.basetag, self.info.level, newname, path)
+        tag = f"{self.info.tag}.{self.info.steps}"
+        self.info = TestCaseInfo(tag, newname, path)
 
     def __pop_execinfo(self):
         # do something with tag?
         finised_info = self.info
         self.info = self.__saved_info.pop()
-        self.info.inclevel()
         return finised_info
 
     async def _exec_script(self, script):
@@ -235,6 +233,13 @@ class TestCase:
         _ok_result = "marker"
         try:
             script = script.strip()
+
+            if m := re.search(r"# TITLE: *(.*) *(\n|$)", script):
+                title = m.group(1)
+            else:
+                title = f"Test from file: {self.info.filename.name}"
+            self.print_summary_header(self.info.tag, title, False)
+
             s2 = (
                 f"async def _{newname}(ok_result):\n"
                 + " "
@@ -256,6 +261,13 @@ class TestCase:
         passed, failed = self.end_test()
         return passed, failed, e
 
+    def print_summary_header(self, tag, header, add_newline=True):
+        # self.olog.info(self.sum_fmt, tag, "", "", "", header)
+        self.olog.info("== %s ==", f"TEST: {tag}. {header}")
+        if add_newline:
+            self.rlog.info("")
+        self.rlog.info("%s. %s", tag, header)
+
     def post_result(self, target, success, rstr, logstr=None):
         if success:
             self.info.passed += 1
@@ -276,6 +288,11 @@ class TestCase:
 
         stepstr = f"{self.tag}.{self.steps}"
         rtimes = _delta_time_str(run_time)
+
+        if self.__space_before_result:
+            self.rlog.info("")
+            self.__space_before_result = False
+
         reslf(self.sum_fmt, stepstr, status, target, rtimes, rstr)
 
         # start counting for next step now
@@ -472,17 +489,27 @@ class TestCase:
 
         if not inline:
             self.__push_execinfo(path)
-
         try:
-
             script = open(path, "r", encoding="utf-8").read()
-            exec(script, globals(), locals())
 
+            if not inline:
+                if m := re.search(r"# TITLE: *(.*) *(\n|$)", script):
+                    title = m.group(1)
+                self.print_summary_header(self.info.tag, title)
+                self.__space_before_result = False
+
+            exec(script, globals(), locals())
         except Exception as error:
             logging.error("Exception while including file: %s: %s", path, error)
 
         if not inline:
-            self.__pop_execinfo()
+            info = self.__pop_execinfo()
+            passed, failed = info.passed, info.failed
+            self.info.passed += passed
+            self.info.failed += failed
+
+            # This is to add a space after an include completes
+            self.__space_before_result = True
 
     def step(self, target: str, cmd: str) -> str:
         """See :py:func:`~munet.mutest.userapi.step`.
@@ -665,7 +692,7 @@ TestCase.g_tc = None
 
 def _delta_time_str(run_time: float) -> str:
     if run_time < 0.001:
-        return f"{run_time:1.4f}"
+        return f"{run_time:1.3f}"
     if run_time < 0.01:
         return f"{run_time:2.3f}"
     if run_time < 0.1:

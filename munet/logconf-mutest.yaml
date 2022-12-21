@@ -35,9 +35,10 @@ handlers:
     filename: mutest-output.log
     mode: w
   results:
-    level: DEBUG
+    level: INFO
     class: munet.logging.MultiFileHandler
     root_path: "mutest.results"
+    new_handler_level: DEBUG
     formatter: results
     filename: mutest-results.log
     mode: w

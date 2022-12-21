@@ -51,6 +51,7 @@ class MultiFileHandler(logging.FileHandler):
 
     Args:
         root_path: the logging path of the root level for this handler.
+        new_handler_level: logging level for newly created handlers
         log_dir: the log directory to put log files in.
         filename: the base log file.
     """
@@ -66,7 +67,18 @@ class MultiFileHandler(logging.FileHandler):
         self.__log_dir.mkdir(parents=True, exist_ok=True)
         self.__filenames = {}
         self.__added = set()
+
+        if "new_handler_level" not in kwargs:
+            self.__new_handler_level = logging.NOTSET
+        else:
+            new_handler_level = kwargs["new_handler_level"]
+            del kwargs["new_handler_level"]
+            self.__new_handler_level = new_handler_level
+
         super().__init__(filename=filename, **kwargs)
+
+        if self.__new_handler_level is None:
+            self.__new_handler_level = self.level
 
     def __log_filename(self, name):
         if name in self.__filenames:
@@ -90,6 +102,7 @@ class MultiFileHandler(logging.FileHandler):
             if newname not in self.__added:
                 self.__added.add(newname)
                 h = logging.FileHandler(filename=newname, **self.__kwargs)
+                h.setLevel(self.__new_handler_level)
                 h.setFormatter(self.formatter)
                 logging.getLogger(record.name).addHandler(h)
                 h.emit(record)

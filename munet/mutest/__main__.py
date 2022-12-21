@@ -220,8 +220,12 @@ async def execute_test(
     logger.addHandler(exec_handler)
     reslog.addHandler(exec_handler)
 
-    # reslog.info("-" * 70)
-    reslog.info("START: %s:%s from %s", test_num, test_name, test.stem)
+    # We need to send an info level log to cause the speciifc handler to be
+    # created, otherwise all these debug ones don't get through
+    reslog.info("")
+
+    # reslog.debug("START: %s:%s from %s", test_num, test_name, test.stem)
+    # reslog.debug("-" * 70)
 
     targets = dict(unet.hosts.items())
     targets["."] = unet
@@ -231,16 +235,17 @@ async def execute_test(
     run_time = time.time() - tc.info.start_time
 
     status = "PASS" if not (failed or e) else "FAIL"
-    reslog.info(
-        "stats: %s:%s:  %d pass, %d fail, %4.2fs elapsed",
-        test_num,
-        test_name,
+
+    # Turn off for now
+    reslog.debug("-" * 70)
+    reslog.debug(
+        "(stats: %d pass, %d fail, %4.2fs elapsed)",
         passed,
         failed,
         run_time,
     )
-    reslog.info("-" * 70)
-    reslog.info("END: %s %s:%s\n", status, test_num, test_name)
+    reslog.debug("-" * 70)
+    reslog.debug("END: %s %s:%s\n", status, test_num, test_name)
 
     return passed, failed, e
 
@@ -257,14 +262,23 @@ def testname_from_path(path: Path) -> str:
     return str(Path(path).stem).replace("/", ".")
 
 
+def print_header(reslog, unet):
+    targets = dict(unet.hosts.items())
+    nmax = max(len(x) for x in targets)
+    nmax = max(nmax, len("TARGET"))
+    sum_fmt = uapi.TestCase.sum_fmt.format(nmax)
+    reslog.info(sum_fmt, "NUMBER", "STAT", "TARGET", "TIME", "DESCRIPTION")
+    reslog.info("-" * 70)
+
+
 async def run_tests(args):
     reslog = logging.getLogger("mutest.results")
-    sheader = "=== RUN START "
-    reslog.info(sheader + sheader[0] * (70 - len(sheader)) + "\n")
 
     common, tests, configs = await collect(args)
     results = []
     errlog = logging.getLogger("mutest.error")
+    reslog = logging.getLogger("mutest.results")
+    printed_header = False
     tnum = 0
     start_time = time.time()
     for dirpath in tests:
@@ -284,6 +298,9 @@ async def run_tests(args):
 
             try:
                 async for unet in get_unet(config, common, rundir):
+                    if not printed_header:
+                        print_header(reslog, unet)
+                        printed_header = True
                     passed, failed, e = await execute_test(
                         unet, test, args, tnum, exec_handler
                     )
@@ -297,33 +314,27 @@ async def run_tests(args):
             results.append((test_name, passed, failed, e))
     run_time = time.time() - start_time
 
-    sheader = "--- RUN SUMMARY "
-    reslog.info(sheader + sheader[0] * (70 - len(sheader)))
-
     tnum = 0
     tpassed = 0
     tfailed = 0
     texc = 0
 
-    snum = 0
     spassed = 0
     sfailed = 0
+
     for result in results:
-        test_name, passed, failed, e = result
+        _, passed, failed, e = result
         tnum += 1
         spassed += passed
         sfailed += failed
         if e:
             texc += 1
         if failed or e:
-            s = "FAIL"
             tfailed += 1
         else:
-            s = "PASS"
             tpassed += 1
 
-        reslog.info(" %s  %s:%s", s, tnum, test_name)
-
+    reslog.info("")
     reslog.info(
         "run stats: %s steps, %s pass, %s fail, %s abort, %4.2fs elapsed",
         spassed + sfailed,
@@ -333,7 +344,18 @@ async def run_tests(args):
         run_time,
     )
     reslog.info("-" * 70)
-    reslog.info("END RUN: %s tests, %s pass, %s fail", tnum, tpassed, tfailed)
+
+    tnum = 0
+    for result in results:
+        test_name, passed, failed, e = result
+        tnum += 1
+        s = "FAIL" if failed or e else "PASS"
+        reslog.info(" %s  %s:%s", s, tnum, test_name)
+
+    reslog.info("-" * 70)
+    reslog.info(
+        "END RUN: %s test scripts, %s passed, %s failed", tnum, tpassed, tfailed
+    )
 
     return 1 if tfailed else 0
 
