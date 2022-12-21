@@ -229,7 +229,9 @@ async def execute_test(
     targets = dict(unet.hosts.items())
     targets["."] = unet
 
-    tc = uapi.TestCase(str(test_num), test_name, test, targets, logger, reslog)
+    tc = uapi.TestCase(
+        str(test_num), test_name, test, targets, logger, reslog, args.full_summary
+    )
     passed, failed, e = tc.execute()
     run_time = time.time() - tc.info.start_time
 
@@ -393,6 +395,12 @@ def main():
         "--file-select", default="mutest_*.py", help="shell glob for finding tests"
     )
     ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
+    ap.add_argument(
+        "-V",
+        "--full-summary",
+        action="store_true",
+        help="print full summary headers from docstrings",
+    )
     ap.add_argument(
         "-v", dest="verbose", action="count", default=0, help="More -v's, more verbose"
     )

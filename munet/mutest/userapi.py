@@ -120,6 +120,8 @@ class TestCase:
         targets: a dictionary of objects which implement ``cmd_nostatus(str)``
         output_logger: a logger for output and other messages from the test.
         result_logger: a logger to output the results of test steps to.
+        full_summary: if True then print entire doctstring instead of
+          only the first line in the results report
 
     Attributes:
         tag: identity of the test in a run
@@ -149,10 +151,12 @@ class TestCase:
         targets: dict,
         output_logger: logging.Logger = None,
         result_logger: logging.Logger = None,
+        full_summary: bool = False,
     ):
 
         self.info = TestCaseInfo(tag, name, path)
         self.__saved_info = []
+        self.__short_doc_header = not full_summary
 
         self.__space_before_result = False
 
@@ -275,7 +279,10 @@ class TestCase:
 
             # Extract any docstring as a title.
             if print_header:
-                title = locals()[f"_{name}"].__doc__
+                title = locals()[f"_{name}"].__doc__.lstrip()
+                if self.__short_doc_header and (title := title.lstrip()):
+                    if (idx := title.find("\n")) != -1:
+                        title = title[:idx].strip()
                 if not title:
                     title = f"Test from file: {self.info.path.name}"
                 self.__print_header(self.info.tag, title, add_newline)
@@ -496,7 +503,7 @@ class TestCase:
     # Public APIs for User
     # ---------------------
 
-    def include(self, pathname: str, inline: bool = False):
+    def include(self, pathname: str, new_section: bool = False):
         """See :py:func:`~munet.mutest.userapi.include`.
 
         :meta private:
@@ -504,14 +511,14 @@ class TestCase:
         path = Path(pathname)
         path = self.info.script_dir.joinpath(path)
 
-        if not inline:
+        if new_section:
             if self.__in_section:
                 self.__end_section()
             self.__push_execinfo(path)
 
-        self.__exec_script(path, not inline, True)
+        self.__exec_script(path, new_section, True)
 
-        if not inline:
+        if new_section:
             info = self.__pop_execinfo()
             passed, failed = info.passed, info.failed
             self.info.passed += passed
@@ -758,14 +765,15 @@ def log(fmt, *args, **kwargs):
     return TestCase.g_tc.logf(fmt, *args, **kwargs)
 
 
-def include(pathname: str, inline=False):
+def include(pathname: str, new_section=False):
     """Include a file as part of testcase.
 
     Args:
         pathname: the file to include.
-        inline: execute the script inline.
+        new_section: if a new section should be created, otherwise
+          commands are executed inline.
     """
-    return TestCase.g_tc.include(pathname, inline)
+    return TestCase.g_tc.include(pathname, new_section)
 
 
 def script_dir() -> Path:
@@ -984,7 +992,7 @@ def wait_step_json(
 
 def luInclude(filename, CallOnFail=None):
     """Backward compatible API, do not use in new tests."""
-    return include(filename, CallOnFail)
+    return include(filename)
 
 
 def luLast(usenl=False):
