@@ -229,16 +229,22 @@ class TestCase:
         self.rlog.info("%s. %s", tag, header)
 
     def __exec_script(self, path, print_header, add_newline):
+
+        # Below was the original method to avoid the global TestCase
+        # variable; however, we need global functions so we can import them
+        # into test scripts. Without imports pylint will complain about undefined
+        # functions and the resulting christmas tree of warnings is annoying.
+        #
         # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
-        include = self.include
-        log = self.logf
-        match_step = self.match_step
-        match_step_json = self.match_step_json
-        step = self.step
-        step_json = self.step_json
-        test = self.test
-        wait_step = self.wait_step
-        wait_step_json = self.wait_step_json
+        # include = self.include
+        # log = self.logf
+        # match_step = self.match_step
+        # match_step_json = self.match_step_json
+        # step = self.step
+        # step_json = self.step_json
+        # test = self.test
+        # wait_step = self.wait_step
+        # wait_step_json = self.wait_step_json
 
         name = f"{path.stem}{self.tag}"
         name = re.sub(r"\W|^(?=\d)", "_", name)
