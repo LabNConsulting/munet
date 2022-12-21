@@ -1,8 +1,10 @@
 """A test of json steps"""
+# TITLE: Test JSON step functionality
 from munet.mutest.userapi import include
 from munet.mutest.userapi import log
 from munet.mutest.userapi import match_step_json
 from munet.mutest.userapi import step_json
+from munet.mutest.userapi import test
 from munet.mutest.userapi import wait_step_json
 
 
@@ -66,4 +68,12 @@ wait_step_json(
 )
 
 # expect failing tests
+
 include("inc_b_fail.py")
+include("inc_b_fail.py")
+
+test(True, "Test after an 2 non-inline includes")
+
+include("inc_b_fail.py", True)
+
+test(True, "A test after an inline include")
