@@ -7,4 +7,4 @@ section("The waiting section of this include")
 wait_step("r1", "sleep .1; hostname", "r1", "Verify correct hostname with sleep;")
 wait_step("r1", "sleep .1; ls -l /", "etc", "Verify etc in rootfs /")
 
-include("inc_subtest.py")
+include("inc_subtest.py", new_section=True)
