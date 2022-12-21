@@ -58,6 +58,7 @@ is in the FIB for the IP destination ``10.0.1.1``.  Then it checks repeatedly fo
 
     match_step("r1", 'vtysh -c "show ip fib 10.0.1.1"', "Routing entry for 10.0.1.0/24",
                "Check for FIB entry for 10.0.1.1")
+
     wait_step("r1",
               'vtysh -c "show ip fib 10.0.2.1"',
               "Routing entry for 10.0.2.0/24",
@@ -80,7 +81,6 @@ import time
 
 from pathlib import Path
 from typing import Any
-from typing import Callable
 from typing import Union
 
 from deepdiff import DeepDiff as json_cmp
@@ -90,8 +90,8 @@ class TestCaseInfo:
     """Object to hold nestable TestCase Results."""
 
     def __init__(self, tag: str, name: str, path: Path):
-        self.filename = path.absolute()
-        self.script_dir = self.filename.parent
+        self.path = path.absolute()
+        self.script_dir = self.path.parent
         assert self.script_dir.is_dir()
 
         self.tag = tag
@@ -195,9 +195,17 @@ class TestCase:
     def failed(self):
         return self.info.failed
 
+    def execute(self):
+        """Execute the test case.
+
+        :meta private:
+        """
+        e = self.__exec_script(self.info.path, True, False)
+        return *self.__end_test(), e
+
     def __del__(self):
         if TestCase.g_tc is self:
-            logging.error("Internal error, TestCase.end_test() was not called!")
+            logging.error("Internal error, TestCase.__end_test() was not called!")
             TestCase.g_tc = None
 
     def __push_execinfo(self, path: Path):
@@ -213,7 +221,14 @@ class TestCase:
         self.info = self.__saved_info.pop()
         return finised_info
 
-    async def _exec_script(self, script):
+    def __print_header(self, tag, header, add_newline=True):
+        # self.olog.info(self.sum_fmt, tag, "", "", "", header)
+        self.olog.info("== %s ==", f"TEST: {tag}. {header}")
+        if add_newline:
+            self.rlog.info("")
+        self.rlog.info("%s. %s", tag, header)
+
+    def __exec_script(self, path, print_header, add_newline):
         # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
         include = self.include
         log = self.logf
@@ -225,50 +240,49 @@ class TestCase:
         wait_step = self.wait_step
         wait_step_json = self.wait_step_json
 
-        self.info.start_time = time.time()
+        name = f"{path.stem}{self.tag}"
+        name = re.sub(r"\W|^(?=\d)", "_", name)
 
-        newname = self.name + self.tag
-        newname = newname.replace(".", "_")
-        e = None
         _ok_result = "marker"
         try:
+            script = open(path, "r", encoding="utf-8").read()
+
+            # Load the script into a function.
             script = script.strip()
-
-            if m := re.search(r"# TITLE: *(.*) *(\n|$)", script):
-                title = m.group(1)
-            else:
-                title = f"Test from file: {self.info.filename.name}"
-            self.print_summary_header(self.info.tag, title, False)
-
             s2 = (
-                f"async def _{newname}(ok_result):\n"
+                # f"async def _{name}(ok_result):\n"
+                f"def _{name}(ok_result):\n"
                 + " "
                 + script.replace("\n", "\n ")
                 + "\n return ok_result\n"
                 + "\n"
             )
             exec(s2)
-            result = await locals()[f"_{newname}"](_ok_result)
+
+            # Extract any docstring as a title.
+            if print_header:
+                title = locals()[f"_{name}"].__doc__
+                if not title:
+                    title = f"Test from file: {self.info.path.name}"
+                self.__print_header(self.info.tag, title, add_newline)
+            self.__space_before_result = False
+
+            # Execute the function.
+            result = locals()[f"_{name}"](_ok_result)
+
+            # Here's where we can do async in the future if we want.
+            # result = await locals()[f"_{name}"](_ok_result)
         except Exception as error:
             logging.error(
-                "Unexpected exception during test %s: %s", newname, error, exc_info=True
+                "Unexpected exception executing %s: %s", name, error, exc_info=True
             )
-            e = error
+            return error
         else:
             if result is not _ok_result:
-                logging.info("Test %s returned early, result: %s", newname, result)
+                logging.info("%s returned early, result: %s", name, result)
+        return None
 
-        passed, failed = self.end_test()
-        return passed, failed, e
-
-    def print_summary_header(self, tag, header, add_newline=True):
-        # self.olog.info(self.sum_fmt, tag, "", "", "", header)
-        self.olog.info("== %s ==", f"TEST: {tag}. {header}")
-        if add_newline:
-            self.rlog.info("")
-        self.rlog.info("%s. %s", tag, header)
-
-    def post_result(self, target, success, rstr, logstr=None):
+    def __post_result(self, target, success, rstr, logstr=None):
         if success:
             self.info.passed += 1
             status = "PASS"
@@ -298,7 +312,7 @@ class TestCase:
         # start counting for next step now
         self.info.step_start_time = time.time()
 
-    def end_test(self) -> (int, int, Exception):
+    def __end_test(self) -> (int, int):
         """End the test log final results.
 
         Returns:
@@ -314,7 +328,7 @@ class TestCase:
 
         assert (
             TestCase.g_tc == self
-        ), "TestCase global unexpectedly someon else in end_test"
+        ), "TestCase global unexpectedly someon else in __end_test"
         TestCase.g_tc = None
 
         self.info.run_time = time.time() - self.info.start_time
@@ -465,42 +479,18 @@ class TestCase:
     # Public APIs for User
     # ---------------------
 
-    async def execute(self, script):
-        return await self._exec_script(script)
-
     def include(self, pathname: str, inline: bool = False):
         """See :py:func:`~munet.mutest.userapi.include`.
 
         :meta private:
         """
-        # pylint: disable=possibly-unused-variable,exec-used,redefined-outer-name
-        include = self.include
-        log = self.logf
-        match_step = self.match_step
-        match_step_json = self.match_step_json
-        step = self.step
-        step_json = self.step_json
-        test = self.test
-        wait_step = self.wait_step
-        wait_step_json = self.wait_step_json
-
         path = Path(pathname)
         path = self.info.script_dir.joinpath(path)
 
         if not inline:
             self.__push_execinfo(path)
-        try:
-            script = open(path, "r", encoding="utf-8").read()
 
-            if not inline:
-                if m := re.search(r"# TITLE: *(.*) *(\n|$)", script):
-                    title = m.group(1)
-                self.print_summary_header(self.info.tag, title)
-                self.__space_before_result = False
-
-            exec(script, globals(), locals())
-        except Exception as error:
-            logging.error("Exception while including file: %s: %s", path, error)
+        self.__exec_script(path, not inline, True)
 
         if not inline:
             info = self.__pop_execinfo()
@@ -520,7 +510,7 @@ class TestCase:
             "#%s.%s:%s:STEP:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
         )
@@ -535,7 +525,7 @@ class TestCase:
             "#%s.%s:%s:STEP_JSON:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
         )
@@ -558,7 +548,7 @@ class TestCase:
             "#%s.%s:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
             match,
@@ -568,17 +558,17 @@ class TestCase:
         )
         success, ret = self._match_command(target, cmd, match, expect_fail, flags)
         if desc:
-            self.post_result(target, success, desc)
+            self.__post_result(target, success, desc)
         return success, ret
 
-    def test(self, expr_or_value: Any, desc: str):
+    def test(self, expr_or_value: Any, desc: str, target: str = "") -> bool:
         """See :py:func:`~munet.mutest.userapi.test`.
 
         :meta private:
         """
         success = bool(expr_or_value)
         if success:
-            self.post_result("", success, desc)
+            self.__post_result(target, success, desc)
         return success
 
     def match_step_json(
@@ -597,7 +587,7 @@ class TestCase:
             "#%s.%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
             match,
@@ -606,7 +596,7 @@ class TestCase:
         )
         success, ret = self._match_command_json(target, cmd, match, expect_fail)
         if desc:
-            self.post_result(target, success, desc)
+            self.__post_result(target, success, desc)
         return success, ret
 
     def wait_step(
@@ -630,7 +620,7 @@ class TestCase:
             "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
             match,
@@ -644,7 +634,7 @@ class TestCase:
             target, cmd, match, False, timeout, interval, expect_fail, flags
         )
         if desc:
-            self.post_result(target, success, desc)
+            self.__post_result(target, success, desc)
         return success, ret
 
     def wait_step_json(
@@ -667,7 +657,7 @@ class TestCase:
             "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
-            self.info.filename,
+            self.info.path,
             target,
             cmd,
             match,
@@ -680,7 +670,7 @@ class TestCase:
             target, cmd, match, True, timeout, interval, expect_fail, 0
         )
         if desc:
-            self.post_result(target, success, desc)
+            self.__post_result(target, success, desc)
         return success, ret
 
 
@@ -691,13 +681,15 @@ TestCase.g_tc = None
 
 
 def _delta_time_str(run_time: float) -> str:
+    if run_time < 0.0001:
+        return "0.0"
     if run_time < 0.001:
-        return f"{run_time:1.3f}"
+        return f"{run_time:1.4f}"
     if run_time < 0.01:
         return f"{run_time:2.3f}"
     if run_time < 0.1:
         return f"{run_time:3.2f}"
-    if run_time < 1000:
+    if run_time < 100:
         return f"{run_time:4.1f}"
     return f"{run_time:5f}s"
 
@@ -754,7 +746,7 @@ def step_json(target: str, cmd: str) -> dict:
     return TestCase.g_tc.step_json(target, cmd)
 
 
-def test(expr_or_value: Any, desc: str):
+def test(expr_or_value: Any, desc: str, target: str = "") -> bool:
     """Evaluates ``expr_or_value`` and posts a result base on it bool(expr).
 
     If ``expr_or_value`` evaluates to a positive result (i.e., True, non-zero, non-None,
@@ -764,11 +756,12 @@ def test(expr_or_value: Any, desc: str):
     Args:
         expr: an expression or value to evaluate
         desc: description of this test step.
+        target: optional target to associate with this test in the result string.
 
     Returns:
         A bool indicating the test PASS or FAIL result.
     """
-    return TestCase.g_tc.test(expr_or_value, desc)
+    return TestCase.g_tc.test(expr_or_value, desc, target)
 
 
 def match_step(
@@ -932,6 +925,7 @@ def luInclude(filename, CallOnFail=None):
 
 def luLast(usenl=False):
     """Backward compatible API, do not use in new tests."""
+    del usenl
     return TestCase.g_tc.last_m
 
 

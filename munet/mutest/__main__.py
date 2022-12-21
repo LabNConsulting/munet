@@ -212,7 +212,6 @@ async def execute_test(
         exec_handler: exec file handler to add to test loggers which do not propagate.
     """
     test_name = testname_from_path(test)
-    script = open(f"{test}", "r", encoding="utf-8").read()
 
     # Get test case loggers
     logger = logging.getLogger(f"mutest.output.{test_name}")
@@ -231,7 +230,7 @@ async def execute_test(
     targets["."] = unet
 
     tc = uapi.TestCase(str(test_num), test_name, test, targets, logger, reslog)
-    passed, failed, e = await tc.execute(script)
+    passed, failed, e = tc.execute()
     run_time = time.time() - tc.info.start_time
 
     status = "PASS" if not (failed or e) else "FAIL"
@@ -239,9 +238,11 @@ async def execute_test(
     # Turn off for now
     reslog.debug("-" * 70)
     reslog.debug(
-        "(stats: %d pass, %d fail, %4.2fs elapsed)",
+        "stats: %d steps, %d pass, %d fail, %s abort, %4.2fs elapsed",
+        passed + failed,
         passed,
         failed,
+        1 if e else 0,
         run_time,
     )
     reslog.debug("-" * 70)
