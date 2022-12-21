@@ -1,12 +1,13 @@
 """Test match and wait send/expect step functionality."""
-from munet.mutest.userapi import match_step, step, test, wait_step
+from munet.mutest.userapi import match_step, section, step, test, wait_step
 
 step("r1", "ls -l /")
 step("host1", "ls -l /")
 
 test(True, "An always passing test", "any")
 
-# expect passing tests
+section("Test positive match_step calls")
+
 match_step("r1", "ls -l /dev/tty", "crw.* /dev/tty", "Look for /dev/tty")
 match_step(
     target="r1", cmd="ls -l /dev/tty", match="crw.* /dev/tty", desc="Look for /dev/tty"
@@ -45,7 +46,8 @@ wait_step(
     expect_fail=False,
 )
 
-# expect failing tests
+section("Test negative (expect_fail) match_step calls")
+
 match_step("host1", "ls -l /", " nodir", "Look for no /nodir", True)
 match_step("host1", "ls -l /", " nodir", "Look for no /nodir", expect_fail=True)
 wait_step("host1", "ls -l /", " nodir", "Look for no /nodir", 1, expect_fail=True)
