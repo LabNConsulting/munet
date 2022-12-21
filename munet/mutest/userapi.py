@@ -85,6 +85,8 @@ from typing import Union
 
 from deepdiff import DeepDiff as json_cmp
 
+from munet.base import Commander
+
 
 class TestCaseInfo:
     """Object to hold nestable TestCase Results."""
@@ -153,6 +155,12 @@ class TestCase:
         self.__saved_info = []
 
         self.__space_before_result = False
+
+        # we are only ever in a section once, an include ends a section
+        # so are never in section+include, and another section ends a
+        # section, so we don't need __in_section to be save in the
+        # TestCaseInfo struct.
+        self.__in_section = False
 
         self.targets = targets
 
@@ -324,6 +332,9 @@ class TestCase:
         Returns:
             number of steps, number passed, number failed, run time.
         """
+        if self.__in_section:
+            self.__end_section()
+
         passed, failed = self.info.passed, self.info.failed
 
         # No close for loggers
@@ -494,6 +505,8 @@ class TestCase:
         path = self.info.script_dir.joinpath(path)
 
         if not inline:
+            if self.__in_section:
+                self.__end_section()
             self.__push_execinfo(path)
 
         self.__exec_script(path, not inline, True)
@@ -506,6 +519,28 @@ class TestCase:
 
             # This is to add a space after an include completes
             self.__space_before_result = True
+
+    def __end_section(self):
+        info = self.__pop_execinfo()
+        passed, failed = info.passed, info.failed
+        self.info.passed += passed
+        self.info.failed += failed
+        self.__space_before_result = True
+        self.__in_section = False
+
+    def section(self, desc: str):
+        """See :py:func:`~munet.mutest.userapi.section`.
+
+        :meta private:
+        """
+        if self.__in_section:
+            self.__end_section()
+
+        add_nl = True if self.info.steps > 0 else False
+        self.__push_execinfo(self.info.path)
+        self.__print_header(self.info.tag, desc, add_nl)
+        self.__space_before_result = False
+        self.__in_section = True
 
     def step(self, target: str, cmd: str) -> str:
         """See :py:func:`~munet.mutest.userapi.step`.
@@ -700,6 +735,24 @@ def _delta_time_str(run_time: float) -> str:
     return f"{run_time:5f}s"
 
 
+def section(desc: str):
+    """Start a new section for steps, with a description.
+
+    This starts a new section of tests. The result is basically
+    the same as doing a non-inline include. The current test number
+    is used to form a new sub-set of test steps. So if the current
+    test number is 2.3, a section will now number subsequent steps
+    2.3.1, 2.3.2, ...
+
+    A subsequent :py:func:`section` or non-inline :py:func:`include`
+    call ends the current section and advances the base test number.
+
+    Args:
+        desc: the description for the new section.
+    """
+    TestCase.g_tc.section(desc)
+
+
 def log(fmt, *args, **kwargs):
     """Log a message in the testcase output log."""
     return TestCase.g_tc.logf(fmt, *args, **kwargs)
@@ -722,6 +775,11 @@ def script_dir() -> Path:
     includeded file, and is reverted to the previous value when the include completes.
     """
     return TestCase.g_tc.info.script_dir
+
+
+def target(name: str) -> Commander:
+    """Get the target object with the given ``name``."""
+    return TestCase.g_tc.targets[name]
 
 
 def step(target: str, cmd: str) -> str:
