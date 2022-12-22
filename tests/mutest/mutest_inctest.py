@@ -22,7 +22,7 @@
 from munet.mutest.userapi import include
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import section
-from munet.mutest.userapi import test
+from munet.mutest.userapi import test_step
 
 
 section("A section testing echo commands")
@@ -36,10 +36,10 @@ match_step("host1", 'printf "%s\n" "World"', "World", "Test printf with World ar
 include("inc_subtest.py", new_section=True)
 include("inc_withsection.py", new_section=True)
 
-test(True, "Test after an 2 non-inline includes")
-test(True, "A second test case with a target", "zoot")
+test_step(True, "Test after an 2 non-inline includes")
+test_step(True, "A second test case with a target", "zoot")
 
 section("A section with an inline include")
 include("inc_subtest.py")
 
-test(True, "A test after an inline include")
+test_step(True, "A test after an inline include")

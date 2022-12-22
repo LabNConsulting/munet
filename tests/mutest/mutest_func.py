@@ -25,7 +25,7 @@ complex commands to targets work.
 """
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import script_dir
-from munet.mutest.userapi import test
+from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step
 
 
@@ -40,7 +40,7 @@ for search_string in [
         timeout=1,
         desc=f'Verify counting "Full" adjacencies with regexp: "{search_string}"',
     )
-    test(success is True, desc="Verify success value is True")
+    test_step(success is True, desc="Verify success value is True")
 
 for search_string in [
     r"(.*Full){3,}",
@@ -54,9 +54,9 @@ for search_string in [
         desc=f'Verify counting "Full" adjacencies with regexp: "{search_string}"',
         expect_fail=True,
     )
-    test(success is True, desc="Verify success value is True")
+    test_step(success is True, desc="Verify success value is True")
 
 success, match = match_step(
     target="r1", cmd="ls -l / | grep dev", match="dev", desc="Verify shell pipe works"
 )
-test(success is True, desc="Verify success value is True")
+test_step(success is True, desc="Verify success value is True")

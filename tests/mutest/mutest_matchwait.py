@@ -1,10 +1,10 @@
 """Test match and wait send/expect step functionality."""
-from munet.mutest.userapi import match_step, section, step, test, wait_step
+from munet.mutest.userapi import match_step, section, step, test_step, wait_step
 
 step("r1", "ls -l /")
 step("host1", "ls -l /")
 
-test(True, "An always passing test", "any")
+test_step(True, "An always passing test", "any")
 
 section("Test positive match_step calls")
 
