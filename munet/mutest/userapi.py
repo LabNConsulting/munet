@@ -609,14 +609,13 @@ class TestCase:
             self.__post_result(target, success, desc)
         return success, ret
 
-    def test(self, expr_or_value: Any, desc: str, target: str = "") -> bool:
+    def test_step(self, expr_or_value: Any, desc: str, target: str = "") -> bool:
         """See :py:func:`~munet.mutest.userapi.test`.
 
         :meta private:
         """
         success = bool(expr_or_value)
-        if success:
-            self.__post_result(target, success, desc)
+        self.__post_result(target, success, desc)
         return success
 
     def match_step_json(
@@ -818,7 +817,7 @@ def step_json(target: str, cmd: str) -> dict:
     return TestCase.g_tc.step_json(target, cmd)
 
 
-def test(expr_or_value: Any, desc: str, target: str = "") -> bool:
+def test_step(expr_or_value: Any, desc: str, target: str = "") -> bool:
     """Evaluates ``expr_or_value`` and posts a result base on it bool(expr).
 
     If ``expr_or_value`` evaluates to a positive result (i.e., True, non-zero, non-None,
@@ -833,7 +832,7 @@ def test(expr_or_value: Any, desc: str, target: str = "") -> bool:
     Returns:
         A bool indicating the test PASS or FAIL result.
     """
-    return TestCase.g_tc.test(expr_or_value, desc, target)
+    return TestCase.g_tc.test_step(expr_or_value, desc, target)
 
 
 def match_step(
