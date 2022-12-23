@@ -226,10 +226,10 @@ class L3Node(LinuxNamespace):
         self.loopback_ips = get_loopback_ips(self.config, self.id)
         self.loopback_ip = self.loopback_ips[0] if self.loopback_ips else None
         if self.loopback_ip:
-            self.cmd_raises_host(f"ip addr add {self.loopback_ip} dev lo")
-            self.cmd_raises_host("ip link set lo up")
+            self.cmd_raises_nsonly(f"ip addr add {self.loopback_ip} dev lo")
+            self.cmd_raises_nsonly("ip link set lo up")
             for i, ip in enumerate(self.loopback_ips[1:]):
-                self.cmd_raises_host(f"ip addr add {ip} dev lo:{i}")
+                self.cmd_raises_nsonly(f"ip addr add {ip} dev lo:{i}")
 
         # -------------------
         # Setup node's rundir
@@ -409,7 +409,7 @@ ff02::2\tip6-allrouters
                 cmdfile.write(f"#!{shell_cmd}\n")
                 cmdfile.write(cmd)
                 cmdfile.flush()
-            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
             cmds = [cmdpath]
         else:
             cmds = shlex.split(cmd)
@@ -472,7 +472,7 @@ ff02::2\tip6-allrouters
                 cmdfile.write(f"#!{shell_cmd}\n")
                 cmdfile.write(cmd)
                 cmdfile.flush()
-            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
 
             if self.container_id:
                 cmds = ["/tmp/cleanup_cmds.shebang"]
@@ -957,10 +957,11 @@ class L3ContainerNode(L3Node):
 
         # By default run inside container
         skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        use_pty = kwargs.get("use_pty", False)
 
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
         p, _ = self._popen("popen", cmds, **kwargs)
         return p
 
@@ -970,45 +971,48 @@ class L3ContainerNode(L3Node):
 
         # By default run inside container
         skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        use_pty = kwargs.get("use_pty", False)
 
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd)
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
         p, _ = await self._async_popen("async_popen", cmds, **kwargs)
         return p
 
     def cmd_status(self, cmd, **kwargs):
         if self._check_use_base(cmd):
             return super().cmd_status(cmd, **kwargs)
-        if tty := kwargs.get("tty", False):
-            # tty always runs inside container (why?)
-            skip_pre_cmd = False
-            del kwargs["tty"]
-        else:
-            # By default run inside container
-            skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
+        # if tty := kwargs.get("tty", False):
+        #     # tty always runs inside container (why?)
+        #     skip_pre_cmd = False
+        #     del kwargs["tty"]
+        # else:
+        #     # By default run inside container
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        use_pty = kwargs.get("use_pty", False)
 
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
-        cmds = self.cmd_get_cmd_list(cmds)
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
         return self._cmd_status(cmds, **kwargs)
 
     async def async_cmd_status(self, cmd, **kwargs):
         if self._check_use_base(cmd):
             return await super().async_cmd_status(cmd, **kwargs)
-        if tty := kwargs.get("tty", False):
-            # tty always runs inside container (why?)
-            skip_pre_cmd = False
-            del kwargs["tty"]
-        else:
-            # By default run inside container
-            skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+
+        # if tty := kwargs.get("tty", False):
+        #     # tty always runs inside container (why?)
+        #     skip_pre_cmd = False
+        #     del kwargs["tty"]
+        # else:
+        #     # By default run inside container
+        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
+        use_pty = kwargs.get("use_pty", False)
 
         # Never use the base class nsenter precmd
         kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty)
-        cmds = self.cmd_get_cmd_list(cmds)
+        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
         return await self._async_cmd_status(cmds, **kwargs)
 
     def tmpfs_mount(self, inner):
@@ -1021,8 +1025,8 @@ class L3ContainerNode(L3Node):
         # eventually would be nice to support live mounting
         assert not self.container_id
         self.logger.debug("Bind mounting %s on %s", outer, inner)
-        if not self.test_host("-e", outer):
-            self.cmd_raises(f"mkdir -p {outer}")
+        if not self.test_nsonly("-e", outer):
+            self.cmd_raises_nsonly(f"mkdir -p {outer}")
         self.extra_mounts.append(f"--mount=type=bind,src={outer},dst={inner}")
 
     def mount_volumes(self):
@@ -1039,8 +1043,8 @@ class L3ContainerNode(L3Node):
                             os.path.dirname(self.unet.config["config_pathname"]), spath
                         )
                     )
-                    if not self.test_host("-e", spath):
-                        self.cmd_raises(f"mkdir -p {spath}")
+                    if not self.test_nsonly("-e", spath):
+                        self.cmd_raises_nsonly(f"mkdir -p {spath}")
                     args.append(f"--mount=type=bind,src={spath},dst={s[1]}")
                 continue
 
@@ -1056,8 +1060,8 @@ class L3ContainerNode(L3Node):
                                 os.path.dirname(self.unet.config["config_pathname"]), v
                             )
                         )
-                        if not self.test_host("-e", v):
-                            self.cmd_raises(f"mkdir -p {v}")
+                        if not self.test_nsonly("-e", v):
+                            self.cmd_raises_nsonly(f"mkdir -p {v}")
                     margs.append(f"{k}={v}")
                 else:
                     margs.append(f"{k}")
@@ -1138,8 +1142,8 @@ class L3ContainerNode(L3Node):
         if shell_cmd and cleanup_cmd:
             # Will write the file contents out when the command is run
             cleanup_cmdpath = os.path.join(self.rundir, "cleanup_cmd.shebang")
-            await self.async_cmd_raises_host(f"touch {cleanup_cmdpath}")
-            await self.async_cmd_raises_host(f"chmod 755 {cleanup_cmdpath}")
+            await self.async_cmd_raises_nsonly(f"touch {cleanup_cmdpath}")
+            await self.async_cmd_raises_nsonly(f"chmod 755 {cleanup_cmdpath}")
             cmds += [
                 # How can we override this?
                 # u'--entrypoint=""',
@@ -1167,7 +1171,7 @@ class L3ContainerNode(L3Node):
                 cmdfile.write(f"#!{shell_cmd}\n")
                 cmdfile.write(cmd)
                 cmdfile.flush()
-            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
             cmds += [
                 # How can we override this?
                 # u'--entrypoint=""',
@@ -1211,7 +1215,7 @@ class L3ContainerNode(L3Node):
         # ---------------------------------------
         timeout = Timeout(30)
         while self.cmd_p.returncode is None and not timeout.is_expired():
-            o = await self.async_cmd_raises_host(
+            o = await self.async_cmd_raises_nsonly(
                 f"podman ps -q -f name={self.container_id}"
             )
             if o.strip():
@@ -1297,7 +1301,7 @@ class L3ContainerNode(L3Node):
             e = ""
             if self.cmd_p:
                 if (rc := self.cmd_p.returncode) is None:
-                    rc, o, e = await self.async_cmd_status_host(
+                    rc, o, e = await self.async_cmd_status_nsonly(
                         [get_exec_path_host("podman"), "stop", contid]
                     )
                 if rc and rc < 128:
@@ -1311,7 +1315,7 @@ class L3ContainerNode(L3Node):
                     self.cmd_p = None
 
             # now remove the container
-            rc, o, e = await self.async_cmd_status_host(
+            rc, o, e = await self.async_cmd_status_nsonly(
                 [get_exec_path_host("podman"), "rm", contid]
             )
             if rc:
@@ -1396,8 +1400,8 @@ class L3QemuVM(L3Node):
                         os.path.dirname(self.unet.config["config_pathname"]), spath
                     )
                 )
-                if not self.test_host("-e", spath):
-                    self.cmd_raises(f"mkdir -p {spath}")
+                if not self.test_nsonly("-e", spath):
+                    self.cmd_raises_nsonly(f"mkdir -p {spath}")
                 args.append((spath, s[1], ""))
 
         for m in self.config.get("mounts", []):
@@ -1408,8 +1412,8 @@ class L3QemuVM(L3Node):
                         os.path.dirname(self.unet.config["config_pathname"]), src
                     )
                 )
-                if not self.test_host("-e", src):
-                    self.cmd_raises(f"mkdir -p {src}")
+                if not self.test_nsonly("-e", src):
+                    self.cmd_raises_nsonly(f"mkdir -p {src}")
             dst = m.get("dst", m.get("destination"))
             assert dst, "destination path required for mount"
 
@@ -1464,7 +1468,7 @@ class L3QemuVM(L3Node):
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(cmd)
-            self.cmd_raises_host(f"chmod 755 {cmdpath}")
+            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
 
             # Now write a copy inside the VM
             self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
@@ -1729,7 +1733,7 @@ class L3QemuVM(L3Node):
         args = [get_exec_path_host("qemu-system-x86_64"), "-boot", bootd]
 
         if qc.get("kvm"):
-            rc, _, e = await self.async_cmd_status_host("ls -l /dev/kvm")
+            rc, _, e = await self.async_cmd_status_nsonly("ls -l /dev/kvm")
             if rc:
                 self.logger.warning("Can't enable KVM no /dev/kvm: %s", e)
             else:
@@ -2065,14 +2069,14 @@ class Munet(BaseMunet):
                     "new-window": {"background": True},
                 },
                 {
-                    "name": "hterm",
-                    "format": "hterm HOST [HOST ...]",
+                    "name": "nsterm",
+                    "format": "nsterm HOST [HOST ...]",
                     "help": (
-                        "open terminal[s] on HOST[S] (outside containers), * for all"
+                        "open terminal[s] in the namespace only"
+                        " (outside containers or VM), * for all"
                     ),
                     "exec": "bash",
-                    "on-host": True,
-                    "new-window": True,
+                    "new-window": {"ns_only": True},
                 },
                 {
                     "name": "term",
@@ -2427,7 +2431,7 @@ async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
     # Add flash dir and mount it
     #
     flashdir = os.path.join(node.rundir, "flash")
-    node.cmd_raises_host(f"mkdir -p {flashdir} && chmod 775 {flashdir}")
+    node.cmd_raises_nsonly(f"mkdir -p {flashdir} && chmod 775 {flashdir}")
     cmds += [f"--volume={flashdir}:/mnt/flash"]
 
     #
@@ -2439,7 +2443,7 @@ async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
             node.logger.info("Skipping copy of startup-config, already present")
         else:
             source = os.path.join(node.unet.config_dirname, startup_config)
-            node.cmd_raises_host(f"cp {source} {dest} && chmod 664 {dest}")
+            node.cmd_raises_nsonly(f"cp {source} {dest} && chmod 664 {dest}")
 
     #
     # system mac address (if not present already
@@ -2456,7 +2460,7 @@ async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
         system_mac = node.config.get("system-mac", random_arista_mac)
         with open(dest, "w", encoding="ascii") as f:
             f.write(system_mac + "\n")
-        node.cmd_raises_host(f"chmod 664 {dest}")
+        node.cmd_raises_nsonly(f"chmod 664 {dest}")
 
     args = []
 

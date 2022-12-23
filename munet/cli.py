@@ -59,26 +59,31 @@ def lineiter(sock):
             s = s[i + 1 :]
 
 
-def spawn(unet, host, cmd, iow, on_host):
+# Would be nice to convert to async, but really not needed as used
+def spawn(unet, host, cmd, iow, ns_only):
     if sys.stdin.isatty():
         old_tty = termios.tcgetattr(sys.stdin)
         tty.setraw(sys.stdin.fileno())
+
     try:
         master_fd, slave_fd = pty.openpty()
 
         ns = unet.hosts[host] if host and host != unet else unet
+        popenf = ns.popen_nsonly if ns_only else ns.popen
 
         # use os.setsid() make it run in a new process group, or bash job
         # control will not be enabled
-        cmds = ns.cmd_get_cmd_list(cmd)
-        p = ns.popen(
-            cmds,
+        # cmds = ns._get_cmd_as_list(cmd)
+        p = popenf(
+            cmd,
             preexec_fn=os.setsid,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
             universal_newlines=True,
-            skip_pre_cmd=on_host,
+            use_pty=True,
+            # XXX this is actually implementing "run on host" for real
+            # skip_pre_cmd=ns_only,
         )
         iow.write("\r")
         iow.flush()
@@ -322,8 +327,8 @@ async def run_command(
     hosts,
     toplevel,
     kinds,
-    on_host=False,
-    with_pty=False,
+    ns_only=False,
+    interactive=False,
 ):
     """Runs a command on a set of hosts.
 
@@ -343,8 +348,8 @@ async def run_command(
       `unet` (the Munet object), and `user_input` (the additional command input)
       defined.
 
-    The output is sent to `outf`.  If `on_host` is True then the `execfmt` is
-    run using `Commander.cmd_status_host` otherwise it is run with
+    The output is sent to `outf`.  If `ns_only` is True then the `execfmt` is
+    run using `Commander.cmd_status_nsonly` otherwise it is run with
     `Commander.cmd_status`.
     """
     if kinds:
@@ -361,15 +366,15 @@ async def run_command(
     #     outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
     #     return
 
-    # if sys.stdin.isatty() and with_pty:
-    if with_pty:
+    # if sys.stdin.isatty() and interactive:
+    if interactive:
         for host in hosts:
             shcmd = get_shcmd(unet, host, kinds, execfmt, line)
             if not shcmd:
                 continue
             if len(hosts) > 1 or banner:
                 outf.write(f"------ Host: {host} ------\n")
-            spawn(unet, host if not toplevel else unet, shcmd, outf, on_host)
+            spawn(unet, host if not toplevel else unet, shcmd, outf, ns_only)
             if len(hosts) > 1 or banner:
                 outf.write(f"------- End: {host} ------\n")
         outf.write("\n")
@@ -384,8 +389,8 @@ async def run_command(
             ns = unet
         else:
             ns = unet.hosts[host] if host and host != unet else unet
-        if on_host:
-            cmdf = ns.async_cmd_status_host
+        if ns_only:
+            cmdf = ns.async_cmd_status_nsonly
         else:
             cmdf = ns.async_cmd_status
         aws.append(cmdf(shcmd, warn=False, stderr=subprocess.STDOUT))
@@ -564,13 +569,13 @@ async def doline(
         outf.write(f"% Unknown command: {cmd} {nline}\n")
         return True
 
-    execfmt, toplevel, kinds, on_host, with_pty = unet.cli_run_cmds[cmd][2:]
-    if with_pty and notty:
+    execfmt, toplevel, kinds, ns_only, interactive = unet.cli_run_cmds[cmd][2:]
+    if interactive and notty:
         outf.write("% Error: interactive command must be run from primary CLI\n")
         return True
 
     await run_command(
-        unet, outf, nline, execfmt, banner, hosts, toplevel, kinds, on_host, with_pty
+        unet, outf, nline, execfmt, banner, hosts, toplevel, kinds, ns_only, interactive
     )
 
     return True
@@ -736,7 +741,7 @@ def add_cli_run_cmd(
     execfmt,
     toplevel,
     kinds,
-    on_host=False,
+    ns_only=False,
     interactive=False,
 ):
     """Adds a CLI command to the CLI.
@@ -755,7 +760,7 @@ def add_cli_run_cmd(
           string for that kind.
         toplevel: run command in common top-level namespaec not inside hosts
         kinds: limit CLI command to nodes which match list of kinds.
-        on_host: Should execute the command on the host vs in the node namespace.
+        ns_only: Should execute the command on the host vs in the node namespace.
         interactive: Should execute the command inside an allocated pty (interactive)
     """
     unet.cli_run_cmds[name] = (
@@ -764,7 +769,7 @@ def add_cli_run_cmd(
         execfmt,
         toplevel,
         kinds,
-        on_host,
+        ns_only,
         interactive,
     )
 
@@ -785,7 +790,7 @@ def add_cli_config(unet, config):
         - help: "run the given FRR command using vtysh"
           format: "[HOST ...] FRR-CLI-COMMAND"
           exec: "vtysh -c {}"
-          on-host: false        # the default
+          ns-only: false        # the default
           interactive: false    # the default
         - name: "vtysh"
           help: "Open a FRR CLI inside new terminal[s] on the given HOST[s]"
@@ -822,9 +827,10 @@ def add_cli_config(unet, config):
         elif bool(new_window):
             add_cli_in_window_cmd(*stdargs)
         else:
+            # on-host is deprecated it really implemented "ns-only"
             add_cli_run_cmd(
                 *stdargs,
-                cli_cmd.get("on-host", False),
+                cli_cmd.get("ns-only", cli_cmd.get("on-host")),
                 cli_cmd.get("interactive", False),
             )
 
