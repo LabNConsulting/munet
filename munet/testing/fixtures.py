@@ -65,6 +65,7 @@ def get_test_logdir(nodeid=None, module=False):
         nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
     cur_test = nodeid.replace("[", "_").replace("]", "_")
     path, testname = cur_test.split("::")
+    testname = testname.replace("/", ".")
     path = path[:-3].replace("/", ".")
 
     # We use different logdir paths based on how xdist is running.
