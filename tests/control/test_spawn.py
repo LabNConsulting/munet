@@ -71,20 +71,26 @@ async def test_spawn(unet_share, host, mode, shellcmd):
         pytest.skip(f"{shellcmd} not installed skipping")
 
     os.environ["TEST_SHELL"] = shellcmd
+
     if mode == "pty":
-        repl = await _test_repl(unet, host, [shellcmd], use_pty=True)
+        # Do we really want to have to set this? Why is it different?
+        will_echo = host == "container1"
+        repl = await _test_repl(
+            unet, host, [shellcmd], use_pty=True, will_echo=will_echo
+        )
     else:
+        # why is our command differnt here? Will the user know to do this?
         repl = await _test_repl(unet, host, [shellcmd, "-si"], use_pty=False)
 
     try:
         rn = unet.hosts[host]
-        output = rn.cmd_raises("pwd ; ls -l /")
+        output = rn.cmd_raises("pwd ; ls -l --color=auto /")
         logging.debug("pwd and ls -l: %s", output)
 
         output = repl.cmd_raises("unset HISTFILE LSCOLORS")
         assert not output.strip()
 
-        if host != "remote1":
+        if host not in ("remote1", "container1"):
             output = repl.cmd_raises("env | grep TEST_SHELL")
             logging.debug("'env | grep TEST_SHELL' output: %s", output)
             assert output == f"TEST_SHELL={shellcmd}"
