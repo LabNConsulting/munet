@@ -34,9 +34,9 @@ import time
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
-from .base import Commander
 from .base import LinuxNamespace
 from .base import MunetError
+from .base import SharedNamespace
 from .base import SSHRemote
 from .base import Timeout
 from .base import _async_get_exec_path
@@ -236,7 +236,7 @@ class L3Node(LinuxNamespace):
         # -------------------
 
         # Not host path based, but we assume same
-        self.set_cwd(self.rundir)
+        self.set_ns_cwd(self.rundir)
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
@@ -864,6 +864,9 @@ class L3ContainerNode(L3Node):
         self.extra_mounts = []
         assert self.container_image
 
+        self.__base_cmd = []
+        self.__base_cmd_pty = []
+
         super().__init__(
             name=name,
             config=config,
@@ -901,119 +904,25 @@ class L3ContainerNode(L3Node):
         """
         return get_exec_path_host(binary)
 
-    def _get_podman_precmd(self, cmd, sudo=False, tty=False):
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
+        if ns_only:
+            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+
         if not self.cmd_p:
-            raise L3ContainerNotRunningError(f"{self}: cannot execute command: {cmd}")
-        assert self.container_id
+            if self.container_id:
+                s = f"{self}: Running command in namespace b/c container exited"
+                self.logger.warning("%s", s)
+                raise L3ContainerNotRunningError(s)
+            self.logger.debug("%s: Running command in namespace b/c no container", self)
+            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
 
-        cmds = []
-        if sudo:
-            cmds.append(get_exec_path_host("sudo"))
-        cmds.append(get_exec_path_host("podman"))
-        cmds.append("exec")
-        cmds.append(f"-eMUNET_RUNDIR={self.unet.rundir}")
-        cmds.append(f"-eMUNET_NODENAME={self.name}")
-        if tty:
-            cmds.append("-it")
-        cmds.append(self.container_id)
-
-        if not isinstance(cmd, str):
-            cmds += cmd
+        # XXX grab the env from kwargs and add to podman exec
+        # env = kwargs.get("env", {})
+        if use_pty:
+            pre_cmd = self.__base_cmd_pty
         else:
-            # Make sure the code doesn't think `cd` will work.
-            assert not re.match(r"cd(\s*|\s+(\S+))$", cmd)
-            cmds += ["/bin/bash", "-c", cmd]
-        return cmds
-
-    def get_cmd_container(self, cmd, sudo=False, tty=False):
-        # return " ".join(self._get_podman_precmd(cmd, sudo=sudo, tty=tty))
-        return self._get_podman_precmd(cmd, sudo=sudo, tty=tty)
-
-    def _check_use_base(self, cmd):
-        """Check if we should call the base class cmd method.
-
-        This is only the case if we haven't tried to create the container yet.
-        """
-        if self.cmd_p:
-            return False
-        if self.container_id is None:
-            self.logger.debug(
-                "%s: Invoking base class cmd_/popen* function "
-                "b/c no container yet: cmd: %s",
-                self,
-                cmd,
-            )
-            return True
-        self.logger.debug(
-            "%s: No running cmd_p, invoking cmd_/popen* to raise exception: cmd: %s",
-            self,
-            cmd,
-        )
-        return False
-
-    def popen(self, cmd, **kwargs):
-        if self._check_use_base(cmd):
-            return super().popen(cmd, **kwargs)
-
-        # By default run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
-        use_pty = kwargs.get("use_pty", False)
-
-        # Never use the base class nsenter precmd
-        kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
-        p, _ = self._popen("popen", cmds, **kwargs)
-        return p
-
-    async def async_popen(self, cmd, **kwargs):
-        if self._check_use_base(cmd):
-            return await super().async_popen(cmd, **kwargs)
-
-        # By default run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
-        use_pty = kwargs.get("use_pty", False)
-
-        # Never use the base class nsenter precmd
-        kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
-        p, _ = await self._async_popen("async_popen", cmds, **kwargs)
-        return p
-
-    def cmd_status(self, cmd, **kwargs):
-        if self._check_use_base(cmd):
-            return super().cmd_status(cmd, **kwargs)
-
-        # if tty := kwargs.get("tty", False):
-        #     # tty always runs inside container (why?)
-        #     skip_pre_cmd = False
-        #     del kwargs["tty"]
-        # else:
-        #     # By default run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
-        use_pty = kwargs.get("use_pty", False)
-
-        # Never use the base class nsenter precmd
-        kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
-        return self._cmd_status(cmds, **kwargs)
-
-    async def async_cmd_status(self, cmd, **kwargs):
-        if self._check_use_base(cmd):
-            return await super().async_cmd_status(cmd, **kwargs)
-
-        # if tty := kwargs.get("tty", False):
-        #     # tty always runs inside container (why?)
-        #     skip_pre_cmd = False
-        #     del kwargs["tty"]
-        # else:
-        #     # By default run inside container
-        skip_pre_cmd = kwargs.get("skip_pre_cmd", False)
-        use_pty = kwargs.get("use_pty", False)
-
-        # Never use the base class nsenter precmd
-        kwargs["skip_pre_cmd"] = True
-        cmds = cmd if skip_pre_cmd else self._get_podman_precmd(cmd, tty=use_pty)
-        return await self._async_cmd_status(cmds, **kwargs)
+            pre_cmd = self.__base_cmd
+        return shlex.join(pre_cmd) if use_str else pre_cmd
 
     def tmpfs_mount(self, inner):
         # eventually would be nice to support live mounting
@@ -1194,7 +1103,7 @@ class L3ContainerNode(L3Node):
 
         stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
         stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
-        self.cmd_p = await self.async_popen(
+        self.cmd_p = await self.async_popen_nsonly(
             cmds,
             stdin=subprocess.DEVNULL,
             stdout=stdout,
@@ -1227,6 +1136,7 @@ class L3ContainerNode(L3Node):
                 self.logger.info("%s: run_cmd taking more than %ss", self, elapsed)
                 await asyncio.sleep(1)
         if self.cmd_p.returncode is not None:
+            # leave self.container_id set to cause exception on use
             self.logger.warning(
                 "%s: run_cmd exited quickly (%ss) rc: %s",
                 self,
@@ -1240,6 +1150,22 @@ class L3ContainerNode(L3Node):
                 timeout.elapsed(),
             )
             assert not timeout.is_expired()
+
+        #
+        # Set our precmd for executing in the container
+        #
+        self.__base_cmd = [
+            get_exec_path_host("podman"),
+            "exec",
+            f"-eMUNET_RUNDIR={self.unet.rundir}",
+            f"-eMUNET_NODENAME={self.name}",
+            "-i",
+        ]
+        self.__base_cmd_pty = list(self.__base_cmd)  # copy list to pty
+        self.__base_cmd.append(self.container_id)  # end regular list
+        self.__base_cmd_pty.append("-t")  # add pty flags
+        self.__base_cmd_pty.append(self.container_id)  # end pty list
+        # self.set_pre_cmd(self.__base_cmd, self.__base_cmd_pty)  # set both pre_cmd
 
         self.logger.info("%s: started container", self.name)
 
@@ -1297,6 +1223,9 @@ class L3ContainerNode(L3Node):
                     "Got an error during delete from async_cleanup_cmd: %s", error
                 )
 
+            # Clear the container_id field we want to act like a namespace now.
+            self.container_id = None
+
             o = ""
             e = ""
             if self.cmd_p:
@@ -1322,8 +1251,6 @@ class L3ContainerNode(L3Node):
                 self.logger.warning(
                     "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
                 )
-            # keeps us from cleaning up twice
-            self.container_id = None
 
         await super()._async_delete()
 
@@ -2025,7 +1952,7 @@ class Munet(BaseMunet):
 
         self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
-        self.set_cwd(self.rundir)
+        self.set_ns_cwd(self.rundir)
 
         if not config:
             config = {}
@@ -2043,10 +1970,7 @@ class Munet(BaseMunet):
         if not self.isolated:
             self.rootcmd = commander
         else:
-            self.rootcmd = Commander("host")
-            self.rootcmd.set_pre_cmd(
-                ["/usr/bin/nsenter", *self.a_flags, "-t", "1", "-F"]
-            )
+            self.rootcmd = SharedNamespace("host", pid=1)
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:

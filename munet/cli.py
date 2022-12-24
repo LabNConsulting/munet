@@ -73,9 +73,9 @@ def spawn(unet, host, cmd, iow, ns_only):
 
         # use os.setsid() make it run in a new process group, or bash job
         # control will not be enabled
-        # cmds = ns._get_cmd_as_list(cmd)
         p = popenf(
             cmd,
+            # _common_prologue, later in call chain, only does this for use_pty == False
             preexec_fn=os.setsid,
             stdin=slave_fd,
             stdout=slave_fd,
