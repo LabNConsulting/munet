@@ -49,3 +49,4 @@ topology:
         tail -f /dev/null
     - name: r3
       server: localhost
+      server-port: 5222
