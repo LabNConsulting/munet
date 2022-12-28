@@ -25,6 +25,7 @@ import datetime
 import logging
 import os
 import sys
+import time
 
 import requests
 
@@ -40,7 +41,14 @@ def fetch(owner, repo, files, release="latest", dest="."):
 
     remaining = list(files)
     qurl = base_url + f"/releases/{release}"
-    jr = requests.get(qurl, timeout=60).json()
+    for i in range(0, 20):
+        jr = requests.get(qurl, timeout=60).json()
+        if "assets" in jr:
+            break
+        logging.warning("query returned with no assets: %s", jr)
+        time.sleep(1)
+    else:
+        raise Exception(f"Never got list of assest after {i} tries")
     for asset in jr["assets"]:
         name = asset["name"]
         if name not in files:
@@ -71,7 +79,7 @@ def fetch(owner, repo, files, release="latest", dest="."):
         r = requests.get(aurl, timeout=60, headers=bheader)
         assert (
             r.headers["Content-Type"] == "application/octet-stream"
-        ), f"Wrong content type: {r.headers['Content-Type']}"
+        ), f"Wrong content type: {r.headers['Content-Type']}: request: {r}"
 
         # Save the asset
         with open(path, "wb") as f:
