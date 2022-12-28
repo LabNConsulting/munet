@@ -1,0 +1,45 @@
+#cloud-config
+hostname: r1
+manage_etc_hosts: true
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    home: /home/ubuntu
+    shell: /bin/bash
+    lock_passwd: false
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDNTAAgBYz2bzRWm3S4B+9m+1LR4MASPc4xoYXYT+MSpTLoYcMxfM2W6s0ZwWFnCO2Rkv5myS7zUK5DoWrE0RPkYAMdkgN/oaIND886eTUREw2m/d0aUffHl9UWg0enE9HoN4qt0V1rZezJRp4cgVPCXODomKQ47vtlkPMhmMPJNN1L/hZqqobeah1esFt5IQNVTKNzWh2PzIQsywXXkkPaA4aJEBqzTCsqwQtAr0/bg5HDJ9kCrI5EeL9MQhN1BJ1uI2yPb/2BGsz2ALPg+zanLbARJnk79QTqO8cjFilEhZRyxNklDkVQokjwfXn+b7FQyn5iFk3/p6fHq/Eg/oUwsk9idRY2bTFVlGt5Dh+vjAxoCQ4wT5/rcA70mxFtqtJUrk8I/y1u63axKJAU5j9gKlFHSg12I6bCT/95TpZ1g3k3KBiTMeBKcUnSLRf2amzPorWubBzoa/l3vS18rGEO/zSHw78TQiWuU0EAZT7gMz2VgEBR88Pl3xyS/D7fxQfVs1SodN57qjBII4Fn0M8KKC6pEbGRSKhfJ32OWIwLLfJ4FG0jXqPS3+M9IWmLoDKas3r7cXlOuz0qA4X9HQ1nB5tdfDpbLwrhywK0oVnFRp8zKzis65Ni/fATIFwTSdgIy5p4DT/co7S8m31unRSm1EbpcbPW9vrUpMgWSw1bmQ== chopps@fermi
+
+# only cert auth via ssh (console access can still login)
+ssh_pwauth: true
+disable_root: false
+chpasswd:
+  list: |
+     root:admin
+     ubuntu:$6$rounds=4096$QyYt7EpUTV004xEn$.XMbzwtK.skPHg4Um5Ljn219AOsFcxXYsyhn/l3bOJbzivGgFa7l4LJe/D3wyTpOBvw24Am.YuXAK73wOgjk4/
+  expire: False
+
+# Doesn't work right
+# packages:
+#   - qemu-guest-agent
+
+runcmd:
+  - [ systemctl, enable, serial-getty@ttyS1.service ]
+  - [ systemctl, enable, serial-getty@ttyS2.service ]
+  - [ systemctl, enable, serial-getty@hvc1.service ]
+  - [ systemctl, start, --no-block, serial-getty@ttyS1.service ]
+  - [ systemctl, start, --no-block, serial-getty@ttyS2.service ]
+  - [ systemctl, start, --no-block, serial-getty@hvc1.service ]
+
+# write_files:
+#   - path: /etc/systemd/system/getty@tty1.service.d/override.conf
+#     permissions: '0644'
+#     content: |
+#       [Service]
+#       Type=simple
+#       ExecStart=
+#       ExecStart=-/sbin/agetty --autologin root --noclear %I 38400 linux
+
+# written to /var/log/cloud-init-output.log
+final_message: "The system is finally up, after $UPTIME seconds"

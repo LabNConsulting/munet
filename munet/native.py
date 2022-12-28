@@ -31,6 +31,8 @@ import socket
 import subprocess
 import time
 
+from pathlib import Path
+
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
@@ -1743,30 +1745,48 @@ class L3QemuVM(L3Node):
         if not nnics:
             args += ["-nic", "none"]
 
-        dtpl = qc.get("disk-template")
-        diskpath = disk = qc.get("disk")
-        if dtpl and not disk:
-            disk = qc["disk"] = f"{self.name}-{os.path.basename(dtpl)}"
-            diskpath = os.path.join(self.rundir, disk)
-            if self.path_exists(diskpath):
-                logging.debug("Disk '%s' file exists, using.", diskpath)
-            else:
-                dtplpath = os.path.abspath(
-                    os.path.join(
-                        os.path.dirname(self.unet.config["config_pathname"]), dtpl
-                    )
-                )
-                logging.info("Create disk '%s' from template '%s'", diskpath, dtplpath)
-                self.cmd_raises(
-                    f"qemu-img create -f qcow2 -F qcow2 -b {dtplpath} {diskpath}"
-                )
-
-        if diskpath:
-            args.extend(
-                ["-drive", f"file={diskpath},if=none,id=sata-disk0,format=qcow2"]
-            )
+        if qc.get("disks") or qc.get("disk-templates"):
             args.extend(["-device", "ahci,id=ahci"])
-            args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
+
+        disks = []
+        for tpl in qc.get("disk-templates", []):
+            tplpath = tpl.get("path")
+            tplsize = tpl.get("size", "2G")
+
+            tplpath = Path(self.unet.config_dirname).joinpath(tplpath)
+            assert tplpath.exists(), f"Missign disk template file: {tplpath}"
+
+            diskpath = Path(self.rundir).joinpath(tplpath.name)
+            assert diskpath != tplpath, "disk-template and new disk are same"
+            if self.path_exists(diskpath):
+                logging.warning("disk '%s' exists, removing.", diskpath)
+                os.remove(diskpath)
+
+            logging.info("Creating disk '%s' backed by '%s'", diskpath, tplpath)
+            self.cmd_raises(
+                f"qemu-img create -b {tplpath} -f qcow2 -F qcow2 {diskpath} {tplsize}"
+            )
+            disks.append(diskpath)
+
+        edisks = qc.get("disks", [])
+        qc["disks"] = edisks + disks
+
+        for i, diskpath in enumerate(qc["disks"]):
+            diskpath = Path(self.rundir).joinpath(diskpath)
+            assert diskpath.exists(), f"disk '{diskpath}' doesn't exist"
+            args.extend(
+                ["-drive", f"file={diskpath},if=none,id=sata-disk{i},format=qcow2"]
+            )
+            args.extend(["-device", f"ide-hd,bus=ahci.0,drive=sata-disk{i}"])
+
+        data_disk_path = qc.get("data-disk")
+        if data_disk_path:
+            args.extend(
+                ["-drive", f"file={data_disk_path},if=none,id=sata-disk1,format=raw"]
+            )
+            if not diskpath:
+                args.extend(["-device", "ahci,id=ahci"])
+            args.extend(["-device", "ide-hd,bus=ahci.1,drive=sata-disk1"])
 
         use_stdio = cc.get("stdio", True)
         has_cmd = self.config.get("cmd")

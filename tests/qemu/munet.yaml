@@ -7,10 +7,15 @@ topology:
       nat: true
   nodes:
     - name: h1
-      connections: ["mgmt0", "r1"]
+      connections: ["mgmt0"]
+    # - name: h2
+    #   kind: linux
+    #   connections: ["mgmt0"]
     - name: r1
-      kind: linux
-      connections: ["mgmt0", "h1"]
+      kind: ubuntu
+      connections:
+        - to: "mgmt0"
+          name: "ens3"
 
 kinds:
   - name: linux
@@ -22,11 +27,37 @@ kinds:
       kvm: true
       ncpu: 2
 
+  - name: ubuntu
+    qemu:
+      disk-templates:
+        - path: "%CONFIGDIR%/images/jammy-server-cloudimg-amd64-disk-kvm.img"
+          size: "20G"
+      data-disk: "%CONFIGDIR%/user-data.img"
+      cmdline-extra: "acpi=off nokaslr"
+      memory: "768M"
+      kvm: true
+      ncpu: 2
+      console:
+        stdio: true
+        user: "root"
+        password: "admin"
+        timeout: 300
+
 cli:
   commands:
     - name: con
       exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/console"
       format: "con HOST [HOST ...]"
+      help: "open console on given hosts, * for all"
+      new-window: true
+    - name: _con
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/_console"
+      format: "_con HOST [HOST ...]"
+      help: "open console on given hosts, * for all"
+      new-window: true
+    - name: vcon
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/vcon0"
+      format: "vcon HOST [HOST ...]"
       help: "open console on given hosts, * for all"
       new-window: true
     - name: mon
