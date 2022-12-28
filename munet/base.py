@@ -307,6 +307,8 @@ class Commander:  # pylint: disable=R0904
         pre_cmd_list = self._get_pre_cmd(False, use_pty, ns_only=ns_only, **kwargs)
         cmd_list = [str(x) for x in cmd_list]
 
+        # os_env = {k: v for k, v in os.environ.items() if k.startswith("MUNET")}
+        # env = {**os_env, **(kwargs["env"] if "env" in kwargs else {})}
         env = {**(kwargs["env"] if "env" in kwargs else os.environ)}
         if "MUNET_NODENAME" not in env:
             env["MUNET_NODENAME"] = self.name
@@ -480,8 +482,10 @@ class Commander:  # pylint: disable=R0904
         # for spawned shells (i.e., a direct command an not a console)
         # this is wrong and will cause 2 prompts
         if not use_pty:
+            # This isn't very nice looking
             p.echo = False
-            p.isalive = lambda: p.proc.poll() is None
+            if not is_file_like(cmd):
+                p.isalive = lambda: p.proc.poll() is None
             if not hasattr(p, "close"):
                 p.close = p.wait
 
@@ -2012,7 +2016,7 @@ class BaseMunet(LinuxNamespace):
                     os.getpid(),
                     os.environ["MUNET_PID"],
                 )
-            os.environ["MUNET_PID"] = str(os.getpid())
+        os.environ["MUNET_PID"] = str(os.getpid())
 
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:
