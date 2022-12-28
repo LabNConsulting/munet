@@ -968,9 +968,8 @@ class Commander:  # pylint: disable=R0904
         if isinstance(self, SSHRemote):
             if isinstance(cmd, str):
                 cmd = shlex.split(cmd)
-                cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
+            cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
             nscmd = self._get_pre_cmd(False, True, ns_only=ns_only) + cmd
-            # This is always a list
         else:
             # This is the command to execute to be inside the namespace.
             # We are getting into trouble with quoting.
@@ -979,9 +978,12 @@ class Commander:  # pylint: disable=R0904
             # We need sudo b/c we are executing as the user inside the window system.
             sudo_path = get_exec_path_host(["sudo"])
             nscmd = (
-                sudo_path + " " + self._get_pre_cmd(True, True, ns_only=ns_only) + cmd
+                sudo_path
+                + " "
+                + self._get_pre_cmd(True, True, ns_only=ns_only)
+                + " "
+                + cmd
             )
-            # This is always a string
 
         if "TMUX" in os.environ and not forcex:
             cmd = [get_exec_path_host("tmux")]
@@ -1320,6 +1322,8 @@ class SSHRemote(Commander):
         self.__base_cmd.append("-q")
         self.__base_cmd.append("-oStrictHostKeyChecking=no")
         self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
+        # Would be nice but has to be accepted by server config so not very useful.
+        # self.__base_cmd.append("-oSendVar='TEST'")
         self.__base_cmd_pty = list(self.__base_cmd)
         self.__base_cmd_pty.append("-t")
         self.__base_cmd.append(self.server)
