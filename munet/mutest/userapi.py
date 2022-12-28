@@ -175,9 +175,6 @@ class TestCase:
         self.olog = output_logger
         self.logf = functools.partial(self.olog.log, logging.INFO)
 
-        assert TestCase.g_tc is None
-        TestCase.g_tc = self
-
         # find the longerst target name and make target field that wide
         nmax = max(len(x) for x in targets)
         nmax = max(nmax, len("TARGET"))
@@ -212,7 +209,13 @@ class TestCase:
 
         :meta private:
         """
-        e = self.__exec_script(self.info.path, True, False)
+        assert TestCase.g_tc is None
+        try:
+            TestCase.g_tc = self
+            e = self.__exec_script(self.info.path, True, False)
+        except BaseException:
+            self.__end_test()
+            raise
         return *self.__end_test(), e
 
     def __del__(self):

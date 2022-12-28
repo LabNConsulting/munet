@@ -332,6 +332,9 @@ async def async_build_topology(
         logging.critical("Failure building munet topology: %s", error, exc_info=True)
         await unet.async_delete()
         raise
+    except KeyboardInterrupt:
+        await unet.async_delete()
+        raise
 
     topoconf = config.get("topology")
     if not topoconf:

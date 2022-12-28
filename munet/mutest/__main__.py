@@ -65,40 +65,43 @@ async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = True
     Yields:
         Munet: The constructed and running topology.
     """
+    tasks = []
+    unet = None
     try:
-        unet = await async_build_topology(
-            config, rundir=str(rundir), unshare_inline=unshare
-        )
-    except Exception as error:
-        logging.debug("unet build failed: %s", error, exc_info=True)
+        try:
+            unet = await async_build_topology(
+                config, rundir=str(rundir), unshare_inline=unshare
+            )
+        except Exception as error:
+            logging.debug("unet build failed: %s", error, exc_info=True)
+            raise
+        try:
+            tasks = await unet.run()
+        except Exception as error:
+            logging.debug("unet run failed: %s", error, exc_info=True)
+            raise
+        logging.debug("unet topology running")
+        try:
+            yield unet
+        except Exception as error:
+            logging.error("unet fixture: yield unet unexpected exception: %s", error)
+            raise
+    except KeyboardInterrupt:
+        logging.info("Received keyboard while building topology")
         raise
+    finally:
+        if unet:
+            await unet.async_delete()
 
-    try:
-        tasks = await unet.run()
-    except Exception as error:
-        logging.debug("unet run failed: %s", error, exc_info=True)
-        await unet.async_delete()
-        raise
+        # No one ever awaits these so cancel them
+        logging.debug("unet fixture: cleanup")
+        for task in tasks:
+            task.cancel()
 
-    logging.debug("unet topology running")
-
-    # Pytest is supposed to always return even if exceptions
-    try:
-        yield unet
-    except Exception as error:
-        logging.error("unet fixture: yield unet unexpected exception: %s", error)
-
-    await unet.async_delete()
-
-    # No one ever awaits these so cancel them
-    logging.debug("unet fixture: cleanup")
-    for task in tasks:
-        task.cancel()
-
-    # Reset the class variables so auto number is predictable
-    logging.debug("unet fixture: resetting ords to 1")
-    L3Node.next_ord = 1
-    Bridge.next_ord = 1
+        # Reset the class variables so auto number is predictable
+        logging.debug("unet fixture: resetting ords to 1")
+        L3Node.next_ord = 1
+        Bridge.next_ord = 1
 
 
 def common_root(path1: Union[str, Path], path2: Union[str, Path]) -> Path:
@@ -233,6 +236,7 @@ async def execute_test(
         str(test_num), test_name, test, targets, logger, reslog, args.full_summary
     )
     passed, failed, e = tc.execute()
+
     run_time = time.time() - tc.info.start_time
 
     status = "PASS" if not (failed or e) else "FAIL"
@@ -284,39 +288,52 @@ async def run_tests(args):
     printed_header = False
     tnum = 0
     start_time = time.time()
-    for dirpath in tests:
-        test_files = tests[dirpath]
-        for test in test_files:
-            tnum += 1
-            config = deepcopy(configs[dirpath])
-            test_name = testname_from_path(test)
-            rundir = args.rundir.joinpath(test_name)
+    try:
+        for dirpath in tests:
+            test_files = tests[dirpath]
+            for test in test_files:
+                tnum += 1
+                config = deepcopy(configs[dirpath])
+                test_name = testname_from_path(test)
+                rundir = args.rundir.joinpath(test_name)
 
-            # Add an test case exec file handler to the root logger and result logger
-            exec_path = rundir.joinpath("mutest-exec.log")
-            exec_path.parent.mkdir(parents=True, exist_ok=True)
-            exec_handler = logging.FileHandler(exec_path, "w")
-            exec_handler.setFormatter(exec_formatter)
-            root_logger.addHandler(exec_handler)
+                # Add an test case exec file handler to the root logger and result
+                # logger
+                exec_path = rundir.joinpath("mutest-exec.log")
+                exec_path.parent.mkdir(parents=True, exist_ok=True)
+                exec_handler = logging.FileHandler(exec_path, "w")
+                exec_handler.setFormatter(exec_formatter)
+                root_logger.addHandler(exec_handler)
 
-            try:
-                async for unet in get_unet(config, common, rundir):
-                    if not printed_header:
-                        print_header(reslog, unet)
-                        printed_header = True
-                    passed, failed, e = await execute_test(
-                        unet, test, args, tnum, exec_handler
+                try:
+                    async for unet in get_unet(config, common, rundir):
+                        if not printed_header:
+                            print_header(reslog, unet)
+                            printed_header = True
+                        passed, failed, e = await execute_test(
+                            unet, test, args, tnum, exec_handler
+                        )
+                except KeyboardInterrupt as error:
+                    errlog.warning("KeyboardInterrupt while running test %s", test_name)
+                    passed, failed, e = 0, 0, error
+                    raise
+                except Exception as error:
+                    logging.error(
+                        "Error executing test %s: %s", test, error, exc_info=True
                     )
-            except Exception as error:
-                errlog.error("Error executing test %s: %s", test, error, exc_info=True)
-                passed, failed, e = 0, 0, error
+                    errlog.error(
+                        "Error executing test %s: %s", test, error, exc_info=True
+                    )
+                    passed, failed, e = 0, 0, error
+                finally:
+                    # Remove the test case exec file handler form the root logger.
+                    root_logger.removeHandler(exec_handler)
+                    results.append((test_name, passed, failed, e))
 
-            # Remove the test case exec file handler form the root logger.
-            root_logger.removeHandler(exec_handler)
+    except KeyboardInterrupt:
+        pass
 
-            results.append((test_name, passed, failed, e))
     run_time = time.time() - start_time
-
     tnum = 0
     tpassed = 0
     tfailed = 0
