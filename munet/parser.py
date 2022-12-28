@@ -151,12 +151,15 @@ def setup_logging(args, config_base="logconf"):
         pathname = config["config_pathname"]
         del config["config_pathname"]
 
-        if args.verbose > 1:
+        if "info_console" in config["handlers"]:
+            if args.verbose > 1:
+                config["handlers"]["console"]["level"] = "DEBUG"
+                config["handlers"]["info_console"]["level"] = "DEBUG"
+            elif args.verbose:
+                config["handlers"]["console"]["level"] = "INFO"
+                config["handlers"]["info_console"]["level"] = "DEBUG"
+        else:
             config["handlers"]["console"]["level"] = "DEBUG"
-            config["handlers"]["info_console"]["level"] = "DEBUG"
-        elif args.verbose:
-            config["handlers"]["console"]["level"] = "INFO"
-            config["handlers"]["info_console"]["level"] = "DEBUG"
 
         # add the rundir path to the filenames
         for v in config["handlers"].values():

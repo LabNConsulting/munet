@@ -50,7 +50,7 @@ async def run_and_wait(args, unet):
 
     if sys.stdin.isatty() and not args.no_cli:
         # Run an interactive CLI
-        task = asyncio.create_task(cli.async_cli(unet))
+        task = cli.async_cli(unet)
     else:
         if args.no_wait:
             logger.info("Waiting for all node cmd to complete")
@@ -60,7 +60,11 @@ async def run_and_wait(args, unet):
             task = asyncio.create_task(forever())
             task = asyncio.gather(task, *tasks, return_exceptions=True)
 
-    await task
+    try:
+        await task
+    finally:
+        for task in tasks:
+            task.cancel()
 
 
 async def async_main(args, config):
@@ -84,14 +88,15 @@ async def async_main(args, config):
     else:
         logger.info("Exiting normally")
 
+    logger.debug("main: async deleting")
     try:
-        if unet:
-            logger.debug("main: async deleting")
-            await unet.async_delete()
+        await unet.async_delete()
+    except KeyboardInterrupt:
+        status = 2
+        logger.warning("Received KeyboardInterrupt while cleaning up.")
     except Exception as error:
         status = 2
         logger.info("Deleting, unexpected exception %s", error, exc_info=True)
-
     return status
 
 

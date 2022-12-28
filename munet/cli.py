@@ -226,7 +226,10 @@ def proc_readline(fd, prompt, histfile):
         sys.stdin = os.fdopen(fd)
         line = input(prompt)
         readline.write_history_file(histfile)
-    except Exception:
+    except KeyboardInterrupt:
+        print("^C\n% Exiting from KeyboardInterrupt")
+        return None
+    except BaseException:
         return None
     if line is None:
         return None
@@ -235,10 +238,10 @@ def proc_readline(fd, prompt, histfile):
 
 async def async_input(prompt, histfile):
     loop = asyncio.get_running_loop()
-    input_pool = concurrent.futures.ProcessPoolExecutor()
     partial = functools.partial(proc_readline, sys.stdin.fileno(), prompt, histfile)
-    result = await loop.run_in_executor(input_pool, partial)
-    return result
+    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as input_pool:
+        result = await loop.run_in_executor(input_pool, partial)
+        return result
 
 
 def make_help_str(unet):
