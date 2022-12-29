@@ -1839,6 +1839,7 @@ class L3QemuVM(L3Node):
                 f"local,path={m[0]},mount_tag=shared{i},security_model=passthrough",
             ]
 
+        args += ["-device", "virtio-rng-pci"]
         args += ["-nographic"]
 
         #
