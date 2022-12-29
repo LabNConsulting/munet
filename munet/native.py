@@ -1558,17 +1558,22 @@ class L3QemuVM(L3Node):
         for ifname in sorted(self.intf_addrs):
             ifaddr = self.intf_addrs[ifname]
             conn = find_with_kv(self.config.get("connections"), "name", ifname)
+            to = conn["to"]
+            switch = self.unet.switches.get(to)
             mtu = conn.get("mtu")
-            if not mtu and conn["to"] in self.unet.switches:
-                mtu = self.unet.switches[conn["to"]].config.get("mtu")
+            if not mtu and switch:
+                mtu = switch.config.get("mtu")
             if mtu:
                 con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
             con.cmd_raises(f"ip link set {ifname} up")
+            # In case there was some preconfig e.g., cloud-init
+            con.cmd_raises(f"ip addr flush dev {ifname}")
             con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
 
-            # # XXX
-            # if hasattr(switch, "is_nat") and switch.is_nat:
-            #     self.cmd_raises(f"ip route add default via {switch.ip_address}")
+            if switch and hasattr(switch, "is_nat") and switch.is_nat:
+                # In case there was some preconfig e.g., cloud-init
+                con.cmd_raises("ip route flush exact default")
+                con.cmd_raises(f"ip route add default via {switch.ip_address}")
         con.cmd_raises("ip link set lo up")
 
     async def _opencons(
