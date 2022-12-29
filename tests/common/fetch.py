@@ -41,14 +41,18 @@ def fetch(owner, repo, files, release="latest", dest="."):
 
     remaining = list(files)
     qurl = base_url + f"/releases/{release}"
-    for i in range(0, 20):
-        jr = requests.get(qurl, timeout=60).json()
-        if "assets" in jr:
-            break
-        logging.warning("query returned with no assets: %s", jr)
-        time.sleep(1)
+    if qurl in fetch.cache:
+        jr = fetch.cache[qurl]
     else:
-        raise Exception(f"Never got list of assest after {i} tries")
+        for i in range(0, 20):
+            jr = requests.get(qurl, timeout=60).json()
+            if "assets" in jr:
+                break
+            logging.warning("query returned with no assets: %s", jr)
+            time.sleep(1)
+        else:
+            raise Exception(f"Never got list of assest after {i} tries")
+        fetch.cache[qurl] = jr
     for asset in jr["assets"]:
         name = asset["name"]
         if name not in files:
@@ -90,6 +94,9 @@ def fetch(owner, repo, files, release="latest", dest="."):
         remaining.remove(name)
 
     assert not remaining, f"Failed to fetch {remaining}"
+
+
+fetch.cache = {}
 
 
 def main():
