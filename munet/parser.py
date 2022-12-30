@@ -152,13 +152,15 @@ def setup_logging(args, config_base="logconf"):
         del config["config_pathname"]
 
         if "info_console" in config["handlers"]:
+            # mutest case
             if args.verbose > 1:
                 config["handlers"]["console"]["level"] = "DEBUG"
                 config["handlers"]["info_console"]["level"] = "DEBUG"
             elif args.verbose:
                 config["handlers"]["console"]["level"] = "INFO"
                 config["handlers"]["info_console"]["level"] = "DEBUG"
-        else:
+        elif args.verbose:
+            # munet case
             config["handlers"]["console"]["level"] = "DEBUG"
 
         # add the rundir path to the filenames
