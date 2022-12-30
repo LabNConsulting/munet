@@ -79,6 +79,7 @@ def main(*args):
         for flag in ["-u", "-i", "-m", "-n", "-p", "-C", "-T"]:
             if f" {flag}," in output:
                 eargs.append(flag)
+    eargs.append(f"--wd={rundir}")
     eargs.extend(["-t", pid])
     eargs += args.shellcmd
     print(eargs)

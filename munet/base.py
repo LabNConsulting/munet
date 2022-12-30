@@ -1741,10 +1741,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
     def set_ns_cwd(self, cwd):
         """Common code for changing pre_cmd and pre_nscmd."""
         self.logger.debug("%s: new CWD %s", self, cwd)
-        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
-            self.__pre_cmd = self.__base_pre_cmd
-        else:
-            self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
+        self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
 
     def cleanup_proc(self, p):
         if not p or p.returncode is not None:
@@ -1915,10 +1912,7 @@ class SharedNamespace(Commander):
     def set_ns_cwd(self, cwd):
         """Common code for changing pre_cmd and pre_nscmd."""
         self.logger.debug("%s: new CWD %s", self, cwd)
-        if os.path.abspath(cwd) == os.path.abspath(os.getcwd()):
-            self.__pre_cmd = self.__base_pre_cmd
-        else:
-            self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
+        self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
 
 
 class Bridge(SharedNamespace, InterfaceMixin):
