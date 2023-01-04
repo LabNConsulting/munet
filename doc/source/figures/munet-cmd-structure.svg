@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xl="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="-217 15 1194 730" width="1194" height="730">
+  <defs>
+    <marker orient="auto" overflow="visible" markerUnits="strokeWidth" id="FilledArrow_Marker" stroke-linejoin="miter" stroke-miterlimit="10" viewBox="-9 -4 10 8" markerWidth="10" markerHeight="8" color="black">
+      <g>
+        <path d="M -8 0 L 0 3 L 0 -3 Z" fill="currentColor" stroke="currentColor" stroke-width="1"/>
+      </g>
+    </marker>
+    <marker orient="auto" overflow="visible" markerUnits="strokeWidth" id="FilledArrow_Marker_2" stroke-linejoin="miter" stroke-miterlimit="10" viewBox="-1 -4 10 8" markerWidth="10" markerHeight="8" color="black">
+      <g>
+        <path d="M 8 0 L 0 -3 L 0 3 Z" fill="currentColor" stroke="currentColor" stroke-width="1"/>
+      </g>
+    </marker>
+  </defs>
+  <metadata> Produced by OmniGraffle 7.21.2\n2023-01-04 04:37:50 +0000</metadata>
+  <g id="cmd-struct" fill-opacity="1" stroke-dasharray="none" stroke-opacity="1" fill="none" stroke="none">
+    <title>cmd-struct</title>
+    <g id="cmd-struct_Layer_1">
+      <title>Layer 1</title>
+      <g id="Graphic_96">
+        <rect x="-192" y="448" width="336" height="136" fill="#ccc"/>
+        <rect x="-192" y="448" width="336" height="136" stroke="gray" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_92">
+        <path d="M -159 488 L -17 488 C -12.029437 488 -8 492.02944 -8 497 L -8 527 C -8 531.97056 -12.029437 536 -17 536 L -159 536 C -163.97056 536 -168 531.97056 -168 527 L -168 497 C -168 492.02944 -163.97056 488 -159 488 Z" fill="#ffc0c0"/>
+        <path d="M -159 488 L -17 488 C -12.029437 488 -8 492.02944 -8 497 L -8 527 C -8 531.97056 -12.029437 536 -17 536 L -159 536 C -163.97056 536 -168 531.97056 -168 527 L -168 497 C -168 492.02944 -163.97056 488 -159 488 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(-163 499.5)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="31.652344" y="11">_get_pre_cmd</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="32.856445" y="23">returns precmd</tspan>
+        </text>
+      </g>
+      <g id="Graphic_91">
+        <path d="M -167 480 L -25 480 C -20.029437 480 -16 484.02944 -16 489 L -16 519 C -16 523.97056 -20.029437 528 -25 528 L -167 528 C -171.97056 528 -176 523.97056 -176 519 L -176 489 C -176 484.02944 -171.97056 480 -167 480 Z" fill="#ffc0c0"/>
+        <path d="M -167 480 L -25 480 C -20.029437 480 -16 484.02944 -16 489 L -16 519 C -16 523.97056 -20.029437 528 -25 528 L -167 528 C -171.97056 528 -176 523.97056 -176 519 L -176 489 C -176 484.02944 -171.97056 480 -167 480 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(-171 491.5)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="31.652344" y="11">_get_pre_cmd</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="32.856445" y="23">returns precmd</tspan>
+        </text>
+      </g>
+      <g id="Graphic_76">
+        <path d="M 193 400 L 311 400 C 315.97056 400 320 404.02944 320 409 L 320 415 C 320 419.97056 315.97056 424 311 424 L 193 424 C 188.02944 424 184 419.97056 184 415 L 184 409 C 184 404.02944 188.02944 400 193 400 Z" fill="#c0c0ff"/>
+        <path d="M 193 400 L 311 400 C 315.97056 400 320 404.02944 320 409 L 320 415 C 320 419.97056 315.97056 424 311 424 L 193 424 C 188.02944 424 184 419.97056 184 415 L 184 409 C 184 404.02944 188.02944 400 193 400 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(189 405)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="41.32617" y="11">_popen</tspan>
+        </text>
+      </g>
+      <g id="Graphic_75">
+        <path d="M 193 248 L 311 248 C 315.97056 248 320 252.02944 320 257 L 320 263 C 320 267.97056 315.97056 272 311 272 L 193 272 C 188.02944 272 184 267.97056 184 263 L 184 257 C 184 252.02944 188.02944 248 193 248 Z" fill="#c0c0ff"/>
+        <path d="M 193 248 L 311 248 C 315.97056 248 320 252.02944 320 257 L 320 263 C 320 267.97056 315.97056 272 311 272 L 193 272 C 188.02944 272 184 267.97056 184 263 L 184 257 C 184 252.02944 188.02944 248 193 248 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(189 253)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="19.652344" y="11">_async_popen</tspan>
+        </text>
+      </g>
+      <g id="Graphic_74">
+        <path d="M 193 16 L 311 16 C 315.97056 16 320 20.029437 320 25 L 320 31 C 320 35.970563 315.97056 40 311 40 L 193 40 C 188.02944 40 184 35.970563 184 31 L 184 25 C 184 20.029437 188.02944 16 193 16 Z" fill="#c0c0ff"/>
+        <path d="M 193 16 L 311 16 C 315.97056 16 320 20.029437 320 25 L 320 31 C 320 35.970563 315.97056 40 311 40 L 193 40 C 188.02944 40 184 35.970563 184 31 L 184 25 C 184 20.029437 188.02944 16 193 16 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(189 21)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="34.101562" y="11">_fdspawn</tspan>
+        </text>
+      </g>
+      <g id="Graphic_73">
+        <path d="M 193 112 L 311 112 C 315.97056 112 320 116.02944 320 121 L 320 127 C 320 131.97056 315.97056 136 311 136 L 193 136 C 188.02944 136 184 131.97056 184 127 L 184 121 C 184 116.02944 188.02944 112 193 112 Z" fill="#c0c0ff"/>
+        <path d="M 193 112 L 311 112 C 315.97056 112 320 116.02944 320 121 L 320 127 C 320 131.97056 315.97056 136 311 136 L 193 136 C 188.02944 136 184 131.97056 184 127 L 184 121 C 184 116.02944 188.02944 112 193 112 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(189 117)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="41.32617" y="11">_spawn</tspan>
+        </text>
+      </g>
+      <g id="Graphic_72">
+        <path d="M 385 32 L 503 32 C 507.97056 32 512 36.029437 512 41 L 512 47 C 512 51.97056 507.97056 56 503 56 L 385 56 C 380.02944 56 376 51.97056 376 47 L 376 41 C 376 36.029437 380.02944 32 385 32 Z" fill="#c0ffc0"/>
+        <path d="M 385 32 L 503 32 C 507.97056 32 512 36.029437 512 41 L 512 47 C 512 51.97056 507.97056 56 503 56 L 385 56 C 380.02944 56 376 51.97056 376 47 L 376 41 C 376 36.029437 380.02944 32 385 32 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(381 37)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="44.938477" y="11">spawn</tspan>
+        </text>
+      </g>
+      <g id="Line_71">
+        <line x1="329.5191" y1="30.71974" x2="376" y2="44" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_70">
+        <line x1="325.67728" y1="115.8896" x2="376" y2="44" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_69">
+        <path d="M 561 16 L 679 16 C 683.9706 16 688 20.029437 688 25 L 688 31 C 688 35.970563 683.9706 40 679 40 L 561 40 C 556.02944 40 552 35.970563 552 31 L 552 25 C 552 20.029437 556.02944 16 561 16 Z" fill="#c0ffc0"/>
+        <path d="M 561 16 L 679 16 C 683.9706 16 688 20.029437 688 25 L 688 31 C 688 35.970563 683.9706 40 679 40 L 561 40 C 556.02944 40 552 35.970563 552 31 L 552 25 C 552 20.029437 556.02944 16 561 16 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(557 21)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="5.203125" y="11">monitor (L3Node)</tspan>
+        </text>
+      </g>
+      <g id="Graphic_68">
+        <path d="M 561 48 L 679 48 C 683.9706 48 688 52.02944 688 57 L 688 63 C 688 67.97056 683.9706 72 679 72 L 561 72 C 556.02944 72 552 67.97056 552 63 L 552 57 C 552 52.02944 556.02944 48 561 48 Z" fill="#c0ffc0"/>
+        <path d="M 561 48 L 679 48 C 683.9706 48 688 52.02944 688 57 L 688 63 C 688 67.97056 683.9706 72 679 72 L 561 72 C 556.02944 72 552 67.97056 552 63 L 552 57 C 552 52.02944 556.02944 48 561 48 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(557 53)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="23.264648" y="11">shell_spawn</tspan>
+        </text>
+      </g>
+      <g id="Graphic_67">
+        <path d="M 737 48 L 855 48 C 859.9706 48 864 52.02944 864 57 L 864 63 C 864 67.97056 859.9706 72 855 72 L 737 72 C 732.0294 72 728 67.97056 728 63 L 728 57 C 728 52.02944 732.0294 48 737 48 Z" fill="#c0ffc0"/>
+        <path d="M 737 48 L 855 48 C 859.9706 48 864 52.02944 864 57 L 864 63 C 864 67.97056 859.9706 72 855 72 L 737 72 C 732.0294 72 728 67.97056 728 63 L 728 57 C 728 52.02944 732.0294 48 737 48 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(733 53)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="37.713867" y="11">console</tspan>
+        </text>
+      </g>
+      <g id="Line_66">
+        <line x1="521.1919" y1="40.32323" x2="552" y2="28" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_65">
+        <line x1="521.1919" y1="47.67677" x2="552" y2="60" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_64">
+        <line x1="697.9" y1="60" x2="728" y2="60" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_63">
+        <path d="M 633 344 L 751 344 C 755.9706 344 760 348.02944 760 353 L 760 359 C 760 363.97056 755.9706 368 751 368 L 633 368 C 628.0294 368 624 363.97056 624 359 L 624 353 C 624 348.02944 628.0294 344 633 344 Z" fill="#c0ffc0"/>
+        <path d="M 633 344 L 751 344 C 755.9706 344 760 348.02944 760 353 L 760 359 C 760 363.97056 755.9706 368 751 368 L 633 368 C 628.0294 368 624 363.97056 624 359 L 624 353 C 624 348.02944 628.0294 344 633 344 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 349)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="44.938477" y="11">popen</tspan>
+        </text>
+      </g>
+      <g id="Graphic_62">
+        <path d="M 633 376 L 751 376 C 755.9706 376 760 380.02944 760 385 L 760 391 C 760 395.97056 755.9706 400 751 400 L 633 400 C 628.0294 400 624 395.97056 624 391 L 624 385 C 624 380.02944 628.0294 376 633 376 Z" fill="#c0ffc0"/>
+        <path d="M 633 376 L 751 376 C 755.9706 376 760 380.02944 760 385 L 760 391 C 760 395.97056 755.9706 400 751 400 L 633 400 C 628.0294 400 624 395.97056 624 391 L 624 385 C 624 380.02944 628.0294 376 633 376 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 381)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="19.652344" y="11">popen_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_61">
+        <path d="M 369 432 L 487 432 C 491.97056 432 496 436.02944 496 441 L 496 447 C 496 451.97056 491.97056 456 487 456 L 369 456 C 364.02944 456 360 451.97056 360 447 L 360 441 C 360 436.02944 364.02944 432 369 432 Z" fill="#c0c0ff"/>
+        <path d="M 369 432 L 487 432 C 491.97056 432 496 436.02944 496 441 L 496 447 C 496 451.97056 491.97056 456 487 456 L 369 456 C 364.02944 456 360 451.97056 360 447 L 360 441 C 360 436.02944 364.02944 432 369 432 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(365 437)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="23.264648" y="11">_cmd_status</tspan>
+        </text>
+      </g>
+      <g id="Graphic_60">
+        <path d="M 633 96 L 767 96 C 771.9706 96 776 100.02944 776 105 L 776 111 C 776 115.97056 771.9706 120 767 120 L 633 120 C 628.0294 120 624 115.97056 624 111 L 624 105 C 624 100.02944 628.0294 96 633 96 Z" fill="#c0ffc0"/>
+        <path d="M 633 96 L 767 96 C 771.9706 96 776 100.02944 776 105 L 776 111 C 776 115.97056 771.9706 120 767 120 L 633 120 C 628.0294 120 624 115.97056 624 111 L 624 105 C 624 100.02944 628.0294 96 633 96 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 101)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="31.26465" y="11">async_popen</tspan>
+        </text>
+      </g>
+      <g id="Graphic_59">
+        <path d="M 633 128 L 767 128 C 771.9706 128 776 132.02944 776 137 L 776 143 C 776 147.97056 771.9706 152 767 152 L 633 152 C 628.0294 152 624 147.97056 624 143 L 624 137 C 624 132.02944 628.0294 128 633 128 Z" fill="#c0ffc0"/>
+        <path d="M 633 128 L 767 128 C 771.9706 128 776 132.02944 776 137 L 776 143 C 776 147.97056 771.9706 152 767 152 L 633 152 C 628.0294 152 624 147.97056 624 143 L 624 137 C 624 132.02944 628.0294 128 633 128 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 133)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="5.9785156" y="11">async_popen_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_58">
+        <path d="M 369 280 L 487 280 C 491.97056 280 496 284.02944 496 289 L 496 295 C 496 299.97056 491.97056 304 487 304 L 369 304 C 364.02944 304 360 299.97056 360 295 L 360 289 C 360 284.02944 364.02944 280 369 280 Z" fill="#c0c0ff"/>
+        <path d="M 369 280 L 487 280 C 491.97056 280 496 284.02944 496 289 L 496 295 C 496 299.97056 491.97056 304 487 304 L 369 304 C 364.02944 304 360 299.97056 360 295 L 360 289 C 360 284.02944 364.02944 280 369 280 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(365 285)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="1.5908203" y="11">_async_cmd_status</tspan>
+        </text>
+      </g>
+      <g id="Graphic_57">
+        <path d="M 633 288 L 767 288 C 771.9706 288 776 292.02944 776 297 L 776 303 C 776 307.97056 771.9706 312 767 312 L 633 312 C 628.0294 312 624 307.97056 624 303 L 624 297 C 624 292.02944 628.0294 288 633 288 Z" fill="#c0ffc0"/>
+        <path d="M 633 288 L 767 288 C 771.9706 288 776 292.02944 776 297 L 776 303 C 776 307.97056 771.9706 312 767 312 L 633 312 C 628.0294 312 624 307.97056 624 303 L 624 297 C 624 292.02944 628.0294 288 633 288 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 293)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="13.203125" y="11">async_cmd_status</tspan>
+        </text>
+      </g>
+      <g id="Graphic_56">
+        <path d="M 633 568 L 751 568 C 755.9706 568 760 572.02944 760 577 L 760 583 C 760 587.97056 755.9706 592 751 592 L 633 592 C 628.0294 592 624 587.97056 624 583 L 624 577 C 624 572.02944 628.0294 568 633 568 Z" fill="#c0ffc0"/>
+        <path d="M 633 568 L 751 568 C 755.9706 568 760 572.02944 760 577 L 760 583 C 760 587.97056 755.9706 592 751 592 L 633 592 C 628.0294 592 624 587.97056 624 583 L 624 577 C 624 572.02944 628.0294 568 633 568 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 573)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="26.876953" y="11">cmd_status</tspan>
+        </text>
+      </g>
+      <g id="Graphic_55">
+        <path d="M 633 408 L 751 408 C 755.9706 408 760 412.02944 760 417 L 760 423 C 760 427.97056 755.9706 432 751 432 L 633 432 C 628.0294 432 624 427.97056 624 423 L 624 417 C 624 412.02944 628.0294 408 633 408 Z" fill="#c0ffc0"/>
+        <path d="M 633 408 L 751 408 C 755.9706 408 760 412.02944 760 417 L 760 423 C 760 427.97056 755.9706 432 751 432 L 633 432 C 628.0294 432 624 427.97056 624 423 L 624 417 C 624 412.02944 628.0294 408 633 408 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 413)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="26.876953" y="11">cmd_legacy</tspan>
+        </text>
+      </g>
+      <g id="Graphic_54">
+        <path d="M 633 440 L 751 440 C 755.9706 440 760 444.02944 760 449 L 760 455 C 760 459.97056 755.9706 464 751 464 L 633 464 C 628.0294 464 624 459.97056 624 455 L 624 449 C 624 444.02944 628.0294 440 633 440 Z" fill="#c0ffc0"/>
+        <path d="M 633 440 L 751 440 C 755.9706 440 760 444.02944 760 449 L 760 455 C 760 459.97056 755.9706 464 751 464 L 633 464 C 628.0294 464 624 459.97056 624 455 L 624 449 C 624 444.02944 628.0294 440 633 440 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 445)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="19.652344" y="11">cmd_nostatus</tspan>
+        </text>
+      </g>
+      <g id="Graphic_53">
+        <path d="M 633 504 L 751 504 C 755.9706 504 760 508.02944 760 513 L 760 519 C 760 523.97056 755.9706 528 751 528 L 633 528 C 628.0294 528 624 523.97056 624 519 L 624 513 C 624 508.02944 628.0294 504 633 504 Z" fill="#c0ffc0"/>
+        <path d="M 633 504 L 751 504 C 755.9706 504 760 508.02944 760 513 L 760 519 C 760 523.97056 755.9706 528 751 528 L 633 528 C 628.0294 528 624 523.97056 624 519 L 624 513 C 624 508.02944 628.0294 504 633 504 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 509)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="26.876953" y="11">cmd_raises</tspan>
+        </text>
+      </g>
+      <g id="Graphic_52">
+        <path d="M 633 536 L 751 536 C 755.9706 536 760 540.02944 760 545 L 760 551 C 760 555.97056 755.9706 560 751 560 L 633 560 C 628.0294 560 624 555.97056 624 551 L 624 545 C 624 540.02944 628.0294 536 633 536 Z" fill="#c0ffc0"/>
+        <path d="M 633 536 L 751 536 C 755.9706 536 760 540.02944 760 545 L 760 551 C 760 555.97056 755.9706 560 751 560 L 633 560 C 628.0294 560 624 555.97056 624 551 L 624 545 C 624 540.02944 628.0294 536 633 536 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 541)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="1.5908203" y="11">cmd_raises_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_51">
+        <path d="M 633 160 L 767 160 C 771.9706 160 776 164.02944 776 169 L 776 175 C 776 179.97056 771.9706 184 767 184 L 633 184 C 628.0294 184 624 179.97056 624 175 L 624 169 C 624 164.02944 628.0294 160 633 160 Z" fill="#c0ffc0"/>
+        <path d="M 633 160 L 767 160 C 771.9706 160 776 164.02944 776 169 L 776 175 C 776 179.97056 771.9706 184 767 184 L 633 184 C 628.0294 184 624 179.97056 624 175 L 624 169 C 624 164.02944 628.0294 160 633 160 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 165)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="5.9785156" y="11">async_cmd_nostatus</tspan>
+        </text>
+      </g>
+      <g id="Graphic_50">
+        <path d="M 633 224 L 767 224 C 771.9706 224 776 228.02944 776 233 L 776 239 C 776 243.97056 771.9706 248 767 248 L 633 248 C 628.0294 248 624 243.97056 624 239 L 624 233 C 624 228.02944 628.0294 224 633 224 Z" fill="#c0ffc0"/>
+        <path d="M 633 224 L 767 224 C 771.9706 224 776 228.02944 776 233 L 776 239 C 776 243.97056 771.9706 248 767 248 L 633 248 C 628.0294 248 624 243.97056 624 239 L 624 233 C 624 228.02944 628.0294 224 633 224 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 229)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="13.203125" y="11">async_cmd_raises</tspan>
+        </text>
+      </g>
+      <g id="Graphic_49">
+        <path d="M 633 256 L 799 256 C 803.9706 256 808 260.02944 808 265 L 808 271 C 808 275.97056 803.9706 280 799 280 L 633 280 C 628.0294 280 624 275.97056 624 271 L 624 265 C 624 260.02944 628.0294 256 633 256 Z" fill="#c0ffc0"/>
+        <path d="M 633 256 L 799 256 C 803.9706 256 808 260.02944 808 265 L 808 271 C 808 275.97056 803.9706 280 799 280 L 633 280 C 628.0294 280 624 275.97056 624 271 L 624 265 C 624 260.02944 628.0294 256 633 256 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 261)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="3.916992" y="11">async_cmd_raises_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_48">
+        <path d="M 633 192 L 807 192 C 811.9706 192 816 196.02944 816 201 L 816 207 C 816 211.97056 811.9706 216 807 216 L 633 216 C 628.0294 216 624 211.97056 624 207 L 624 201 C 624 196.02944 628.0294 192 633 192 Z" fill="#c0ffc0"/>
+        <path d="M 633 192 L 807 192 C 811.9706 192 816 196.02944 816 201 L 816 207 C 816 211.97056 811.9706 216 807 216 L 633 216 C 628.0294 216 624 211.97056 624 207 L 624 201 C 624 196.02944 628.0294 192 633 192 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 197)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="7.916992" y="11">async_cmd_status_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_47">
+        <path d="M 633 472 L 751 472 C 755.9706 472 760 476.02944 760 481 L 760 487 C 760 491.97056 755.9706 496 751 496 L 633 496 C 628.0294 496 624 491.97056 624 487 L 624 481 C 624 476.02944 628.0294 472 633 472 Z" fill="#c0ffc0"/>
+        <path d="M 633 472 L 751 472 C 755.9706 472 760 476.02944 760 481 L 760 487 C 760 491.97056 755.9706 496 751 496 L 633 496 C 628.0294 496 624 491.97056 624 487 L 624 481 C 624 476.02944 628.0294 472 633 472 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(629 477)" fill="black">
+          <tspan font-family="Menlo" font-size="12" fill="black" x="1.5908203" y="11">cmd_status_nsonly</tspan>
+        </text>
+      </g>
+      <g id="Graphic_46">
+        <path d="M 16.995951 272 L 134.99595 272 C 139.96651 272 143.99595 276.02944 143.99595 281 L 143.99595 367 C 143.99595 371.97056 139.96651 376 134.99595 376 L 16.995951 376 C 12.025389 376 7.995951 371.97056 7.995951 367 L 7.995951 281 C 7.995951 276.02944 12.025389 272 16.995951 272 Z" fill="#ffc0c0"/>
+        <path d="M 16.995951 272 L 134.99595 272 C 139.96651 272 143.99595 276.02944 143.99595 281 L 143.99595 367 C 143.99595 371.97056 139.96651 376 134.99595 376 L 16.995951 376 C 12.025389 376 7.995951 371.97056 7.995951 367 L 7.995951 281 C 7.995951 276.02944 12.025389 272 16.995951 272 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(12.995951 300.5)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="5.203125" y="11">_common_prologue</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="8.81543" y="23">adds pre_cmd based </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="17.846191" y="34">on skip_pre_cmd </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="47.94873" y="45">kwarg</tspan>
+        </text>
+      </g>
+      <g id="Line_45">
+        <line x1="323.90225" y1="275.2671" x2="360" y2="292" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_44">
+        <line x1="505.8807" y1="292.61755" x2="624" y2="300" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_43">
+        <line x1="505.73043" y1="442.17554" x2="624" y2="420" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_42">
+        <line x1="505.8807" y1="444.61755" x2="624" y2="452" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_41">
+        <line x1="505.44935" y1="446.9529" x2="624" y2="484" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_40">
+        <line x1="504.6286" y1="448.8536" x2="624" y2="516" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_39">
+        <line x1="503.6835" y1="450.24287" x2="624" y2="548" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_38">
+        <line x1="502.7851" y1="451.2092" x2="624" y2="580" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_37">
+        <line x1="324.7175" y1="399.4733" x2="624" y2="356" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_36">
+        <line x1="329.8693" y1="411.22085" x2="624" y2="388" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_35">
+        <line x1="323.9285" y1="244.78997" x2="624" y2="108" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_34">
+        <line x1="329.20854" y1="256.36505" x2="624" y2="140" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_33">
+        <line x1="323.90225" y1="427.2671" x2="360" y2="444" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_32">
+        <line x1="150.39208" y1="271.17044" x2="184" y2="260" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_31">
+        <line x1="148.39092" y1="380.2908" x2="184" y2="412" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_29">
+        <path d="M -207 328 L -65 328 C -60.02944 328 -56 332.02944 -56 337 L -56 375 C -56 379.97056 -60.02944 384 -65 384 L -207 384 C -211.97056 384 -216 379.97056 -216 375 L -216 337 C -216 332.02944 -211.97056 328 -207 328 Z" fill="#ffc0c0"/>
+        <path d="M -207 328 L -65 328 C -60.02944 328 -56 332.02944 -56 337 L -56 375 C -56 379.97056 -60.02944 384 -65 384 L -207 384 C -211.97056 384 -216 379.97056 -216 375 L -216 337 C -216 332.02944 -211.97056 328 -207 328 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(-211 338)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="28.04004" y="11">_get_sub_args</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="14.794922" y="23">returns precmd, cmd, </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="50.91797" y="34">defaults</tspan>
+        </text>
+      </g>
+      <g id="Graphic_28">
+        <path d="M -207 216 L -65 216 C -60.02944 216 -56 220.02944 -56 225 L -56 279 C -56 283.97056 -60.02944 288 -65 288 L -207 288 C -211.97056 288 -216 283.97056 -216 279 L -216 225 C -216 220.02944 -211.97056 216 -207 216 Z" fill="#ffc0c0"/>
+        <path d="M -207 216 L -65 216 C -60.02944 216 -56 220.02944 -56 225 L -56 279 C -56 283.97056 -60.02944 288 -65 288 L -207 288 C -211.97056 288 -216 283.97056 -216 279 L -216 225 C -216 220.02944 -211.97056 216 -207 216 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(-211 228.5)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="17.203125" y="11">cmd_get_cmd_list</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="0" y="23">returns [“bash”, “-c”, </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="0" y="34">cmd] if given str, </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="0" y="45">otherwise no-op</tspan>
+        </text>
+      </g>
+      <g id="Line_27">
+        <line x1="7.995951" y1="324" x2="-49.42303" y2="259.39956" marker-end="url(#FilledArrow_Marker_2)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_26">
+        <line x1="7.995951" y1="324" x2="-47.145283" y2="351.57236" marker-end="url(#FilledArrow_Marker_2)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_24">
+        <line x1="503.2224" y1="285.22898" x2="624" y2="172" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_23">
+        <line x1="504.158" y1="286.39136" x2="624" y2="204" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_22">
+        <line x1="505.06996" y1="288.0319" x2="624" y2="236" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_21">
+        <line x1="505.73043" y1="290.17554" x2="624" y2="268" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_20">
+        <path d="M 78.07324 262.31787 C 81.64936 248.38106 90.74867 221.1211 112 192 C 142.59809 150.07086 184 124 184 124" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_19">
+        <rect x="-27.682347" y="329.28646" width="14.214355" height="18" fill="white"/>
+        <text transform="translate(-22.682347 334.28646)" fill="black">
+          <tspan font-family="Menlo" font-size="7" fill="black" x="0" y="6">2</tspan>
+        </text>
+      </g>
+      <g id="Graphic_18">
+        <rect x="-27.18244" y="283.4179" width="14.214355" height="18" fill="white"/>
+        <text transform="translate(-22.18244 288.4179)" fill="black">
+          <tspan font-family="Menlo" font-size="7" fill="black" x="0" y="6">1</tspan>
+        </text>
+      </g>
+      <g id="Graphic_80">
+        <path d="M -175 472 L -33 472 C -28.029437 472 -24 476.02944 -24 481 L -24 511 C -24 515.97056 -28.029437 520 -33 520 L -175 520 C -179.97056 520 -184 515.97056 -184 511 L -184 481 C -184 476.02944 -179.97056 472 -175 472 Z" fill="#ffc0c0"/>
+        <path d="M -175 472 L -33 472 C -28.029437 472 -24 476.02944 -24 481 L -24 511 C -24 515.97056 -28.029437 520 -33 520 L -175 520 C -179.97056 520 -184 515.97056 -184 511 L -184 481 C -184 476.02944 -179.97056 472 -175 472 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(-179 483.5)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="31.652344" y="11">_get_pre_cmd</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="32.856445" y="23">returns precmd</tspan>
+        </text>
+      </g>
+      <g id="Graphic_81">
+        <path d="M 801 640 L 967 640 C 971.9706 640 976 644.0294 976 649 L 976 735 C 976 739.9706 971.9706 744 967 744 L 801 744 C 796.0294 744 792 739.9706 792 735 L 792 649 C 792 644.0294 796.0294 640 801 640 Z" fill="#c0ffc0"/>
+        <path d="M 801 640 L 967 640 C 971.9706 640 976 644.0294 976 649 L 976 735 C 976 739.9706 971.9706 744 967 744 L 801 744 C 796.0294 744 792 739.9706 792 735 L 792 649 C 792 644.0294 796.0294 640 801 640 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(797 652)" fill="black">
+          <tspan font-family="Menlo" font-weight="bold" font-size="12" fill="black" x="40.04004" y="11">run_in_window</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="2.7128906" y="23">get’s precmd to insert after </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="41.84619" y="34">window cmd e.g.</tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="5.7231445" y="45">‘tmux split-window precmd + </tspan>
+          <tspan font-family="Menlo" font-size="10" fill="black" x="74.95898" y="56">cmd’ </tspan>
+          <tspan font-family="Menlo" font-style="italic" font-size="10" fill="black" x="50.876953" y="67">X11 =&gt; popen</tspan>
+          <tspan font-family="Menlo" font-style="italic" font-size="10" fill="black" x="32.81543" y="78">tmux =&gt; cmd_status</tspan>
+        </text>
+      </g>
+      <g id="Line_82">
+        <path d="M 696.3396 600.89505 C 702.7798 613.2767 716.2535 636.3955 735.85795 656 C 764.18845 684.3305 792 692 792 692" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4.0,4.0" stroke-width="1"/>
+      </g>
+      <g id="Line_83">
+        <path d="M -99.42489 528.77735 C -86.41436 541.2997 -38.342356 566.5325 136 600 C 389.8413 648.72846 792 692 792 692" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Line_84">
+        <line x1="-107.38326" y1="462.69605" x2="-136" y2="384" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_86">
+        <rect x="746.9141" y="678.777" width="14.214355" height="18" fill="white"/>
+        <text transform="translate(751.9141 683.777)" fill="black">
+          <tspan font-family="Menlo" font-size="7" fill="black" x="0" y="6">1</tspan>
+        </text>
+      </g>
+      <g id="Graphic_87">
+        <rect x="736.1174" y="653.93555" width="14.214355" height="18" fill="white"/>
+        <text transform="translate(741.1174 658.93555)" fill="black">
+          <tspan font-family="Menlo" font-size="7" fill="black" x="0" y="6">2</tspan>
+        </text>
+      </g>
+      <g id="Graphic_85">
+        <path d="M 762.3668 630.12946 C 762.3668 628.1401 761.2228 627.894 752.866 625.92526 L 752.7777 625.9049 C 744.3768 623.91556 744.28945 623.91556 735.6679 623.91556 C 724.188 623.91556 672.2864 623.91556 672.2864 623.91556 L 672.2864 644.91556 L 762.3668 644.91556 L 762.3668 630.12946 Z" fill="#999"/>
+        <path d="M 762.3668 630.12946 C 762.3668 628.1401 761.2228 627.894 752.866 625.92526 L 752.7777 625.9049 C 744.3768 623.91556 744.28945 623.91556 735.6679 623.91556 C 724.188 623.91556 672.2864 623.91556 672.2864 623.91556 L 672.2864 644.91556 L 762.3668 644.91556 L 762.3668 630.12946 Z M 762.3668 630.027 C 762.3668 628.1401 762.2785 628.1401 744.28945 628.1401 L 744.28945 628.1401 C 744.28945 623.93614 744.28945 623.91556 736.1957 623.91556" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8.0,4.0,1.0,4.0" stroke-width="1"/>
+        <text transform="translate(677.2864 628.91556)" fill="white">
+          <tspan font-family="Menlo" font-size="10" fill="white" x="3.91716" y="9">skip_pre_cmd</tspan>
+        </text>
+      </g>
+      <g id="Line_90">
+        <path d="M 769.7467 357.7316 C 788.3687 362.38814 829.5051 379.31817 856 440 C 891.1298 520.4586 884 640 884 640" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4.0,4.0" stroke-width="1"/>
+      </g>
+      <g id="Graphic_89">
+        <rect x="875.7824" y="557.029" width="14.214355" height="18" fill="white"/>
+        <text transform="translate(880.7824 562.029)" fill="black">
+          <tspan font-family="Menlo" font-size="7" fill="black" x="0" y="6">2</tspan>
+        </text>
+      </g>
+      <g id="Graphic_88">
+        <path d="M 922.9861 519.5975 C 922.9861 517.60816 921.852 517.36204 913.5677 515.3933 L 913.4802 515.3729 C 905.1521 513.3836 905.0655 513.3836 896.5187 513.3836 C 885.1384 513.3836 833.687 513.3836 833.687 513.3836 L 833.687 534.3836 L 922.9861 534.3836 L 922.9861 519.5975 Z" fill="#999"/>
+        <path d="M 922.9861 519.5975 C 922.9861 517.60816 921.852 517.36204 913.5677 515.3933 L 913.4802 515.3729 C 905.1521 513.3836 905.0655 513.3836 896.5187 513.3836 C 885.1384 513.3836 833.687 513.3836 833.687 513.3836 L 833.687 534.3836 L 922.9861 534.3836 L 922.9861 519.5975 Z M 922.9861 519.495 C 922.9861 517.60816 922.8986 517.60816 905.0655 517.60816 L 905.0655 517.60816 C 905.0655 513.4042 905.0655 513.3836 897.042 513.3836" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8.0,4.0,1.0,4.0" stroke-width="1"/>
+        <text transform="translate(838.687 518.3836)" fill="white">
+          <tspan font-family="Menlo" font-size="10" fill="white" x="3.5265045" y="9">skip_pre_cmd</tspan>
+        </text>
+      </g>
+      <g id="Graphic_93">
+        <text transform="translate(-.3416875 461)" fill="black">
+          <tspan font-family="Menlo" font-size="16" fill="black" x="0" y="15">LinuxNamespace</tspan>
+          <tspan font-family="Menlo" font-style="italic" font-size="12" fill="black" x="42.143555" y="30">nsenter</tspan>
+        </text>
+      </g>
+      <g id="Graphic_94">
+        <text transform="translate(-4.1260937 509)" fill="black">
+          <tspan font-family="Menlo" font-size="16" fill="black" x="0" y="15">L3ContainerNode</tspan>
+          <tspan font-family="Menlo" font-style="italic" font-size="12" fill="black" x="32.510742" y="30">podman exec</tspan>
+        </text>
+      </g>
+      <g id="Graphic_95">
+        <text transform="translate(56.183594 549)" fill="black">
+          <tspan font-family="Menlo" font-size="16" fill="black" x="0" y="15">…</tspan>
+        </text>
+      </g>
+    </g>
+  </g>
+</svg>
