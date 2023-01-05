@@ -1513,7 +1513,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
             else:
                 self.p_ns_fds = None
                 self.p_ns_fnames = None
-                self.ppid_fd = os.pidfd_open(self.ppid)  # pylint: disable=no-member
+                self.ppid_fd = unshare.pidfd_open(self.ppid)
 
             self.logger.debug(
                 "%s: unshare to new namespaces %s",

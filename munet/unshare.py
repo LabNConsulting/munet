@@ -23,8 +23,8 @@
 import ctypes  # pylint: disable=C0415
 import ctypes.util  # pylint: disable=C0415
 import errno
+import functools
 import os
-import sys
 
 
 libc = None
@@ -47,15 +47,22 @@ def _load_libc():
 
 
 def pidfd_open(pid, flags=0):
-    if sys.version_info[0] > 3 or (
-        sys.version_info[0] == 3 and sys.version_info[1] > 8
-    ):
+    if hasattr(os, "pidfd_open"):
         return os.pidfd_open(pid, flags)  # pylint: disable=no-member
 
     if not libc:
         _load_libc()
 
-    fd = libc.pidfd_open(int(pid), int(flags))
+    try:
+        pfof = libc.pidfd_open
+    except AttributeError:
+        __NR_pidfd_open = 434
+        _pidfd_open = libc.syscall
+        _pidfd_open.restype = ctypes.c_int
+        _pidfd_open.argtypes = ctypes.c_long, ctypes.c_uint, ctypes.c_uint
+        pfof = functools.partial(_pidfd_open, __NR_pidfd_open)
+
+    fd = pfof(int(pid), int(flags))
     if fd == -1:
         raise_oserror(ctypes.get_errno())
 
