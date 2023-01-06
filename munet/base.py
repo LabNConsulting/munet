@@ -974,6 +974,20 @@ class Commander:  # pylint: disable=R0904
                 cmd = shlex.split(cmd)
             cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
             nscmd = self._get_pre_cmd(False, True, ns_only=ns_only) + cmd
+        elif self.is_vm and self.use_ssh:  # pylint: disable=E1101
+            if isinstance(cmd, str):
+                cmd = shlex.split(cmd)
+            cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
+
+            # get the ssh cmd
+            cmd = self._get_pre_cmd(False, True, ns_only=ns_only) + [shlex.join(cmd)]
+            unscmd = self.unet._get_pre_cmd(False, True, ns_only=True)
+            # get the nsenter for munet
+            nscmd = [
+                get_exec_path_host(["sudo"]),
+                *unscmd,
+                *cmd,
+            ]
         else:
             # This is the command to execute to be inside the namespace.
             # We are getting into trouble with quoting.
@@ -1073,7 +1087,7 @@ class Commander:  # pylint: disable=R0904
             )
             raise Exception("Window requestd but TMUX, Screen and X11 not available")
 
-        pane_info = self.cmd_raises(cmd, skip_pre_cmd=True).strip()
+        pane_info = self.cmd_raises(cmd, skip_pre_cmd=True, ns_only=True).strip()
 
         # Re-adjust the layout
         if "TMUX" in os.environ:

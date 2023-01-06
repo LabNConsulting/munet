@@ -21,6 +21,7 @@
 """A module that defines objects for standalone use."""
 import asyncio
 import errno
+import getpass
 import ipaddress
 import logging
 import os
@@ -1273,6 +1274,10 @@ class L3QemuVM(L3Node):
 
         self.tapnames = {}
 
+        self.use_ssh = False
+        self.__base_cmd = []
+        self.__base_cmd_pty = []
+
         super().__init__(name=name, config=config, **kwargs)
 
         self.sockdir = os.path.join(self.rundir, "s")
@@ -1284,10 +1289,92 @@ class L3QemuVM(L3Node):
             rundir=os.path.join(self.rundir, self.name),
             configdir=self.unet.config_dirname,
         )
+        self.ssh_keyfile = self.qemu_config.get("sshkey")
 
     @property
     def is_vm(self):
         return True
+
+    def __setup_ssh(self):
+        if not self.ssh_keyfile:
+            self.logger.warning("%s: No sshkey config", self)
+            return False
+        if not self.mgmt_ip:
+            self.logger.warning("%s: No mgmt IP to ssh to", self)
+            return False
+
+        #
+        # Since we have a keyfile shouldn't need to sudo
+        # self.user = os.environ.get("SUDO_USER", "")
+        # if not self.user:
+        #     self.user = getpass.getuser()
+        # self.__base_cmd = [
+        #     get_exec_path_host("sudo"),
+        #     "-E",
+        #     f"-u{self.user}",
+        #     get_exec_path_host("ssh"),
+        # ]
+        #
+        port = 22
+        self.__base_cmd = [get_exec_path_host("ssh")]
+        if port != 22:
+            self.__base_cmd.append(f"-p{port}")
+        self.__base_cmd.append("-i")
+        self.__base_cmd.append(self.ssh_keyfile)
+        self.__base_cmd.append("-q")
+        self.__base_cmd.append("-oStrictHostKeyChecking=no")
+        self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
+        # Would be nice but has to be accepted by server config so not very useful.
+        # self.__base_cmd.append("-oSendVar='TEST'")
+        self.__base_cmd_pty = list(self.__base_cmd)
+        self.__base_cmd_pty.append("-t")
+
+        user = self.qemu_config.get("sshuser", "root")
+        self.__base_cmd.append(f"{user}@{self.mgmt_ip}")
+        self.__base_cmd.append("--")
+        self.__base_cmd_pty.append(f"{user}@{self.mgmt_ip}")
+        # self.__base_cmd_pty.append("--")
+        return True
+
+    def _get_cmd_as_list(self, cmd):
+        """Given a list or string return a list form for execution.
+
+        If cmd is a string then [cmd] is returned, for most other
+        node types ["bash", "-c", cmd] is returned but in our case
+        ssh is the shell.
+
+        Args:
+            cmd: list or string representing the command to execute.
+            str_shell: if True and `cmd` is a string then run the
+              command using bash -c
+        Returns:
+            list of commands to execute.
+        """
+        if self.use_ssh and self.launch_p:
+            return [cmd] if isinstance(cmd, str) else cmd
+        return super()._get_cmd_as_list(cmd)
+
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
+        if ns_only:
+            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+
+        if not self.launch_p:
+            self.logger.debug("%s: Running command in namespace b/c no VM", self)
+            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+
+        if not self.use_ssh:
+            self.logger.debug(
+                "%s: Running command in namespace b/c no SSH configured", self
+            )
+            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+
+        # XXX grab the env from kwargs and add to podman exec
+        # env = kwargs.get("env", {})
+        if use_pty:
+            pre_cmd = self.__base_cmd_pty
+        else:
+            pre_cmd = self.__base_cmd
+        return shlex.join(pre_cmd) if use_str else pre_cmd
 
     async def moncmd(self):
         """Uses internal REPL to send cmmand to qemu monitor and get reply."""
@@ -1886,10 +1973,15 @@ class L3QemuVM(L3Node):
 
         self.pytest_hook_open_shell()
 
+        self.use_ssh = bool(self.ssh_keyfile)
+        if self.use_ssh:
+            self.use_ssh = self.__setup_ssh()
+
         return self.launch_p
 
     def launch_completed(self, future):
         self.logger.debug("%s: launch (qemu) completed called", self)
+        self.use_ssh = False
         try:
             n = future.result()
             self.logger.debug("%s: node launch (qemu) completed result: %s", self, n)
