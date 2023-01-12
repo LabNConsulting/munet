@@ -323,9 +323,9 @@ munet$ sudo poetry run munet -c examples/frr/ospf/ospf/munet.yaml
 2022-09-16 13:37:05,609: INFO: Loaded config from /home/lberger/Code/github/labn/munet/examples/frr/ospf/ospf/munet.yaml
 2022-09-16 13:37:05,623: INFO: Loaded kinds config /home/lberger/Code/github/labn/munet/munet/kinds.yaml
 2022-09-16 13:37:05,745: INFO: Munet(munet): created
-2022-09-16 13:37:05,926: INFO: L3Node(r1): created
-2022-09-16 13:37:06,086: INFO: L3Node(r2): created
-2022-09-16 13:37:06,247: INFO: L3Node(r3): created
+2022-09-16 13:37:05,926: INFO: L3NamespaceNode(r1): created
+2022-09-16 13:37:06,086: INFO: L3NamespaceNode(r2): created
+2022-09-16 13:37:06,247: INFO: L3NamespaceNode(r3): created
 2022-09-16 13:37:06,778: INFO: Topology up: rundir: /tmp/unet-root
 
 --- Munet CLI Starting ---

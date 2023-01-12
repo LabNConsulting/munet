@@ -91,10 +91,12 @@ def proc_error(p, o, e):
         args = p.args if isinstance(p.args, str) else " ".join(p.args)
     else:
         args = ""
-    s = f"rc {p.returncode} pid {p.pid}\n\targs: {args}"
-    o = "\n\tstdout: " + o.strip() if o and o.strip() else ""
-    e = "\n\tstderr: " + e.strip() if e and e.strip() else ""
-    return s + o + e
+
+    s = f"rc {p.returncode} pid {p.pid}"
+    a = "\n\targs: " + args if args else ""
+    o = "\n\tstdout: " + (o.strip() if o and o.strip() else "*empty*")
+    e = "\n\tstderr: " + (e.strip() if e and e.strip() else "*empty*")
+    return s + a + o + e
 
 
 def comm_error(p):
@@ -208,7 +210,8 @@ class Commander:  # pylint: disable=R0904
 
     def __init__(self, name, logger=None, **kwargs):
         """Create a Commander."""
-        del kwargs  # deal with lint warning
+        # del kwargs  # deal with lint warning
+        # logging.warning("Commander: name %s kwargs %s", name, kwargs)
 
         self.name = name
         self.deleting = False
@@ -220,7 +223,7 @@ class Commander:  # pylint: disable=R0904
         else:
             self.logger = logger
 
-        super().__init__()
+        super().__init__(**kwargs)
 
     @property
     def is_vm(self):
@@ -674,6 +677,47 @@ class Commander:  # pylint: disable=R0904
         )
         return p
 
+    async def async_cleanup_proc(self, p):
+        """Terminate a process started with a popen call.
+
+        Args:
+            p: return value from :py:`async_popen`, :py:`popen`, et al.
+
+        Returns:
+            None on success, the ``p`` if multiple timeouts occur even
+            after a SIGKILL sent.
+        """
+        if not p or p.returncode is not None:
+            return None
+
+        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+
+        # XXX Are we calling this -p.pid on cmd_p which isn't setup right for that?
+        os.kill(-p.pid, signal.SIGTERM)
+        try:
+            assert not isinstance(p, subprocess.Popen)
+            await asyncio.wait_for(p.communicate(), timeout=10)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
+            )
+            os.kill(-p.pid, signal.SIGKILL)
+            try:
+                assert not isinstance(p, subprocess.Popen)
+                await asyncio.wait_for(p.communicate(), timeout=2)
+            except asyncio.TimeoutError:
+                self.logger.warning("%s: kill timeout", self)
+                return p
+            except Exception as error:
+                self.logger.warning(
+                    "%s: kill unexpected exception: %s", self, error, exc_info=True
+                )
+        except Exception as error:
+            self.logger.warning(
+                "%s: terminate unexpected exception: %s", self, error, exc_info=True
+            )
+        return None
+
     @staticmethod
     def _cmd_status_input(stdin):
         pinput = None
@@ -687,7 +731,7 @@ class Commander:  # pylint: disable=R0904
         self.last = (rc, ac, c, o, e)
         if rc:
             if warn:
-                self.logger.warning("%s: proc failed: %s:", self, proc_error(p, o, e))
+                self.logger.warning("%s: proc failed: %s", self, proc_error(p, o, e))
             if raises:
                 # error = Exception("stderr: {}".format(stderr))
                 # This annoyingly doesnt' show stderr when printed normally
@@ -974,6 +1018,23 @@ class Commander:  # pylint: disable=R0904
                 cmd = shlex.split(cmd)
             cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
             nscmd = self._get_pre_cmd(False, True, ns_only=ns_only) + cmd
+        elif self.is_vm and self.use_ssh:  # pylint: disable=E1101
+            if isinstance(cmd, str):
+                cmd = shlex.split(cmd)
+            cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
+
+            # get the ssh cmd
+            cmd = self._get_pre_cmd(False, True, ns_only=ns_only) + [shlex.join(cmd)]
+            unet = self.unet  # pylint: disable=E1101
+            uns_cmd = unet._get_pre_cmd(  # pylint: disable=W0212
+                False, True, ns_only=True
+            )
+            # get the nsenter for munet
+            nscmd = [
+                get_exec_path_host(["sudo"]),
+                *uns_cmd,
+                *cmd,
+            ]
         else:
             # This is the command to execute to be inside the namespace.
             # We are getting into trouble with quoting.
@@ -1073,11 +1134,11 @@ class Commander:  # pylint: disable=R0904
             )
             raise Exception("Window requestd but TMUX, Screen and X11 not available")
 
-        pane_info = self.cmd_raises(cmd, skip_pre_cmd=True).strip()
+        pane_info = self.cmd_raises(cmd, skip_pre_cmd=True, ns_only=True).strip()
 
         # Re-adjust the layout
         if "TMUX" in os.environ:
-            self.cmd_status(
+            commander.cmd_status(
                 "tmux select-layout -t {} tiled".format(
                     pane_info if not tmux_target else tmux_target
                 ),
@@ -1087,7 +1148,7 @@ class Commander:  # pylint: disable=R0904
         # Wait here if we weren't handed the channel to wait for
         if channel and wait_for is True:
             cmd = [get_exec_path_host("tmux"), "wait", channel]
-            self.cmd_status(cmd, skip_pre_cmd=True)
+            commander.cmd_status(cmd, skip_pre_cmd=True)
 
         return pane_info
 
@@ -1122,14 +1183,16 @@ class Commander:  # pylint: disable=R0904
 class InterfaceMixin:
     """A mixin class to support interface functionality."""
 
-    def __init__(self, **kwargs):
-        del kwargs  # get rid of lint
+    def __init__(self, *args, **kwargs):
+        # del kwargs  # get rid of lint
+        # logging.warning("InterfaceMixin: args: %s kwargs: %s", args, kwargs)
+
         self.intf_addrs = {}
         self.net_intfs = {}
         self.next_intf_index = 0
         self.basename = "eth"
         # self.basename = name + "-eth"
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
     @property
     def intfs(self):
@@ -1153,6 +1216,22 @@ class InterfaceMixin:
             self.next_intf_index += 1
             if ifname not in self.intf_addrs:
                 break
+        return ifname
+
+    def get_ns_ifname(self, ifname):
+        """Return a namespace unique interface name.
+
+        This function is primarily overriden by L3QemuVM, IOW by any class
+        that doesn't create it's own network namespace and will share that
+        with the root (unet) namespace.
+
+        Args:
+            ifname: the interface name.
+
+        Returns:
+            A name unique to the namespace of this object. By defualt the assumption
+            is the ifname is namespace unique.
+        """
         return ifname
 
     def register_interface(self, ifname):
@@ -1270,27 +1349,38 @@ class InterfaceMixin:
             rate (int): bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000.
         """
-        netem_args, tbf_args = self.get_linux_tc_args(ifname, constraints)
+        nsifname = self.get_ns_ifname(ifname)
+        netem_args, tbf_args = self.get_linux_tc_args(nsifname, constraints)
         count = 1
         selector = f"root handle {count}:"
         if netem_args:
-            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} netem {netem_args}")
+            self.cmd_raises(
+                f"tc qdisc add dev {nsifname} {selector} netem {netem_args}"
+            )
             count += 1
             selector = f"parent {count-1}: handle {count}"
         # Place rate limit after delay otherwise limit/burst too complex
         if tbf_args:
-            self.cmd_raises(f"tc qdisc add dev {ifname} {selector} tbf {tbf_args}")
+            self.cmd_raises(f"tc qdisc add dev {nsifname} {selector} tbf {tbf_args}")
 
-        self.cmd_raises(f"tc qdisc show dev {ifname}")
+        self.cmd_raises(f"tc qdisc show dev {nsifname}")
 
 
 class SSHRemote(Commander):
     """SSHRemote a node representing an ssh connection to something."""
 
     def __init__(
-        self, name, server, port=22, user=None, password=None, unet=None, **kwargs
+        self,
+        name,
+        server,
+        port=22,
+        user=None,
+        password=None,
+        unet=None,
+        logger=None,
+        **kwargs,
     ):
-        super().__init__(name, unet=unet, **kwargs)
+        super().__init__(name, logger=logger)
 
         self.logger.debug("%s: creating", self)
 
@@ -1386,6 +1476,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         set_hostname=True,
         private_mounts=None,
         logger=None,
+        **kwargs,
     ):
         """Create a new linux namespace.
 
@@ -1407,7 +1498,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
             unshare_inline: Unshare the process itself rather than using a proxy.
             logger: Passed to superclass.
         """
-        super().__init__(name=name, logger=logger)
+        # logging.warning("LinuxNamespace: name %s kwargs %s", name, kwargs)
+
+        super().__init__(name, logger=logger, **kwargs)
 
         self.logger.debug("%s: creating", self)
 
@@ -1773,38 +1866,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
             )
         return None
 
-    async def async_cleanup_proc(self, p):
-        if not p or p.returncode is not None:
-            return None
-
-        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
-
-        # XXX Are we calling this -p.pid on cmd_p which isn't setup right for that?
-        os.kill(-p.pid, signal.SIGTERM)
-        try:
-            assert not isinstance(p, subprocess.Popen)
-            await asyncio.wait_for(p.communicate(), timeout=10)
-        except asyncio.TimeoutError:
-            self.logger.warning(
-                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
-            )
-            os.kill(-p.pid, signal.SIGKILL)
-            try:
-                assert not isinstance(p, subprocess.Popen)
-                await asyncio.wait_for(p.communicate(), timeout=2)
-            except asyncio.TimeoutError:
-                self.logger.warning("%s: kill timeout", self)
-                return p
-            except Exception as error:
-                self.logger.warning(
-                    "%s: kill unexpected exception: %s", self, error, exc_info=True
-                )
-        except Exception as error:
-            self.logger.warning(
-                "%s: terminate unexpected exception: %s", self, error, exc_info=True
-            )
-        return None
-
     async def _async_delete(self):
         if type(self) == LinuxNamespace:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
@@ -1878,7 +1939,7 @@ class SharedNamespace(Commander):
     An object that executes commands in an existing pid's linux namespace
     """
 
-    def __init__(self, name, pid, aflags=("-a",), logger=None):
+    def __init__(self, name, pid=None, aflags=("-a",), logger=None, **kwargs):
         """Share a linux namespace.
 
         Args:
@@ -1887,12 +1948,12 @@ class SharedNamespace(Commander):
             aflags: nsenter flags to pass to inherit namespaces from
             logger: logger to use for this object.
         """
-        super().__init__(name=name, logger=logger)
+        super().__init__(name, logger=logger, **kwargs)
 
         self.logger.debug("%s: Creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
-        self.pid = pid
+        self.pid = pid if pid is not None else os.getpid()
 
         self.__base_pre_cmd = ["/usr/bin/nsenter", *aflags, "-t", str(self.pid)]
         self.__pre_cmd = self.__base_pre_cmd
@@ -1933,13 +1994,12 @@ class Bridge(SharedNamespace, InterfaceMixin):
         if not name:
             name = "br{}".format(self.id)
         super().__init__(
-            name=name, pid=unet.pid, aflags=unet.a_flags, logger=logger, **kwargs
+            name, pid=unet.pid, aflags=unet.a_flags, logger=logger, **kwargs
         )
 
         self.set_intf_basename(self.name + "-e")
 
         self.mtu = mtu
-        self.unet = unet
 
         self.logger.debug("Bridge: Creating")
 
@@ -1985,8 +2045,10 @@ class Bridge(SharedNamespace, InterfaceMixin):
 class BaseMunet(LinuxNamespace):
     """Munet."""
 
-    def __init__(self, isolated=True, **kwargs):
+    def __init__(self, name="munet", isolated=True, **kwargs):
         """Create a Munet."""
+        # logging.warning("BaseMunet: %s", name)
+
         self.hosts = {}
         self.switches = {}
         self.links = {}
@@ -2000,7 +2062,7 @@ class BaseMunet(LinuxNamespace):
         self.cli_in_window_cmds = {}
         self.cli_run_cmds = {}
 
-        super().__init__(name="munet", mount=True, net=isolated, uts=isolated, **kwargs)
+        super().__init__(name, mount=True, net=isolated, uts=isolated, **kwargs)
 
         # This allows us to cleanup any leftover running munet's
         if "MUNET_PID" in os.environ:
@@ -2088,41 +2150,47 @@ class BaseMunet(LinuxNamespace):
                 "ip link add {} type veth peer name {}".format(lifname, rifname)
             )
 
+            nsif1 = lhost.get_ns_ifname(if1)
+            nsif2 = rhost.get_ns_ifname(if2)
+
             self.cmd_raises_nsonly("ip link set {} netns {}".format(lifname, lhost.pid))
-            lhost.cmd_raises_nsonly("ip link set {} name {}".format(lifname, if1))
+            lhost.cmd_raises_nsonly("ip link set {} name {}".format(lifname, nsif1))
             if mtu:
-                lhost.cmd_raises_nsonly("ip link set {} mtu {}".format(if1, mtu))
-            lhost.cmd_raises_nsonly("ip link set {} up".format(if1))
+                lhost.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif1, mtu))
+            lhost.cmd_raises_nsonly("ip link set {} up".format(nsif1))
             lhost.register_interface(if1)
 
             self.cmd_raises_nsonly("ip link set {} netns {}".format(rifname, rhost.pid))
-            rhost.cmd_raises_nsonly("ip link set {} name {}".format(rifname, if2))
+            rhost.cmd_raises_nsonly("ip link set {} name {}".format(rifname, nsif2))
             if mtu:
-                rhost.cmd_raises_nsonly("ip link set {} mtu {}".format(if2, mtu))
-            rhost.cmd_raises_nsonly("ip link set {} up".format(if2))
+                rhost.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif2, mtu))
+            rhost.cmd_raises_nsonly("ip link set {} up".format(nsif2))
             rhost.register_interface(if2)
         else:
             switch = self.switches[name1]
             host = self.hosts[name2]
             lifname = "i1{:x}".format(switch.pid)
-            rifname = "i1{:x}".format(host.pid)
+            rifname = "i2{:x}".format(host.pid)
+
+            nsif1 = switch.get_ns_ifname(if1)
+            nsif2 = host.get_ns_ifname(if2)
 
             if mtu is None:
                 mtu = switch.mtu
 
-            if len(if1) > 16:
-                self.logger.error('"%s" len %s > 16', if1, len(if1))
-            elif len(if2) > 16:
-                self.logger.error('"%s" len %s > 16', if2, len(if2))
-            assert len(if1) <= 16 and len(if2) <= 16  # Make sure fits in IFNAMSIZE
+            if len(nsif1) > 16:
+                self.logger.error('"%s" len %s > 16', nsif1, len(nsif1))
+            elif len(nsif2) > 16:
+                self.logger.error('"%s" len %s > 16', nsif2, len(nsif2))
+            assert len(nsif1) <= 16 and len(nsif2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
             self.cmd_raises_nsonly(
                 f"ip link add {lifname} type veth peer name {rifname} netns {host.pid}"
             )
             self.cmd_raises_nsonly(f"ip link set {lifname} netns {switch.pid}")
-            switch.cmd_raises_nsonly(f"ip link set {lifname} name {if1}")
-            host.cmd_raises_nsonly(f"ip link set {rifname} name {if2}")
+            switch.cmd_raises_nsonly(f"ip link set {lifname} name {nsif1}")
+            host.cmd_raises_nsonly(f"ip link set {rifname} name {nsif2}")
 
             if mtu:
                 # if switch.mtu:
@@ -2130,20 +2198,21 @@ class BaseMunet(LinuxNamespace):
                 #     switch.cmd_raises_nsonly(
                 #         "ip link set {} mtu {}".format(if1, switch.mtu)
                 #     )
-                switch.cmd_raises_nsonly("ip link set {} mtu {}".format(if1, mtu))
-                host.cmd_raises_nsonly("ip link set {} mtu {}".format(if2, mtu))
+                switch.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif1, mtu))
+                host.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif2, mtu))
 
             switch.register_interface(if1)
             host.register_interface(if2)
             host.register_network(switch.name, if2)
 
-            switch.cmd_raises_nsonly(f"ip link set {if1} master {switch.name}")
-            switch.cmd_raises_nsonly(f"ip link set {if1} up")
-            host.cmd_raises_nsonly(f"ip link set {if2} up")
+            switch.cmd_raises_nsonly(f"ip link set {nsif1} master {switch.name}")
+
+            switch.cmd_raises_nsonly(f"ip link set {nsif1} up")
+            host.cmd_raises_nsonly(f"ip link set {nsif2} up")
 
         # Cache the MAC values, and reverse mapping
-        self.get_mac(name1, if1)
-        self.get_mac(name2, if2)
+        self.get_mac(name1, nsif1)
+        self.get_mac(name2, nsif2)
 
         # Setup interface constraints if provided
         if intf_constraints:
@@ -2162,8 +2231,10 @@ class BaseMunet(LinuxNamespace):
         else:
             dev = self.switches[name]
 
+        nsifname = self.get_ns_ifname(ifname)
+
         if (name, ifname) not in self.macs:
-            _, output, _ = dev.cmd_status_nsonly("ip -o link show " + ifname)
+            _, output, _ = dev.cmd_status_nsonly("ip -o link show " + nsifname)
             m = re.match(".*link/(loopback|ether) ([0-9a-fA-F:]+) .*", output)
             mac = m.group(2)
             self.macs[(name, ifname)] = mac
@@ -2174,10 +2245,11 @@ class BaseMunet(LinuxNamespace):
     async def _delete_link(self, lname):
         rname, rif = self.links[lname][2:4]
         host = self.hosts[rname]
+        nsrif = host.get_ns_ifname(rif)
 
         self.logger.debug("%s: Deleting veth pair for link %s", self, lname)
         rc, o, e = await host.async_cmd_status_nsonly(
-            [self.ip_path, "link", "delete", rif],
+            [self.ip_path, "link", "delete", nsrif],
             stdin=subprocess.DEVNULL,
             start_new_session=True,
             warn=False,
@@ -2329,11 +2401,15 @@ if True:  # pylint: disable=using-constant-test
             for line in lines:
                 self.child.sendline(line)
                 index = self.expect_prompt(timeout=timeout)
-                if index:
-                    self.child.kill(signal.SIGINT)
-                    self.expect_prompt(timeout=30 if self.child.timeout is None else -1)
-                    raise ValueError("Continuation prompt found at end of commands")
                 output += self.child.before
+
+            if index:
+                if hasattr(self.child, "kill"):
+                    self.child.kill(signal.SIGINT)
+                else:
+                    self.child.send("\x03")
+                self.expect_prompt(timeout=30 if self.child.timeout is None else -1)
+                raise ValueError("Continuation prompt found at end of commands")
 
             if self.escape:
                 output = self.escape.sub("", output)

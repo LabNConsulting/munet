@@ -1,6 +1,6 @@
 topology:
   networks-autonumber: false
-  dns: "mgmt0"
+  dns-network: "mgmt0"
   networks:
     - name: mgmt0
       ip: 10.0.1.254/24

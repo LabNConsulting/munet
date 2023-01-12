@@ -37,7 +37,7 @@ from munet.base import BaseMunet
 from munet.base import Bridge
 from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
-from munet.native import L3Node
+from munet.native import L3NodeMixin
 from munet.parser import async_build_topology
 from munet.parser import get_config
 from munet.testing.util import async_pause_test
@@ -179,7 +179,7 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
 
     # Reset the class variables so auto number is predictable
     logging.debug("unet fixture: resetting ords to 1")
-    L3Node.next_ord = 1
+    L3NodeMixin.next_ord = 1
     Bridge.next_ord = 1
 
 
