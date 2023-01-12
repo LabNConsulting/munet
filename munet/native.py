@@ -21,7 +21,6 @@
 """A module that defines objects for standalone use."""
 import asyncio
 import errno
-import getpass
 import ipaddress
 import logging
 import os
@@ -35,6 +34,7 @@ import time
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
+from .base import InterfaceMixin
 from .base import LinuxNamespace
 from .base import MunetError
 from .base import SharedNamespace
@@ -116,20 +116,36 @@ async def to_thread(func):
         return await asyncio.get_running_loop().run_in_executor(None, func)
 
 
+def convert_ranges_to_bitmask(ranges):
+    bitmask = 0
+    for r in ranges.split(","):
+        if "-" not in r:
+            bitmask |= 1 << int(r)
+        else:
+            x, y = (int(x) for x in r.split("-"))
+            for b in range(x, y + 1):
+                bitmask |= 1 << b
+    return bitmask
+
+
 class L2Bridge(Bridge):
     """A linux bridge with no IP network address."""
 
-    def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
+    def __init__(self, name=None, unet=None, logger=None, mtu=None, config=None):
         """Create a linux Bridge."""
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
 
+    async def _async_delete(self):
+        self.logger.debug("%s: deleting", self)
+        await super()._async_delete()
+
 
 class L3Bridge(Bridge):
     """A linux bridge with associated IP network address."""
 
-    def __init__(self, name=None, unet=None, logger=None, config=None, mtu=None):
+    def __init__(self, name=None, unet=None, logger=None, mtu=None, config=None):
         """Create a linux Bridge."""
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
@@ -146,29 +162,29 @@ class L3Bridge(Bridge):
 
         self.logger.debug("%s: set network address to %s", self, self.ip_interface)
 
+        self.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
         self.is_nat = self.config.get("nat", False)
         if self.is_nat:
             self.cmd_raises(
                 "iptables -t nat -A POSTROUTING "
-                f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
+                f"-s {self.ip_network} ! -d {self.ip_network} "
+                f"! -o {self.name} -j MASQUERADE"
             )
 
     async def _async_delete(self):
-        if type(self) == L3Bridge:  # pylint: disable=C0123
-            self.logger.debug("%s: deleting", self)
-        else:
-            self.logger.debug("%s: L3Bridge sub-class _async_delete", self)
+        self.logger.debug("%s: deleting", self)
 
         if self.config.get("nat", False):
             self.cmd_status(
                 "iptables -t nat -D POSTROUTING "
-                f"-s {self.ip_network} ! -o {self.name} -j MASQUERADE"
+                f"-s {self.ip_network} ! -d {self.ip_network} "
+                f"! -o {self.name} -j MASQUERADE"
             )
-
         await super()._async_delete()
 
 
-class L3Node(LinuxNamespace):
+# Would maybe like to refactor this into L3 and Node
+class L3NodeMixin:
     """A linux namespace with IP attributes."""
 
     next_ord = 1
@@ -176,12 +192,18 @@ class L3Node(LinuxNamespace):
     @classmethod
     def _get_next_ord(cls):
         # Do not use `cls` here b/c that makes the variable class specific
-        n = L3Node.next_ord
-        L3Node.next_ord = n + 1
+        n = L3NodeMixin.next_ord
+        L3NodeMixin.next_ord = n + 1
         return n
 
-    def __init__(self, name, config=None, unet=None, **kwargs):
+    def __init__(self, *args, config=None, unet=None, **kwargs):
         """Create a linux Bridge."""
+        # logging.warning(
+        #     "L3NodeMixin: config %s unet %s kwargs %s", config, unet, kwargs
+        # )
+
+        super().__init__(*args, **kwargs)
+
         self.config = config if config else {}
         config = self.config
 
@@ -201,15 +223,12 @@ class L3Node(LinuxNamespace):
 
         self.intf_tc_count = 0
 
-        if not name:
-            name = "r{}".format(self.id)
-
         # Clear and create rundir early
-        self.rundir = os.path.join(unet.rundir, name)
+        self.rundir = os.path.join(unet.rundir, self.name)
         commander.cmd_raises(f"rm -rf {self.rundir}")
         commander.cmd_raises(f"mkdir -p {self.rundir}")
 
-        super().__init__(name=name, **kwargs)
+        # super().__init__(name=name, **kwargs)
 
         self.mount_volumes()
 
@@ -256,10 +275,8 @@ ff02::1\tip6-allnodes
 ff02::2\tip6-allrouters
 ."""
                 )
-        self.bind_mount(hosts_file, "/etc/hosts")
-
-        if not self.is_container and not self.is_vm:
-            self.pytest_hook_open_shell()
+        if hasattr(self, "bind_mount"):
+            self.bind_mount(hosts_file, "/etc/hosts")
 
     async def console(
         self,
@@ -822,12 +839,7 @@ ff02::2\tip6-allrouters
             del self.phy_odrivers[devaddr]
 
     async def _async_delete(self):
-        if type(self) == L3Node:  # pylint: disable=C0123
-            # Used to use info here as the top level delete but the user doesn't care,
-            # right?
-            self.logger.debug("%s: deleting", self)
-        else:
-            self.logger.debug("%s: L3Node sub-class _async_delete", self)
+        self.logger.debug("%s: L3NodeMixin sub-class _async_delete", self)
 
         # First terminate any still running "cmd:"
         # XXX We need to take care of this in container/qemu before getting here.
@@ -854,8 +866,26 @@ ff02::2\tip6-allrouters
         await super()._async_delete()
 
 
-class L3ContainerNode(L3Node):
-    """An container (podman) based L3Node."""
+class L3NamespaceNode(L3NodeMixin, LinuxNamespace):
+    """A namespace L3 node."""
+
+    def __init__(self, name, **kwargs):
+        # logging.warning(
+        #     "L3NamespaceNode: name %s MRO: %s kwargs %s",
+        #     name,
+        #     L3NamespaceNode.mro(),
+        #     kwargs,
+        # )
+        super().__init__(name, **kwargs)
+        super().pytest_hook_open_shell()
+
+    async def _async_delete(self):
+        self.logger.debug("%s: deleting", self)
+        await super()._async_delete()
+
+
+class L3ContainerNode(L3NodeMixin, LinuxNamespace):
+    """An container (podman) based L3 node."""
 
     def __init__(self, name, config, **kwargs):
         """Create a Container Node."""
@@ -1208,12 +1238,7 @@ class L3ContainerNode(L3Node):
         self.cmd_p = None
 
     async def _async_delete(self):
-        if type(self) == L3ContainerNode:  # pylint: disable=C0123
-            # Used to use info here as the top level delete but the user doesn't care,
-            # right?
-            self.logger.debug("%s: deleting", self)
-        else:
-            self.logger.debug("%s: L3ContainerNode delete", self)
+        self.logger.debug("%s: deleting", self)
 
         if contid := self.container_id:
             try:
@@ -1256,8 +1281,8 @@ class L3ContainerNode(L3Node):
         await super()._async_delete()
 
 
-class L3QemuVM(L3Node):
-    """An container (podman) based L3Node."""
+class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
+    """An VM (qemu) based L3 node."""
 
     def __init__(self, name, config, **kwargs):
         """Create a Container Node."""
@@ -1271,6 +1296,7 @@ class L3QemuVM(L3Node):
         self.is_kvm = False
         self.monrepl = None
         self.tapfds = {}
+        self.cpu_thread_map = {}
 
         self.tapnames = {}
 
@@ -1281,7 +1307,7 @@ class L3QemuVM(L3Node):
         super().__init__(name=name, config=config, **kwargs)
 
         self.sockdir = os.path.join(self.rundir, "s")
-        self.bind_mount(self.sockdir, "/tmp/qemu-sock")
+        self.cmd_raises(f"mkdir -p {self.sockdir}")
 
         self.qemu_config = config_subst(
             self.qemu_config,
@@ -1482,7 +1508,7 @@ class L3QemuVM(L3Node):
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(cmd)
-            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
+            commander.cmd_raises(f"chmod 755 {cmdpath}")
 
             # Now write a copy inside the VM
             self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
@@ -1524,7 +1550,7 @@ class L3QemuVM(L3Node):
             # )
 
             # When run_command supports async_ arg we can use the above...
-            self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
+            self.cmd_p = now_proc(self.cmdrepl.run_command(cmds, timeout=120))
 
             # stdout and err both combined into logfile from the spawned repl
             stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
@@ -1534,6 +1560,11 @@ class L3QemuVM(L3Node):
             self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
 
         return self.cmd_p
+
+    # InterfaceMixin override
+    # We need a name unique in the shared namespace.
+    def get_ns_ifname(self, ifname):
+        return self.name + ifname
 
     async def add_host_intf(self, hname, lname, mtu=None):
         # L3QemuVM needs it's own add_host_intf for macvtap, We need to create the tap
@@ -1590,22 +1621,26 @@ class L3QemuVM(L3Node):
         # we should just be using a tap created earlier which was connected to the
         # bridge. Except we need to handle the case of p2p qemu <-> namespace
         #
+        ifname = self.get_ns_ifname(ifname)
+        brname = f"{self.name}br{index}"
+
         tapindex = self.unet.tapcount
         self.unet.tapcount += 1
+
         mac = f"02:aa:aa:aa:{index:02x}:{self.id:02x}"
         # nic = "tap,model=virtio-net-pci"
         # qemu -net nic,model=virtio,addr=1a:46:0b:ca:bc:7b -net tap,fd=3 3<>/dev/tap11
         self.cmd_raises(f"ip address flush dev {ifname}")
         self.cmd_raises(f"ip tuntap add tap{tapindex} mode tap")
-        self.cmd_raises(f"ip link add name br{index} type bridge")
-        self.cmd_raises(f"ip link set dev {ifname} master br{index}")
-        self.cmd_raises(f"ip link set dev tap{tapindex} master br{index}")
+        self.cmd_raises(f"ip link add name {brname} type bridge")
+        self.cmd_raises(f"ip link set dev {ifname} master {brname}")
+        self.cmd_raises(f"ip link set dev tap{tapindex} master {brname}")
         if mtu:
             self.cmd_raises(f"ip link set dev tap{tapindex} mtu {mtu}")
             self.cmd_raises(f"ip link set dev {ifname} mtu {mtu}")
         self.cmd_raises(f"ip link set dev tap{tapindex} up")
         self.cmd_raises(f"ip link set dev {ifname} up")
-        self.cmd_raises(f"ip link set dev br{index} up")
+        self.cmd_raises(f"ip link set dev {brname} up")
         dev = f"{driver},netdev=n{index},mac={mac}"
         return [
             "-netdev",
@@ -1662,6 +1697,31 @@ class L3QemuVM(L3Node):
                 con.cmd_raises("ip route flush exact default")
                 con.cmd_raises(f"ip route add default via {switch.ip_address}")
         con.cmd_raises("ip link set lo up")
+
+        if self.unet.pytest_config and self.unet.pytest_config.getoption("--coverage"):
+            con.cmd_raises("mount -t debugfs none /sys/kernel/debug")
+
+    async def gather_coverage_data(self):
+        con = self.conrepl
+
+        gcda = "/sys/kernel/debug/gcov"
+        tmpdir = con.cmd_raises("mktemp -d").strip()
+        dest = "/gcov-data.tgz"
+        con.cmd_raises(rf"find {gcda} -type d -exec mkdir -p {tmpdir}/{{}} \;")
+        con.cmd_raises(
+            rf"find {gcda} -name '*.gcda' -exec sh -c 'cat < $0 > {tmpdir}/$0' {{}} \;"
+        )
+        con.cmd_raises(
+            rf"find {gcda} -name '*.gcno' -exec sh -c 'cp -d $0 {tmpdir}/$0' {{}} \;"
+        )
+        con.cmd_raises(rf"tar cf - -C {tmpdir} sys | gzip -c > {dest}")
+        con.cmd_raises(rf"rm -rf {tmpdir}")
+        self.logger.info("Saved coverage data in VM at %s", dest)
+        if self.use_ssh:
+            self.cmd_raises("echo FooBar")
+            ldest = os.path.join(self.rundir, "gcov-data.tgz")
+            self.cmd_raises(f"cat {dest}", stdout=open(ldest, "wb"))
+            self.logger.info("Saved coverage data on host at %s", ldest)
 
     async def _opencons(
         self,
@@ -1740,6 +1800,18 @@ class L3QemuVM(L3Node):
 
         return cons
 
+    async def set_cpu_affinity(self, afflist):
+        for i, aff in enumerate(afflist):
+            if not aff:
+                continue
+            # affmask = convert_ranges_to_bitmask(aff)
+            if i not in self.cpu_thread_map:
+                logging.warning("affinity %s given for missing vcpu %s", aff, i)
+                continue
+            logging.info("setting vcpu %s affinity to %s", i, aff)
+            tid = self.cpu_thread_map[i]
+            self.cmd_raises_nsonly(f"taskset -cp {aff} {tid}")
+
     async def launch(self):
         """Launch qemu."""
         self.logger.info("%s: Launch Qemu", self)
@@ -1751,16 +1823,21 @@ class L3QemuVM(L3Node):
         #         "-nodefaults", "-boot", bootd]
         args = [get_exec_path_host("qemu-system-x86_64"), "-boot", bootd]
 
+        args += ["-machine", "q35"]
+
         if qc.get("kvm"):
             rc, _, e = await self.async_cmd_status_nsonly("ls -l /dev/kvm")
             if rc:
                 self.logger.warning("Can't enable KVM no /dev/kvm: %s", e)
             else:
+                # [args += ["-enable-kvm", "-cpu", "host"]
+                # uargs += ["-accel", "kvm", "-cpu", "Icelake-Server-v5"]
                 args += ["-accel", "kvm", "-cpu", "host"]
 
         if ncpu := qc.get("ncpu"):
-            # args += ["-smp", f"{ncpu},sockets=1,cores={ncpu},threads=1"]
-            args += ["-smp", f"{ncpu},sockets={ncpu},cores=1,threads=1"]
+            # args += ["-smp", f"sockets={ncpu}"]
+            args += ["-smp", f"cores={ncpu}"]
+            # args += ["-smp", f"{ncpu},sockets={ncpu},cores=1,threads=1"]
 
         args.extend(["-m", str(qc.get("memory", "512M"))])
 
@@ -1868,36 +1945,37 @@ class L3QemuVM(L3Node):
         # input chars for some reason.
         #
         # 4 serial ports (max), we'll add extra ports using virtual consoles.
+        _sd = self.sockdir
         if use_stdio:
             args += ["-serial", "stdio"]
-        args += ["-serial", "unix:/tmp/qemu-sock/_console,server,nowait"]
+        args += ["-serial", f"unix:{_sd}/_console,server,nowait"]
         if use_cmdcon:
             args += [
                 "-serial",
-                "unix:/tmp/qemu-sock/_cmdcon,server,nowait",
+                f"unix:{_sd}/_cmdcon,server,nowait",
             ]
         args += [
             "-serial",
-            "unix:/tmp/qemu-sock/console,server,nowait",
+            f"unix:{_sd}/console,server,nowait",
             # A 2 virtual consoles - /dev/hvc[01]
             # Requires CONFIG_HVC_DRIVER=y CONFIG_VIRTIO_CONSOLE=y
             "-device",
             "virtio-serial",  # serial console bus
             "-chardev",
-            "socket,path=/tmp/qemu-sock/vcon0,server=on,wait=off,id=vcon0",
+            f"socket,path={_sd}/vcon0,server=on,wait=off,id=vcon0",
             "-chardev",
-            "socket,path=/tmp/qemu-sock/vcon1,server=on,wait=off,id=vcon1",
+            f"socket,path={_sd}/vcon1,server=on,wait=off,id=vcon1",
             "-device",
             "virtconsole,chardev=vcon0",
             "-device",
             "virtconsole,chardev=vcon1",
             # 2 monitors
             "-monitor",
-            "unix:/tmp/qemu-sock/_monitor,server,nowait",
+            f"unix:{_sd}/_monitor,server,nowait",
             "-monitor",
-            "unix:/tmp/qemu-sock/monitor,server,nowait",
+            f"unix:{_sd}/monitor,server,nowait",
             "-gdb",
-            "unix:/tmp/qemu-sock/gdbserver,server,nowait",
+            f"unix:{_sd}/gdbserver,server,nowait",
         ]
 
         for i, m in enumerate(self.extra_mounts):
@@ -1958,10 +2036,21 @@ class L3QemuVM(L3Node):
         self.monrepl = await self.monitor(os.path.join(self.sockdir, "_monitor"))
 
         # the monitor output has super annoying ANSI escapes in it
+
         output = self.monrepl.cmd_nostatus("info status")
         self.logger.info("VM status: %s", output)
+
         output = self.monrepl.cmd_nostatus("info kvm")
         self.logger.info("KVM status: %s", output)
+
+        #
+        # Set thread affinity
+        #
+        output = self.monrepl.cmd_nostatus("info cpus")
+        matches = re.findall(r"CPU #(\d+): *thread_id=(\d+)", output)
+        self.cpu_thread_map = {int(k): int(v) for k, v in matches}
+        if cpuaff := self.qemu_config.get("cpu-affinity"):
+            await self.set_cpu_affinity(cpuaff)
 
         self.is_kvm = "disabled" not in output
 
@@ -1971,11 +2060,11 @@ class L3QemuVM(L3Node):
         if self.extra_mounts:
             await self.mount_mounts()
 
-        self.pytest_hook_open_shell()
-
         self.use_ssh = bool(self.ssh_keyfile)
         if self.use_ssh:
             self.use_ssh = self.__setup_ssh()
+
+        self.pytest_hook_open_shell()
 
         return self.launch_p
 
@@ -2010,10 +2099,7 @@ class L3QemuVM(L3Node):
         # return await self._async_cleanup_cmd()
 
     async def _async_delete(self):
-        if type(self) == L3QemuVM:  # pylint: disable=C0123
-            self.logger.debug("%s: deleting", self)
-        else:
-            self.logger.debug("%s: L3QemuVM _async_delete", self)
+        self.logger.debug("%s: deleting", self)
 
         if self.cmd_p:
             await self.async_cleanup_proc(self.cmd_p)
@@ -2042,7 +2128,9 @@ class Munet(BaseMunet):
     """Munet."""
 
     def __init__(self, rundir=None, config=None, pytestconfig=None, **kwargs):
-        super().__init__(**kwargs)
+        # logging.warning("Munet")
+
+        super().__init__("munet", **kwargs)
 
         self.built = False
         self.tapcount = 0
@@ -2317,6 +2405,7 @@ class Munet(BaseMunet):
             assert "hostintf" not in c2
             assert "physical" not in c1
             assert "physical" not in c2
+
             if isp2p:
                 mtu1 = c1.get("mtu")
                 mtu2 = c2.get("mtu")
@@ -2325,6 +2414,7 @@ class Munet(BaseMunet):
                     self.logger.error("mtus differ for add_link %s != %s", mtu1, mtu2)
             else:
                 mtu = c2.get("mtu")
+
             super().add_link(node1, node2, if1, if2, mtu=mtu)
 
         if isp2p:
@@ -2348,7 +2438,7 @@ class Munet(BaseMunet):
             kwargs["server"] = config["server"]
             kwargs["port"] = int(config.get("server-port", 22))
         else:
-            cls = L3Node
+            cls = L3NamespaceNode
         return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
 
     def add_network(self, name, config=None, **kwargs):
@@ -2420,10 +2510,16 @@ class Munet(BaseMunet):
     async def _async_delete(self):
         from munet.testing.util import async_pause_test  # pylint: disable=C0415
 
-        if type(self) == Munet:  # pylint: disable=C0123
-            self.logger.debug("%s: deleting.", self)
-        else:
-            self.logger.debug("%s: Munet sub-class munet deleting.", self)
+        self.logger.debug("%s: deleting.", self)
+
+        if self.pytest_config and self.pytest_config.getoption("--coverage"):
+            nodes = (
+                x for x in self.hosts.values() if hasattr(x, "gather_coverage_data")
+            )
+            try:
+                await asyncio.gather(*(x.gather_coverage_data() for x in nodes))
+            except Exception as error:
+                logging.warning("Error gathering coverage data: %s", error)
 
         if not self.pytest_config:
             pause = False

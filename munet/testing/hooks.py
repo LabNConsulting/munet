@@ -48,6 +48,12 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
+        "--coverage",
+        action="store_true",
+        help="Enable coverage gathering if supported",
+    )
+
+    parser.addoption(
         "--gdb",
         default="",
         metavar="HOST[,HOST...]",

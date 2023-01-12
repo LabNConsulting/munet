@@ -29,7 +29,7 @@ from .base import comm_error
 from .base import get_exec_path
 from .base import proc_error
 from .native import L3Bridge
-from .native import L3Node
+from .native import L3NamespaceNode
 from .native import Munet
 from .native import to_thread
 
@@ -39,7 +39,7 @@ __all__ = [
     "Bridge",
     "Commander",
     "L3Bridge",
-    "L3Node",
+    "L3NamespaceNode",
     "LinuxNamespace",
     "Munet",
     "SharedNamespace",

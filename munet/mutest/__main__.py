@@ -36,7 +36,7 @@ from typing import Union
 from munet import parser
 from munet.base import Bridge
 from munet.mutest import userapi as uapi
-from munet.native import L3Node
+from munet.native import L3NodeMixin
 from munet.native import Munet
 from munet.parser import async_build_topology
 from munet.parser import get_config
@@ -100,7 +100,7 @@ async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = True
 
         # Reset the class variables so auto number is predictable
         logging.debug("unet fixture: resetting ords to 1")
-        L3Node.next_ord = 1
+        L3NodeMixin.next_ord = 1
         Bridge.next_ord = 1
 
 
