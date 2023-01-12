@@ -33,7 +33,7 @@ Namespace Node
 The most basic node is a linux namepsace. If no other special configuration
 (e.g., ``image:`` or ``qemu:``) has been specified in the configuration this is
 the node type that is created. This node type is implemented by the
-:py:class:`L3Node` class.
+:py:class:`L3NamespaceNode` class.
 
 Below is an example of creating a namespace node names ``node1`` with a single
 IP interface connected to the ``mgmt0`` network.
