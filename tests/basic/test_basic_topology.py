@@ -35,12 +35,11 @@ pytestmark = pytest.mark.asyncio
 )
 async def test_basic_ping(unet_perfunc):
     unet = unet_perfunc
-    other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
+    other_ip = unet.hosts["r2"].get_intf_addr("eth0").ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.debug("ping r2 output: %s", o)
 
 
-@pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
 async def test_autonumber_ping(unet_perfunc):
     unet = unet_perfunc
     r1 = unet.hosts["r1"]
@@ -63,9 +62,38 @@ async def test_autonumber_ping(unet_perfunc):
     o = await r2.async_cmd_raises("ping -w1 -c1 10.254.2.1")
     logging.debug("r2 ping r3 p2p (10.254.2.1) output: %s", o)
 
+    if unet.ipv6_enable:
+        addr = "fc00:0:0:1::2"
+        o = await r1.async_cmd_nostatus("ip -6 neigh show dev xyz0")
+        logging.info("ip -6 neigh show: %s", o)
 
+        await r1.async_cmd_nostatus(f"ping -w5 -c3 {addr}", warn=False)
+
+        o = await r1.async_cmd_nostatus(f"ip -6 neigh get {addr} dev xyz0")
+        logging.info("ip -6 neigh get: %s", o)
+
+        o = await r1.async_cmd_nostatus("ip -6 neigh show")
+        logging.info("ip -6 neigh show: %s", o)
+
+        o = await r1.async_cmd_raises(f"ping -w1 -c1 {addr}")
+        logging.debug(f"r1 ping r2 ({addr}) output: %s", o)
+
+        o = await r1.async_cmd_raises("ping -w1 -c1 fd00:10::3")
+        logging.debug("r1 ping r3 (192.168.10.3) output: %s", o)
+
+        o = await r2.async_cmd_raises("ping -w1 -c1 fcff:ffff:1::0")
+        logging.debug("r2 ping r1 p2p (fcff:ffff:1::0) output: %s", o)
+
+        o = await r2.async_cmd_raises("ping -w1 -c1 fcff:ffff:2::1")
+        logging.debug("r2 ping r3 p2p (fcff:ffff:2::1) output: %s", o)
+
+        o = await r1.async_cmd_nostatus("ip -6 neigh show")
+        logging.info("ip -6 neigh show: %s", o)
+
+
+@pytest.mark.parametrize("ipv6", [False, True])
 @pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
-async def test_mtu_ping(unet_perfunc, astepf):
+async def test_mtu_ping(unet_perfunc, astepf, ipv6):
     unet = unet_perfunc
     r1 = unet.hosts["r1"]
     r2 = unet.hosts["r2"]
@@ -73,9 +101,12 @@ async def test_mtu_ping(unet_perfunc, astepf):
 
     logf = logging.debug
 
-    dest = r2.intf_addrs[r2.net_intfs["net0"]].ip
-    await astepf(f"ping r1 (4472) --- [net0:4500] ---> {dest} r2")
-    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s4472 {dest}")
+    dest = r2.get_intf_addr(r2.net_intfs["net0"], ipv6=ipv6).ip
+    await astepf(f"ping r1 (4452) --- [net0:4500] ---> {dest} r2")
+    # Need neighbor discovery to finish
+    await r1.async_cmd_nostatus(f"ping -w5 -c3 -Mdo -s4452 {dest}", warn=False)
+
+    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s4452 {dest}")
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc == 0
 
@@ -84,9 +115,9 @@ async def test_mtu_ping(unet_perfunc, astepf):
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc != 0
 
-    dest = r3.intf_addrs[r3.net_intfs["net1"]].ip
-    await astepf(f"ping r1 (8972) --- [net1:9000] ---> {dest} r3")
-    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s8972 {dest}")
+    dest = r3.get_intf_addr(r3.net_intfs["net1"], ipv6=ipv6).ip
+    await astepf(f"ping r1 (8952) --- [net1:9000] ---> {dest} r3")
+    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s8952 {dest}")
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc == 0
 
@@ -95,9 +126,9 @@ async def test_mtu_ping(unet_perfunc, astepf):
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc != 0
 
-    dest = r2.intf_addrs["p2p0"].ip
-    await astepf(f"ping r1 (8972) --- [p2p:9000] ---> {dest} r2")
-    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s8972 {dest}")
+    dest = r2.get_intf_addr("p2p0", ipv6=ipv6).ip
+    await astepf(f"ping r1 (8952) --- [p2p:9000] ---> {dest} r2")
+    rc, o, e = await r1.async_cmd_status(f"ping -w1 -c1 -Mdo -s8952 {dest}")
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc == 0
 
@@ -106,9 +137,9 @@ async def test_mtu_ping(unet_perfunc, astepf):
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc != 0
 
-    dest = r2.intf_addrs["p2p1"].ip
-    await astepf(f"ping r3 (1472) --- [p2p:1500] ---> {dest} r2")
-    rc, o, e = await r3.async_cmd_status(f"ping -w1 -c1 -Mdo -s1472 {dest}")
+    dest = r2.get_intf_addr("p2p1", ipv6=ipv6).ip
+    await astepf(f"ping r3 (1452) --- [p2p:1500] ---> {dest} r2")
+    rc, o, e = await r3.async_cmd_status(f"ping -w1 -c1 -Mdo -s1452 {dest}")
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc == 0
 
@@ -117,9 +148,9 @@ async def test_mtu_ping(unet_perfunc, astepf):
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc != 0
 
-    dest = r2.intf_addrs["p2p2"].ip
-    await astepf(f"ping r3 (8972) --- [p2p:9000] ---> {dest} r2")
-    rc, o, e = await r3.async_cmd_status(f"ping -w1 -c1 -Mdo -s8972 {dest}")
+    dest = r2.get_intf_addr("p2p2", ipv6=ipv6).ip
+    await astepf(f"ping r3 (8952) --- [p2p:9000] ---> {dest} r2")
+    rc, o, e = await r3.async_cmd_status(f"ping -w1 -c1 -Mdo -s8952 {dest}")
     logf("ping: %s", cmd_error(rc, o, e))
     assert rc == 0
 

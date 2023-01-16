@@ -1,9 +1,11 @@
 topology:
+  ipv6-enable: true
   networks-autonumber: true
   dns-network: "mgmt0"
   networks:
     - name: mgmt0
       ip: 192.168.0.254/24
+      ipv6: "fd00::ff/64"
       nat: true
   nodes:
     - name: h1
@@ -17,7 +19,7 @@ kinds:
     qemu:
       kernel: "%CONFIGDIR%/bzImage"
       initrd: "%CONFIGDIR%/rootfs.cpio.gz"
-      cmdline-extra: "acpi=off nokaslr"
+      cmdline-extra: "nokaslr"
       memory: "768M"
       kvm: true
       ncpu: 2
@@ -25,15 +27,16 @@ kinds:
 cli:
   commands:
     - name: con
-      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/console"
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/vcon0"
       format: "con HOST [HOST ...]"
       help: "open console on given hosts, * for all"
       new-window: true
     - name: mon
-      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:/tmp/qemu-sock/monitor"
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/monitor"
       format: "mon NODE [NODE ...]"
       help: "open monitor on given hosts, * for all"
       new-window: true
+
     - name: ssh
       exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %IPADDR%"
       kinds: ["linux"]
