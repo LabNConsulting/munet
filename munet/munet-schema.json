@@ -168,6 +168,9 @@
                 "ip": {
                   "type": "string"
                 },
+                "ipv6": {
+                  "type": "string"
+                },
                 "name": {
                   "type": "string"
                 },
@@ -353,6 +356,9 @@
               },
               "ip": {
                 "type": "string"
+              },
+              "ipv6": {
+                "type": "string"
               }
             }
           }
@@ -465,6 +471,9 @@
                       "type": "string"
                     },
                     "ip": {
+                      "type": "string"
+                    },
+                    "ipv6": {
                       "type": "string"
                     },
                     "name": {
