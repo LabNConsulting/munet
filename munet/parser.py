@@ -184,11 +184,14 @@ def append_hosts_files(unet, netname):
 
     entries = []
     for name, node in unet.hosts.items():
-        if not hasattr(node, "intf_addrs"):
+        if not hasattr(node, "_intf_addrs"):
             continue
         ifname = node.get_ifname(netname)
-        if ifname in node.intf_addrs:
-            entries.append((name, node.intf_addrs[ifname].ip))
+
+        for b in (False, True):
+            ifaddr = node.get_intf_addr(ifname, ipv6=b)
+            if ifaddr:
+                entries.append((name, ifaddr.ip))
     for name, node in unet.hosts.items():
         if not hasattr(node, "rundir"):
             continue

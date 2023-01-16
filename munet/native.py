@@ -73,8 +73,8 @@ def make_ip_network(net, inc):
     )
 
 
-def get_ip_network(c, brid):
-    ip = c.get("ip")
+def get_ip_network(c, brid, ipv6=False):
+    ip = c.get("ipv6" if ipv6 else "ip")
     if ip and str(ip) != "auto":
         try:
             ifip = ipaddress.ip_interface(ip)
@@ -83,6 +83,8 @@ def get_ip_network(c, brid):
             return ifip
         except ValueError:
             return ipaddress.ip_network(ip)
+    if ipv6:
+        return make_ip_network("fc00::/64", brid)
     return make_ip_network("10.0.0.0/24", brid)
 
 
@@ -136,6 +138,7 @@ class L2Bridge(Bridge):
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
+        self.unet = unet
 
     async def _async_delete(self):
         self.logger.debug("%s: deleting", self)
@@ -150,6 +153,7 @@ class L3Bridge(Bridge):
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
+        self.unet = unet
 
         self.ip_interface = get_ip_network(self.config, self.id)
         if hasattr(self.ip_interface, "network"):
@@ -160,9 +164,24 @@ class L3Bridge(Bridge):
             self.ip_address = None
             self.ip_network = self.ip_interface
 
-        self.logger.debug("%s: set network address to %s", self, self.ip_interface)
-
+        self.logger.debug("%s: set IPv4 network address to %s", self, self.ip_interface)
         self.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
+
+        if unet.ipv6_enable:
+            self.ip6_interface = get_ip_network(self.config, self.id, ipv6=True)
+            if hasattr(self.ip6_interface, "network"):
+                self.ip6_address = self.ip6_interface.ip
+                self.ip6_network = self.ip6_interface.network
+                self.cmd_raises(f"ip addr add {self.ip6_interface} dev {name}")
+            else:
+                self.ip6_address = None
+                self.ip6_network = self.ip6_interface
+
+            self.logger.debug(
+                "%s: set IPv6 network address to %s", self, self.ip_interface
+            )
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
+
         self.is_nat = self.config.get("nat", False)
         if self.is_nat:
             self.cmd_raises(
@@ -215,6 +234,7 @@ class L3NodeMixin:
         self.cleanup_called = False
 
         self.mgmt_ip = None  # set in parser.py
+        self.mgmt_ip6 = None  # set in parser.py
         self.host_intfs = {}
         self.phy_intfs = {}
         self.phycount = 0
@@ -241,6 +261,7 @@ class L3NodeMixin:
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
+        self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
 
         self.loopback_ip = None
         self.loopback_ips = get_loopback_ips(self.config, self.id)
@@ -528,6 +549,7 @@ ff02::2\tip6-allrouters
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
+            assert ipaddr.version == 4
         elif self.unet.autonumber and "ip" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
@@ -538,18 +560,43 @@ ff02::2\tip6-allrouters
             n = switch.ip_network
             ipaddr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
         else:
-            return
+            ipaddr = None
+
+        if ip := cconf.get("ipv6"):
+            ip6addr = ipaddress.ip_interface(ip)
+            assert ipaddr.version == 6
+        elif self.unet.ipv6_enable and self.unet.autonumber and "ipv6" not in cconf:
+            self.logger.debug(
+                "%s: prefixlen of switch %s is %s",
+                self,
+                switch.name,
+                switch.ip6_network.prefixlen,
+            )
+            n = switch.ip6_network
+            ip6addr = ipaddress.ip_interface((n.network_address + self.id, n.prefixlen))
+        else:
+            ip6addr = None
 
         dns_network = self.unet.topoconf.get("dns-network")
-        if dns_network and dns_network == switch.name:
-            self.mgmt_ip = ipaddr.ip
-        ifname = cconf["name"]
-        self.intf_addrs[ifname] = ipaddr
-        self.logger.debug("%s: adding %s to lan intf %s", self, ipaddr, ifname)
-        if not self.is_vm:
-            self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
-            if hasattr(switch, "is_nat") and switch.is_nat:
-                self.cmd_raises(f"ip route add default via {switch.ip_address}")
+        for ip in (ipaddr, ip6addr):
+            if not ip:
+                continue
+            ipcmd = "ip " if ip.version == 4 else "ip -6 "
+            if dns_network and dns_network == switch.name:
+                if ip.version == 4:
+                    self.mgmt_ip = ip.ip
+                else:
+                    self.mgmt_ip6 = ip.ip
+            ifname = cconf["name"]
+            self.set_intf_addr(ifname, ip)
+            self.logger.debug("%s: adding %s to lan intf %s", self, ip, ifname)
+            if not self.is_vm:
+                self.intf_ip_cmd(ifname, ipcmd + f"addr add {ip} dev {ifname}")
+                if hasattr(switch, "is_nat") and switch.is_nat:
+                    swaddr = (
+                        switch.ip_address if ip.version == 4 else switch.ip6_address
+                    )
+                    self.cmd_raises(ipcmd + f"route add default via {swaddr}")
 
     def pytest_hook_run_cmd(self, stdout, stderr):
         """Handle pytest options related to running the node cmd.
@@ -663,17 +710,22 @@ ff02::2\tip6-allrouters
         if shellopt == "all" or self.name in shellopt.split(","):
             self.run_in_window("bash")
 
-    def set_p2p_addr(self, other, cconf, occonf):
-        ipaddr = ipaddress.ip_interface(cconf["ip"]) if cconf.get("ip") else None
-        oipaddr = ipaddress.ip_interface(occonf["ip"]) if occonf.get("ip") else None
+    def _set_p2p_addr(self, other, cconf, occonf, ipv6=False):
+        ipkey = "ipv6" if ipv6 else "ip"
+        ipaddr = ipaddress.ip_interface(cconf[ipkey]) if cconf.get(ipkey) else None
+        oipaddr = ipaddress.ip_interface(occonf[ipkey]) if occonf.get(ipkey) else None
         self.logger.debug(
             "%s: set_p2p_addr %s %s %s", self, other.name, ipaddr, oipaddr
         )
 
         if not ipaddr and not oipaddr:
             if self.unet.autonumber:
-                n = self.next_p2p_network
-                self.next_p2p_network = make_ip_network(n, 1)
+                if ipv6:
+                    n = self.next_p2p_network6
+                    self.next_p2p_network6 = make_ip_network(n, 1)
+                else:
+                    n = self.next_p2p_network
+                    self.next_p2p_network = make_ip_network(n, 1)
 
                 ipaddr = ipaddress.ip_interface(n)
                 oipaddr = ipaddress.ip_interface((ipaddr.ip + 1, n.prefixlen))
@@ -682,19 +734,24 @@ ff02::2\tip6-allrouters
 
         if ipaddr:
             ifname = cconf["name"]
-            self.intf_addrs[ifname] = ipaddr
+            self.set_intf_addr(ifname, ipaddr)
             self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
             if "physical" not in cconf and not self.is_vm:
                 self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
         if oipaddr:
             oifname = occonf["name"]
-            other.intf_addrs[oifname] = oipaddr
+            other.set_intf_addr(oifname, oipaddr)
             self.logger.debug(
                 "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
             )
             if "physical" not in occonf and not other.is_vm:
                 other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
+
+    def set_p2p_addr(self, other, cconf, occonf):
+        self._set_p2p_addr(other, cconf, occonf, ipv6=False)
+        if self.unet.ipv6_enable:
+            self._set_p2p_addr(other, cconf, occonf, ipv6=True)
 
     async def add_host_intf(self, hname, lname, mtu=None):
         if hname in self.host_intfs:
@@ -1325,9 +1382,10 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
         if not self.ssh_keyfile:
             self.logger.warning("%s: No sshkey config", self)
             return False
-        if not self.mgmt_ip:
+        if not self.mgmt_ip and not self.mgmt_ip6:
             self.logger.warning("%s: No mgmt IP to ssh to", self)
             return False
+        mgmt_ip = self.mgmt_ip if self.mgmt_ip else self.mgmt_ip6
 
         #
         # Since we have a keyfile shouldn't need to sudo
@@ -1356,9 +1414,9 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
         self.__base_cmd_pty.append("-t")
 
         user = self.qemu_config.get("sshuser", "root")
-        self.__base_cmd.append(f"{user}@{self.mgmt_ip}")
+        self.__base_cmd.append(f"{user}@{mgmt_ip}")
         self.__base_cmd.append("--")
-        self.__base_cmd_pty.append(f"{user}@{self.mgmt_ip}")
+        self.__base_cmd_pty.append(f"{user}@{mgmt_ip}")
         # self.__base_cmd_pty.append("--")
         return True
 
@@ -1677,8 +1735,7 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
         self.logger.info("Renumbering interfaces")
         con = self.conrepl
         con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
-        for ifname in sorted(self.intf_addrs):
-            ifaddr = self.intf_addrs[ifname]
+        for ifname in sorted(self.intfs):
             conn = find_with_kv(self.config.get("connections"), "name", ifname)
             to = conn["to"]
             switch = self.unet.switches.get(to)
@@ -1690,12 +1747,19 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
             con.cmd_raises(f"ip link set {ifname} up")
             # In case there was some preconfig e.g., cloud-init
             con.cmd_raises(f"ip addr flush dev {ifname}")
-            con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
-
-            if switch and hasattr(switch, "is_nat") and switch.is_nat:
-                # In case there was some preconfig e.g., cloud-init
-                con.cmd_raises("ip route flush exact default")
-                con.cmd_raises(f"ip route add default via {switch.ip_address}")
+            sw_is_nat = switch and hasattr(switch, "is_nat") and switch.is_nat
+            if ifaddr := self.get_intf_addr(ifname, ipv6=False):
+                con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
+                if sw_is_nat:
+                    # In case there was some preconfig e.g., cloud-init
+                    con.cmd_raises("ip route flush exact default")
+                    con.cmd_raises(f"ip route add default via {switch.ip_address}")
+            if ifaddr := self.get_intf_addr(ifname, ipv6=True):
+                con.cmd_raises(f"ip -6 addr add {ifaddr} dev {ifname}")
+                if sw_is_nat:
+                    # In case there was some preconfig e.g., cloud-init
+                    con.cmd_raises("ip -6 route flush exact default")
+                    con.cmd_raises(f"ip -6 route add default via {switch.ip6_address}")
         con.cmd_raises("ip link set lo up")
 
         if self.unet.pytest_config and self.unet.pytest_config.getoption("--coverage"):
@@ -2277,6 +2341,7 @@ class Munet(BaseMunet):
         # Allow for all networks to be auto-numbered
         topoconf = self.topoconf
         autonumber = self.autonumber
+        ipv6_enable = self.ipv6_enable
 
         # ---------------------------------------------
         # Merge Kinds and perform variable substitution
@@ -2293,6 +2358,8 @@ class Munet(BaseMunet):
             )
             if "ip" not in conf and autonumber:
                 conf["ip"] = "auto"
+            if "ipv6" not in conf and autonumber and ipv6_enable:
+                conf["ipv6"] = "auto"
             topoconf["networks"][name] = conf
             self.add_network(name, conf, logger=logger)
 

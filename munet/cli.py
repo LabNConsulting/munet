@@ -318,6 +318,10 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
     ucmd = ucmd.replace("%RUNDIR%", os.path.join(unet.rundir, host))
     if h.mgmt_ip:
         ucmd = ucmd.replace("%IPADDR%", str(h.mgmt_ip))
+    elif h.mgmt_ip6:
+        ucmd = ucmd.replace("%IPADDR%", str(h.mgmt_ip6))
+    if h.mgmt_ip6:
+        ucmd = ucmd.replace("%IP6ADDR%", str(h.mgmt_ip6))
     return ucmd.replace("%NAME%", host)
 
 
