@@ -32,7 +32,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def ping_average_rtt(r, other, oifname):
-    oip = other.intf_addrs[oifname].ip
+    oip = other.get_intf_addr(oifname).ip
     await r.async_cmd_raises(f"ping -w1 -c1 {oip}")
     o = await r.async_cmd_raises(f"ping -i.1 -c5 {oip}")
     m = re.search(r"min/avg/max/mdev = ([^/]+)/([^/]+)([^/]+)/([^ ]+) ms", o)
@@ -40,7 +40,7 @@ async def ping_average_rtt(r, other, oifname):
 
 
 async def ping_with_loss(r, other, oifname):
-    oip = other.intf_addrs[oifname].ip
+    oip = other.get_intf_addr(oifname).ip
     await r.async_cmd_status(f"ping -w1 -c1 {oip}", warn=False)
     r, o, _ = await r.async_cmd_status(f"ping -i.001 -c500 {oip}")
     ms = r"(\d+) packets transmitted, (\d+) received"

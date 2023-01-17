@@ -634,7 +634,11 @@ munet>
         }
         leaf ip {
           type string;
-          description "IP address and mask for the connection (interface).";
+          description "IPv4 address and mask for the connection (interface).";
+        }
+        leaf ipv6 {
+          type string;
+          description "IPv6 address and mask for the connection (interface).";
         }
         leaf name {
           type string;
@@ -888,7 +892,13 @@ munet>
         leaf ip {
           type string;
           description
-            "IP prefix for the network. If host bit's are set then the linux
+            "IPv4 prefix for the network. If host bit's are set then the linux
+             bridge will be assigned that IP.";
+        }
+        leaf ipv6 {
+          type string;
+          description
+            "IPv6 prefix for the network. If host bit's are set then the linux
              bridge will be assigned that IP.";
         }
       }

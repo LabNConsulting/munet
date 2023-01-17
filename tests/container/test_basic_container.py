@@ -35,21 +35,21 @@ async def test_containers_up(unet):
 
 
 async def test_ping_the_container(unet):
-    other_ip = unet.hosts["r2"].intf_addrs["eth0"].ip
+    other_ip = unet.hosts["r2"].get_intf_addr("eth0").ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.debug("ping output: %s", o)
 
-    other_ip = unet.hosts["r2"].intf_addrs["eth1"].ip
+    other_ip = unet.hosts["r2"].get_intf_addr("eth1").ip
     o = await unet.hosts["r1"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.debug("ping output: %s", o)
 
 
 async def test_ping_from_container(unet):
-    other_ip = unet.hosts["r1"].intf_addrs["eth0"].ip
+    other_ip = unet.hosts["r1"].get_intf_addr("eth0").ip
     o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.debug("ping output: %s", o)
 
-    other_ip = unet.hosts["r1"].intf_addrs["eth1"].ip
+    other_ip = unet.hosts["r1"].get_intf_addr("eth1").ip
     o = await unet.hosts["r2"].async_cmd_raises(f"ping -w1 -c1 {other_ip}")
     logging.debug("ping output: %s", o)
 

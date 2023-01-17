@@ -22,6 +22,7 @@
 import asyncio
 import datetime
 import getpass
+import ipaddress
 import logging
 import os
 import platform
@@ -33,6 +34,8 @@ import subprocess
 import sys
 import tempfile
 import time as time_mod
+
+from collections import defaultdict
 
 from munet import unshare
 
@@ -1187,7 +1190,7 @@ class InterfaceMixin:
         # del kwargs  # get rid of lint
         # logging.warning("InterfaceMixin: args: %s kwargs: %s", args, kwargs)
 
-        self.intf_addrs = {}
+        self._intf_addrs = defaultdict(lambda: [None, None])
         self.net_intfs = {}
         self.next_intf_index = 0
         self.basename = "eth"
@@ -1196,16 +1199,25 @@ class InterfaceMixin:
 
     @property
     def intfs(self):
-        return self.intf_addrs.keys()
+        return sorted(self._intf_addrs.keys())
 
     @property
     def networks(self):
-        return self.net_intfs.keys()
+        return sorted(self.net_intfs.keys())
 
-    def net_addr(self, netname):
+    def get_intf_addr(self, ifname, ipv6=False):
+        if ifname not in self._intf_addrs:
+            return None
+        return self._intf_addrs[ifname][bool(ipv6)]
+
+    def set_intf_addr(self, ifname, ifaddr):
+        ifaddr = ipaddress.ip_interface(ifaddr)
+        self._intf_addrs[ifname][ifaddr.version == 6] = ifaddr
+
+    def net_addr(self, netname, ipv6=False):
         if netname not in self.net_intfs:
             return None
-        return self.intf_addrs[self.net_intfs[netname]]
+        return self.get_intf_addr(self.net_intfs[netname], ipv6=ipv6)
 
     def set_intf_basename(self, basename):
         self.basename = basename
@@ -1214,7 +1226,7 @@ class InterfaceMixin:
         while True:
             ifname = self.basename + str(self.next_intf_index)
             self.next_intf_index += 1
-            if ifname not in self.intf_addrs:
+            if ifname not in self._intf_addrs:
                 break
         return ifname
 
@@ -1235,8 +1247,8 @@ class InterfaceMixin:
         return ifname
 
     def register_interface(self, ifname):
-        if ifname not in self.intf_addrs:
-            self.intf_addrs[ifname] = None
+        if ifname not in self._intf_addrs:
+            self._intf_addrs[ifname] = [None, None]
 
     def register_network(self, netname, ifname):
         if netname in self.net_intfs:
@@ -1387,6 +1399,7 @@ class SSHRemote(Commander):
         self.unet = unet
         self.config = kwargs.get("config", {})
         self.mgmt_ip = None
+        self.mgmt_ip6 = None
 
         self.port = port
 
