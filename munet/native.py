@@ -1746,7 +1746,7 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
                 con.cmd_raises(f"ip link set {ifname} mtu {mtu}")
             con.cmd_raises(f"ip link set {ifname} up")
             # In case there was some preconfig e.g., cloud-init
-            con.cmd_raises(f"ip addr flush dev {ifname}")
+            con.cmd_raises(f"ip -4 addr flush dev {ifname}")
             sw_is_nat = switch and hasattr(switch, "is_nat") and switch.is_nat
             if ifaddr := self.get_intf_addr(ifname, ipv6=False):
                 con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
