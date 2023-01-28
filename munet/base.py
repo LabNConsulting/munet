@@ -21,10 +21,10 @@
 """A module that implements core functionality for library or standalone use."""
 import asyncio
 import datetime
+import errno
 import getpass
 import ipaddress
 import logging
-import multiprocessing
 import os
 import platform
 import re
@@ -1530,6 +1530,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.uflags = 0
         self.p_ns_fds = None
         self.p_ns_fnames = None
+        self.pid_ns = False
 
         uflags = 0
         if cgroup:
@@ -1553,7 +1554,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
             flags += "n"
             uflags |= unshare.CLONE_NEWNET
         if pid:
-            nslist.append("pid_for_children")
+            self.pid_ns = True
+            # nslist.append("pid_for_children")
+            # This works b/c we lookup the mutini child pid and use it.
+            nslist.append("pid")
             flags += "fp"
             cmd.append("--mount-proc")
             uflags |= unshare.CLONE_NEWPID
@@ -1579,9 +1583,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         if pid:
             # Should look this up using resources I guess
-            cmd.append(get_exec_path_host("mutini.py"))
-            cmd.append("-vv")
-        cmd.append("/bin/cat")
+            cmd.append(get_exec_path_host("mutini"))
+            cmd.append("-v")
+        else:
+            cmd.append("/bin/cat")
 
         self.ppid = os.getppid()
         if unshare_inline and not pid:
@@ -1631,44 +1636,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.pid = os.getpid()
             self.uflags = uflags
             p = None
-        # elif pid:
-        #     self.logger.debug("%s: forking unsharing process", self)
-        #     pout, pin = multiprocessing.Pipe()
-        #     # queue = multiprocessing.Queue()
-        #     mp = multiprocessing.Process(
-        #         target=self.unshare_process,
-        #         args=(
-        #             uflags,
-        #             pout,
-        #             pin,
-        #         ),
-        #     )
-        #     mp.start()
-        #     pout.close()
-
-        #     self.logger.debug("%s: waiting on queue for init pid str", self)
-        #     # init_pid_str = queue.get()
-        #     init_pid_str = ""
-        #     while not init_pid_str.endswith("\n"):
-        #         init_pid_str += pin.recv()
-        #     init_pid = int(init_pid_str[:-1])
-        #     self.logger.debug("%s: got it: %s", self, init_pid)
-
-        #     # ucpid = os.fork()
-        #     # if cpid == 0:
-        #     # In the parent cpid is the unsharing parent of the init process
-        #     self.logger.debug("%s: unshare pid is %d", self, mp.pid)
-        #     self._pid = mp.pid
-        #     self.pid = init_pid
-
-        #     rc, o, e = commander.cmd_status(["/usr/bin/pgrep", "-o", "-P", str(mp.pid)])
-
-        #     init_pid_ = int(o.strip())
-        #     self.logger.debug("%s: init pid is %d", self, init_pid_)
-
-        #     self.uflags = uflags
-        #     p = None
-
         else:
             if unshare_inline:
                 logging.warning("Cannot unshare-inline when creating a PID namespace")
@@ -1692,7 +1659,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.pid = p.pid
             if pid:
                 self.logger.debug(
-                    "%s: unshare pid: %d fetching tini namespace pid", self, self.pid
+                    "%s: unshare pid: %d fetching mutini namespace pid", self, self.pid
                 )
                 self.pid = int(commander.cmd_raises(f"pgrep -o -P {p.pid}").strip())
 
@@ -1791,7 +1758,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 else:
                     self.bind_mount(s[0], s[1])
 
-        o = self.cmd_status_nsonly("ls -l /proc/{}/ns".format(self.pid))
+        # this will fail if running inside the namespace with PID
+        if pid:
+            o = self.cmd_status_nsonly("ls -l /proc/1/ns")
+        else:
+            print("Not pid")
+            o = self.cmd_status_nsonly("ls -l /proc/{}/ns".format(self.pid))
+
         self.logger.debug("namespaces:\n %s", o)
 
         # will cache the path, which is important in delete to avoid running a shell
@@ -1800,57 +1773,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.cmd_status_nsonly([self.ip_path, "link", "set", "lo", "up"])
 
         self.logger.info("%s: created", self)
-
-    # def unshare_process(self, uflags, pout, pin):
-    #     pin.close()
-    #     self.logger.debug(
-    #         "%s:unshare: in the unshare child: getpid() %s", self, os.getpid()
-    #     )
-    #     self.logger.debug(
-    #         "%s:unshare: unsharing %s", self, unshare.clone_flag_string(uflags)
-    #     )
-    #     unshare.unshare(uflags)
-
-    #     self.logger.debug("%s:unshare: forking namespace PID init process", self)
-    #     queue = multiprocessing.Queue()
-    #     mp = multiprocessing.Process(target=self.run_init_process, args=(queue,))
-    #     mp.start()
-    #     self.logger.info(
-    #         "%s:unshare: running unshare process, pass signals to init pid %s",
-    #         self,
-    #         mp.pid,
-    #     )
-    #     self.logger.info("%s:unshare: waiting for pipe output from init process", self)
-    #     qval = queue.get()
-    #     self.logger.info("%s:unshare: got it: %s", self, qval)
-    #     try:
-    #         self.logger.info("%s:unshare: sending pid str to parent", self)
-    #         pout.send(str(mp.pid) + "\n")
-    #         self.logger.info("%s:unshare: sleep loop", self)
-    #         while True:
-    #             time_mod.sleep(1)
-    #     except Exception as e:
-    #         print("Caught an exception: ", e)
-
-    #     sys.exit(3)
-    #     # NORETURN
-
-    # def run_init_process(self, queue):
-    #     # cpid = os.fork()
-    #     # if cpid == 0:
-    #     self.logger.debug(
-    #         "%s:init: in the namespace init child: getpid() %s", self, os.getpid()
-    #     )
-    #     self.logger.info(
-    #         "%s:init: running init process: reap everyone pass signals", self
-    #     )
-
-    #     self.logger.info("%s:init: putting to unshare queue", self)
-    #     queue.put("started")
-    #     self.logger.info("%s:init: enter forever sleep", self)
-    #     time_mod.sleep(100000)
-    #     sys.exit(4)
-    #     # NORETURN
 
     def _get_pre_cmd(self, use_str, use_pty, **kwargs):
         """Get the pre-user-command values.
@@ -1948,6 +1870,37 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.logger.debug("%s: new CWD %s", self, cwd)
         self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
 
+    async def cleanup_pid(self, pid):
+        """Signal a pid to exit with escalating forcefulness."""
+        for sn in (signal.SIGHUP, signal.SIGTERM, signal.SIGQUIT, signal.SIGKILL):
+            self.logger.debug(
+                "%s: %s pid %s to exit", self, pid, signal.Signals(sn).name
+            )
+
+            os.kill(pid, sn)
+
+            # No need to wait after this.
+            if sn == signal.SIGKILL:
+                return
+
+            # try each signal, waiting 2.5 seconds for exit before advancing
+            self.logger.debug("%s: waiting 2.5s for pid to exit", self)
+            for _ in range(0, 25):
+                try:
+                    status = os.waitpid(pid, os.WNOHANG)
+                    if status == (0, 0):
+                        await asyncio.sleep(0.1)
+                    else:
+                        return
+                except OSError as error:
+                    if error.errno == errno.ECHILD:
+                        self.logger.debug("%s: pid %s was reaped", self, pid)
+                    else:
+                        self.logger.warning(
+                            "%s: error trying to signal %s: %s", self, pid, error
+                        )
+                    return
+
     def cleanup_proc(self, p):
         if not p or p.returncode is not None:
             return None
@@ -1984,61 +1937,67 @@ class LinuxNamespace(Commander, InterfaceMixin):
         else:
             self.logger.debug("%s: LinuxNamespace sub-class deleting", self)
 
+        # Signal pid namespace proc to exit
+        if self.pid_ns:
+            await self.cleanup_pid(self.pid)
+
         if self.p is not None:
             self.cleanup_proc(self.p)
-        # return to the previous namespace
-        # why are we doing this at all?
-        if False and self.uflags:
-            # This only works in linux>=5.8
-            if self.p_ns_fds is None:
-                self.logger.debug(
-                    "%s: restoring namespaces %s",
-                    self,
-                    unshare.clone_flag_string(self.uflags),
-                )
-                # fd = unshare.pidfd_open(self.ppid)
-                fd = self.ppid_fd
-                retry = 3
-                for i in range(0, retry):
-                    try:
-                        unshare.setns(fd, self.uflags)
-                    except OSError as error:
-                        self.logger.warning(
-                            "%s: could not reset to old namespace fd %s: %s",
-                            self,
-                            fd,
-                            error,
-                        )
-                        if i == retry - 1:
-                            raise
-                        time_mod.sleep(1)
-                os.close(fd)
-            else:
-                while self.p_ns_fds:
-                    fd = self.p_ns_fds.pop()
-                    fname = self.p_ns_fnames.pop()
-                    self.logger.debug(
-                        "%s: restoring namespace from fd %s (%s)", self, fname, fd
-                    )
-                    retry = 3
-                    for i in range(0, retry):
-                        try:
-                            unshare.setns(fd, 0)
-                            break
-                        except OSError as error:
-                            self.logger.warning(
-                                "%s: could not reset to old namespace fd %s (%s): %s",
-                                self,
-                                fname,
-                                fd,
-                                error,
-                            )
-                            if i == retry - 1:
-                                raise
-                        time_mod.sleep(1)
-                    os.close(fd)
-                self.p_ns_fds = None
-                self.p_ns_fnames = None
+
+        # Need to figure out why this would really be needed
+        # # return to the previous namespace
+        # # why are we doing this at all?
+        # if False and self.uflags:
+        #     # This only works in linux>=5.8
+        #     if self.p_ns_fds is None:
+        #         self.logger.debug(
+        #             "%s: restoring namespaces %s",
+        #             self,
+        #             unshare.clone_flag_string(self.uflags),
+        #         )
+        #         # fd = unshare.pidfd_open(self.ppid)
+        #         fd = self.ppid_fd
+        #         retry = 3
+        #         for i in range(0, retry):
+        #             try:
+        #                 unshare.setns(fd, self.uflags)
+        #             except OSError as error:
+        #                 self.logger.warning(
+        #                     "%s: could not reset to old namespace fd %s: %s",
+        #                     self,
+        #                     fd,
+        #                     error,
+        #                 )
+        #                 if i == retry - 1:
+        #                     raise
+        #                 time_mod.sleep(1)
+        #         os.close(fd)
+        #     else:
+        #         while self.p_ns_fds:
+        #             fd = self.p_ns_fds.pop()
+        #             fname = self.p_ns_fnames.pop()
+        #             self.logger.debug(
+        #                 "%s: restoring namespace from fd %s (%s)", self, fname, fd
+        #             )
+        #             retry = 3
+        #             for i in range(0, retry):
+        #                 try:
+        #                     unshare.setns(fd, 0)
+        #                     break
+        #                 except OSError as error:
+        #                     self.logger.warning(
+        #                         "%s: could not reset to old namespace fd %s (%s): %s",
+        #                         self,
+        #                         fname,
+        #                         fd,
+        #                         error,
+        #                     )
+        #                     if i == retry - 1:
+        #                         raise
+        #                 time_mod.sleep(1)
+        #             os.close(fd)
+        #         self.p_ns_fds = None
+        #         self.p_ns_fnames = None
 
         self.__base_pre_cmd = ["/bin/false"]
         self.__pre_cmd = ["/bin/false"]

@@ -18,17 +18,15 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-"""A tiny init for namespaces in python inspired by the C program tini"""
+"""A tiny init for namespaces in python inspired by the C program tini."""
 import argparse
 import logging
 import os
 import shlex
 import signal
-import subprocess
 import sys
 import time
 
-from pathlib import Path
 from signal import Signals as S
 
 
@@ -63,7 +61,7 @@ def vdebug(*args, **kwargs):
         logging.debug(*args, **kwargs)
 
 
-def sig_transit(signum, frame):
+def sig_transit(signum, _):
     logging.debug("Signalling child %s: %s", child_pid, signal.Signals(signum).name)
     try:
         # Kill the process group
@@ -72,7 +70,7 @@ def sig_transit(signum, frame):
         logging.warning("Got exception trying to forward signal: %s", error)
 
 
-def sig_handle(signum, frame):
+def sig_handle(signum, _):
     assert signum == S.SIGCHLD
 
     try:
@@ -116,7 +114,6 @@ def setup_signals():
         elif snum in abort_signals:
             vdebug("Leaving default handler for %s", sname)
             # signal.signal(snum, signal.SIG_DFL)
-            pass
         else:
             restore_signals.add(snum)
             vdebug("Installing transit signal handler for %s", sname)
@@ -126,11 +123,10 @@ def setup_signals():
                 logging.warning(
                     "Failed installing signal handler for %s: %s", sname, error
                 )
-                pass
 
 
 def run(exec_args):
-    global child_pid
+    global child_pid  # pylint: disable=global-statement
 
     setup_signals()
 
@@ -158,6 +154,11 @@ def run(exec_args):
             signal.signal(S.SIGTTIN, signal.SIG_DFL)
             signal.signal(S.SIGTTOU, signal.SIG_DFL)
 
+            if not exec_args:
+                logging.debug("CHILD: going to sleep")
+                while True:
+                    time.sleep(1000)
+
             # and exec the process
             logging.debug("CHILD: executing '%s'", estring)
             os.execvp(exec_args[0], exec_args)
@@ -182,7 +183,7 @@ def main():
 
     level = logging.DEBUG if args.verbose else logging.INFO
     if args.verbose > 1:
-        global very_verbose
+        global very_verbose  # pylint: disable=global-statement
         very_verbose = True
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s: %(message)s")
 
