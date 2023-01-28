@@ -958,6 +958,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         super().__init__(
             name=name,
             config=config,
+            pid=False,
             # cgroup=True,
             # pid=True,
             # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],

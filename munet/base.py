@@ -24,6 +24,7 @@ import datetime
 import getpass
 import ipaddress
 import logging
+import multiprocessing
 import os
 import platform
 import re
@@ -1482,7 +1483,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         uts=True,
         cgroup=False,
         ipc=False,
-        pid=False,
+        pid=True,
         time=False,
         user=False,
         unshare_inline=False,
@@ -1552,9 +1553,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
             flags += "n"
             uflags |= unshare.CLONE_NEWNET
         if pid:
-            nslist.append("pid")
-            flags += "f"
-            flags += "p"
+            nslist.append("pid_for_children")
+            flags += "fp"
             cmd.append("--mount-proc")
             uflags |= unshare.CLONE_NEWPID
         if time:
@@ -1578,12 +1578,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
             # cmd.append(f"-{flags}")
 
         if pid:
-            cmd.append(get_exec_path_host("tini"))
-            cmd.append("-vvv")
+            # Should look this up using resources I guess
+            cmd.append(get_exec_path_host("mutini.py"))
+            cmd.append("-vv")
         cmd.append("/bin/cat")
 
         self.ppid = os.getppid()
-        if unshare_inline:
+        if unshare_inline and not pid:
             try:
                 kversion = [int(x) for x in platform.release().split("-")[0].split(".")]
                 kvok = kversion[0] > 5 or (kversion[0] == 5 and kversion[1] >= 8)
@@ -1630,7 +1631,48 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.pid = os.getpid()
             self.uflags = uflags
             p = None
+        # elif pid:
+        #     self.logger.debug("%s: forking unsharing process", self)
+        #     pout, pin = multiprocessing.Pipe()
+        #     # queue = multiprocessing.Queue()
+        #     mp = multiprocessing.Process(
+        #         target=self.unshare_process,
+        #         args=(
+        #             uflags,
+        #             pout,
+        #             pin,
+        #         ),
+        #     )
+        #     mp.start()
+        #     pout.close()
+
+        #     self.logger.debug("%s: waiting on queue for init pid str", self)
+        #     # init_pid_str = queue.get()
+        #     init_pid_str = ""
+        #     while not init_pid_str.endswith("\n"):
+        #         init_pid_str += pin.recv()
+        #     init_pid = int(init_pid_str[:-1])
+        #     self.logger.debug("%s: got it: %s", self, init_pid)
+
+        #     # ucpid = os.fork()
+        #     # if cpid == 0:
+        #     # In the parent cpid is the unsharing parent of the init process
+        #     self.logger.debug("%s: unshare pid is %d", self, mp.pid)
+        #     self._pid = mp.pid
+        #     self.pid = init_pid
+
+        #     rc, o, e = commander.cmd_status(["/usr/bin/pgrep", "-o", "-P", str(mp.pid)])
+
+        #     init_pid_ = int(o.strip())
+        #     self.logger.debug("%s: init pid is %d", self, init_pid_)
+
+        #     self.uflags = uflags
+        #     p = None
+
         else:
+            if unshare_inline:
+                logging.warning("Cannot unshare-inline when creating a PID namespace")
+
             # Using cat and a stdin PIPE is nice as it will exit when we do. However,
             # we also detach it from the pgid so that signals do not propagate to it.
             # This is b/c it would exit early (e.g., ^C) then, at least the main munet
@@ -1648,8 +1690,14 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 shell=False,
             )
             self.pid = p.pid
+            if pid:
+                self.logger.debug(
+                    "%s: unshare pid: %d fetching tini namespace pid", self, self.pid
+                )
+                self.pid = int(commander.cmd_raises(f"pgrep -o -P {p.pid}").strip())
 
         self.p = p
+
         self.logger.debug("%s: namespace pid: %d", self, self.pid)
 
         # -----------------------------------------------
@@ -1658,7 +1706,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         timeout = Timeout(30)
         while (p is None or p.poll() is None) and not timeout.is_expired():
             for fname in tuple(nslist):
-                if p is None:
+                if p is None and not pid:
                     # self is changing so compare with parent pid's NS
                     pidnsf = os.readlink("/proc/{}/ns/{}".format(self.ppid, fname))
                 else:
@@ -1697,7 +1745,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.__base_pre_cmd.append("-F")
         self.__pre_cmd = self.__base_pre_cmd
 
-        if self.p is None:
+        if self.p is None and not pid:
             self.cmd_raises("mount --make-rprivate /")
 
         # We do not want cmd_status in child classes (e.g., container) for
@@ -1752,6 +1800,57 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.cmd_status_nsonly([self.ip_path, "link", "set", "lo", "up"])
 
         self.logger.info("%s: created", self)
+
+    # def unshare_process(self, uflags, pout, pin):
+    #     pin.close()
+    #     self.logger.debug(
+    #         "%s:unshare: in the unshare child: getpid() %s", self, os.getpid()
+    #     )
+    #     self.logger.debug(
+    #         "%s:unshare: unsharing %s", self, unshare.clone_flag_string(uflags)
+    #     )
+    #     unshare.unshare(uflags)
+
+    #     self.logger.debug("%s:unshare: forking namespace PID init process", self)
+    #     queue = multiprocessing.Queue()
+    #     mp = multiprocessing.Process(target=self.run_init_process, args=(queue,))
+    #     mp.start()
+    #     self.logger.info(
+    #         "%s:unshare: running unshare process, pass signals to init pid %s",
+    #         self,
+    #         mp.pid,
+    #     )
+    #     self.logger.info("%s:unshare: waiting for pipe output from init process", self)
+    #     qval = queue.get()
+    #     self.logger.info("%s:unshare: got it: %s", self, qval)
+    #     try:
+    #         self.logger.info("%s:unshare: sending pid str to parent", self)
+    #         pout.send(str(mp.pid) + "\n")
+    #         self.logger.info("%s:unshare: sleep loop", self)
+    #         while True:
+    #             time_mod.sleep(1)
+    #     except Exception as e:
+    #         print("Caught an exception: ", e)
+
+    #     sys.exit(3)
+    #     # NORETURN
+
+    # def run_init_process(self, queue):
+    #     # cpid = os.fork()
+    #     # if cpid == 0:
+    #     self.logger.debug(
+    #         "%s:init: in the namespace init child: getpid() %s", self, os.getpid()
+    #     )
+    #     self.logger.info(
+    #         "%s:init: running init process: reap everyone pass signals", self
+    #     )
+
+    #     self.logger.info("%s:init: putting to unshare queue", self)
+    #     queue.put("started")
+    #     self.logger.info("%s:init: enter forever sleep", self)
+    #     time_mod.sleep(100000)
+    #     sys.exit(4)
+    #     # NORETURN
 
     def _get_pre_cmd(self, use_str, use_pty, **kwargs):
         """Get the pre-user-command values.
@@ -1888,7 +1987,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         if self.p is not None:
             self.cleanup_proc(self.p)
         # return to the previous namespace
-        if self.uflags:
+        # why are we doing this at all?
+        if False and self.uflags:
             # This only works in linux>=5.8
             if self.p_ns_fds is None:
                 self.logger.debug(
@@ -2075,7 +2175,9 @@ class BaseMunet(LinuxNamespace):
         self.cli_in_window_cmds = {}
         self.cli_run_cmds = {}
 
-        super().__init__(name, mount=True, net=isolated, uts=isolated, **kwargs)
+        super().__init__(
+            name, mount=True, net=isolated, uts=isolated, pid=False, **kwargs
+        )
 
         # This allows us to cleanup any leftover running munet's
         if "MUNET_PID" in os.environ:
