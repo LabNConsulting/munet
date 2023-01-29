@@ -92,7 +92,7 @@ async def test_autonumber_ping(unet_perfunc):
 
 
 @pytest.mark.parametrize("ipv6", [False, True])
-@pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
+@pytest.mark.parametrize("unet_perfunc", [False, True], indirect=["unet_perfunc"])
 async def test_mtu_ping(unet_perfunc, astepf, ipv6):
     unet = unet_perfunc
     r1 = unet.hosts["r1"]

@@ -34,10 +34,8 @@ from munet import cmd_error
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
 
-if "GITHUB_ACTION" in os.environ:
-    pytestmark = pytest.mark.parametrize(
-        "unet_share", ["munet-ci"], indirect=["unet_share"]
-    )
+# How does this double assignment work, what's going on?
+pytestmark = pytest.mark.parametrize("unet", [True, False], indirect=["unet"])
 
 
 async def check(p, cli_input, cli_output):
@@ -53,8 +51,7 @@ async def check(p, cli_input, cli_output):
     logging.info("Success: %s with output: %s", s, o)
 
 
-async def test_sh_cmd(unet_share):
-    unet = unet_share
+async def test_sh_cmd(unet):
     match = r"""------ Host: r1 ------
 cmd.err
 ------- End: r1 ------
@@ -101,9 +98,7 @@ ok
     assert stdout.getvalue().strip() == match
 
 
-async def test_shi_cmd(unet_share):
-    unet = unet_share
-
+async def test_shi_cmd(unet):
     if not sys.stdin.isatty():
         pytest.skip("Can't test shell-interactive commands without TTY")
 
@@ -155,8 +150,7 @@ ok
     assert value == match.strip()
 
 
-async def test_default_cmd(unet_share):
-    unet = unet_share
+async def test_default_cmd(unet):
     match = r"""------ Host: r1 ------
 name:r1 echo:testing echoback
 ------- End: r1 ------
@@ -186,8 +180,7 @@ name:r3 echo:testing echoback
     assert stdout.getvalue().strip() == match.strip()
 
 
-async def test_ls_cmd(unet_share):
-    unet = unet_share
+async def test_ls_cmd(unet):
     match = r"cmd.err"
     stdout = io.StringIO()
     assert await cli.doline(unet, "r1 ls cmd.err\n", stdout)
@@ -207,8 +200,7 @@ async def test_ls_cmd(unet_share):
     assert stdout.getvalue().strip() == match.strip()
 
 
-async def test_fstring(unet_share):
-    unet = unet_share
+async def test_fstring(unet):
     match = r"HOSTNAME is r1"
     stdout = io.StringIO()
     assert await cli.doline(unet, "r1 hostname\n", stdout)
@@ -222,8 +214,7 @@ async def test_fstring(unet_share):
     # assert stdout.getvalue().strip() == match.strip()
 
 
-async def test_toplevel_no_host(unet_share):
-    unet = unet_share
+async def test_toplevel_no_host(unet):
     netname = "net0"
     stdout = io.StringIO()
     assert await cli.doline(unet, f"toplevel-ip link show {netname}\n", stdout)
@@ -235,8 +226,7 @@ async def test_toplevel_no_host(unet_share):
     assert not re.match(rf"\d+: {netname}: <.*> mtu 1500.*", stdout.getvalue())
 
 
-async def test_toplevel_host(unet_share):
-    unet = unet_share
+async def test_toplevel_host(unet):
     match = r"""------ Host: r1 ------
 name:r1 echo:testing echoback
 ------- End: r1 ------
@@ -270,6 +260,5 @@ name:r3 echo:testing echoback
     assert stdout.getvalue().strip() == match.strip()
 
 
-async def _test_async_cli(unet_share, rundir):
-    unet = unet_share
+async def _test_async_cli(unet, rundir):
     await cli.async_cli(unet, histfile=f"{rundir}/cli-histfile.txt")

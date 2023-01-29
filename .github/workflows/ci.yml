@@ -20,16 +20,6 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Setup SSH
-        run: |
-          mkdir -p $HOME/.ssh
-          ssh-keygen -q -t rsa -N "" -f $HOME/.ssh/id_rsa
-          cp $HOME/.ssh/id_rsa.pub $HOME/.ssh/authorized_keys
-          ssh-keygen -b 2048 -t rsa -f ssh_host_rsa_key -q -N ""
-          sed "s,\$PWD,$PWD,;s,\$USER,$USER,;s,\$HOME,$HOME," .github/workflows/sshd_config.tpl > sshd_config
-          echo -n > sshd.log
-          sudo /usr/sbin/sshd -f sshd_config -E sshd.log
-
       - name: Install Poetry
         uses: snok/install-poetry@v1
         with:
@@ -76,13 +66,6 @@ jobs:
           verbose: true
           files: ./coverage.xml
           # fail_ci_if_error: false
-
-      - name: Cleanup SSH
-        if: always()
-        run: |
-          if [ -e sshd.pid ]; then
-            sudo kill $(cat sshd.pid)
-          fi
 
       - name: Collect test logs
         if: ${{ always() }}

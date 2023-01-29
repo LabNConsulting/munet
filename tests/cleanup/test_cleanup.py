@@ -31,8 +31,8 @@ import os
 cleanup_paths = {}
 
 
-def test_cleanup_create(unet_perfunc):
-    unet = unet_perfunc
+def test_cleanup_create_unshare(unet_perfunc_unshare):
+    unet = unet_perfunc_unshare
 
     # Record paths for all cleanup files
     for host in unet.hosts:
@@ -40,7 +40,25 @@ def test_cleanup_create(unet_perfunc):
         assert not os.path.exists(cleanup_paths[host])
 
 
-def test_munet_cleanup():
+def test_munet_cleanup_unshare():
+    for path in cleanup_paths.values():
+        logging.debug("Checking for: %s", path)
+        if "noclean" in path:
+            assert not os.path.exists(path), f"Unexpected 'cleanup' file: {path}"
+        else:
+            assert os.path.exists(path), f"Missing 'cleanup' file: {path}"
+
+
+def test_cleanup_create_nounshare(unet_perfunc_share):
+    unet = unet_perfunc_share
+
+    # Record paths for all cleanup files
+    for host in unet.hosts:
+        cleanup_paths[host] = os.path.join(unet.hosts[host].rundir, "cleanup-test")
+        assert not os.path.exists(cleanup_paths[host])
+
+
+def test_munet_cleanup_nounshare():
     for path in cleanup_paths.values():
         logging.debug("Checking for: %s", path)
         if "noclean" in path:

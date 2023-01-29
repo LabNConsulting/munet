@@ -31,6 +31,19 @@ from munet import Munet
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(scope="module", name="unet")
+async def unet_(request, rundir_module, pytestconfig):
+    unshare = bool(request.param) if hasattr(request, "param") else True
+    logging.info("Creating munet with%s inline unshare", "" if unshare else "out")
+    unet = Munet(
+        rundir=rundir_module, unshare_inline=unshare, pytestconfig=pytestconfig
+    )
+    try:
+        yield unet
+    finally:
+        await unet.async_delete()
+
+
 async def ping_average_rtt(r, other, oifname):
     oip = other.get_intf_addr(oifname).ip
     await r.async_cmd_raises(f"ping -w1 -c1 {oip}")
@@ -49,7 +62,8 @@ async def ping_with_loss(r, other, oifname):
     return 100 - (100 * recv / sent)
 
 
-async def _test_basic_ping(unet):
+@pytest.mark.parametrize("unet", [False, True], indirect=["unet"])
+async def test_basic_ping(unet):
     unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
@@ -98,11 +112,3 @@ async def _test_basic_ping(unet):
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)
     assert 20 < loss < 40
-
-
-async def test_basic_ping(rundir):
-    unet = Munet(rundir)
-    try:
-        await _test_basic_ping(unet)
-    finally:
-        await unet.async_delete()
