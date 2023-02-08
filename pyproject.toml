@@ -19,6 +19,8 @@ toml = {version = "^0.10.2", optional = true}
 [tool.poetry.scripts]
 munet = "munet.__main__:main"
 mucmd = "munet.mucmd:main"
+mutini = "munet.mutini:main"
+mushare = "munet.mutestshare:main"
 mutest = "munet.mutest.__main__:main"
 
 [tool.poetry.group.schemadev.dependencies]
