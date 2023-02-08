@@ -25,6 +25,7 @@ import ctypes.util  # pylint: disable=C0415
 import errno
 import functools
 import os
+import signal
 
 
 libc = None
@@ -44,6 +45,75 @@ def _load_libc():
         return
     lcpath = ctypes.util.find_library("c")
     libc = ctypes.CDLL(lcpath, use_errno=True)
+
+
+MS_RDONLY = 1
+MS_NOSUID = 1 << 1
+MS_NODEV = 1 << 2
+MS_NOEXEC = 1 << 3
+MS_SYNCHRONOUS = 1 << 4
+MS_REMOUNT = 1 << 5
+MS_MANDLOCK = 1 << 6
+MS_DIRSYNC = 1 << 7
+MS_NOSYMFOLLOW = 1 << 8
+MS_NOATIME = 1 << 10
+MS_NODIRATIME = 1 << 11
+MS_BIND = 1 << 12
+MS_MOVE = 1 << 13
+MS_REC = 1 << 14
+MS_SILENT = 1 << 15
+MS_POSIXACL = 1 << 16
+MS_UNBINDABLE = 1 << 17
+MS_PRIVATE = 1 << 18
+MS_SLAVE = 1 << 19
+MS_SHARED = 1 << 20
+MS_RELATIME = 1 << 21
+MS_KERNMOUNT = 1 << 22
+MS_I_VERSION = 1 << 23
+MS_STRICTATIME = 1 << 24
+MS_LAZYTIME = 1 << 25
+
+
+def mount(source, target, fs, options):
+    if not libc:
+        _load_libc()
+    libc.mount.argtypes = (
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_char_p,
+        ctypes.c_ulong,
+        ctypes.c_char_p,
+    )
+
+    ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
+    if ret < 0:
+        err = ctypes.get_errno()
+        raise OSError(
+            err,
+            f"Error mounting {source} ({fs}) on {target}"
+            f" with options '{options}': {os.strerror(err)}",
+        )
+
+
+# unmout options
+MNT_FORCE = 0x1
+MNT_DETACH = 0x2
+MNT_EXPIRE = 0x4
+UMOUNT_NOFOLLOW = 0x8
+
+
+def umount(target, options):
+    if not libc:
+        _load_libc()
+    libc.umount.argtypes = (ctypes.c_char_p, ctypes.c_uint)
+
+    ret = libc.umount(target.encode(), int(options))
+    if ret < 0:
+        err = ctypes.get_errno()
+        raise OSError(
+            err,
+            f"Error umounting {target} with options '{options}': {os.strerror(err)}",
+        )
 
 
 def pidfd_open(pid, flags=0):
@@ -159,3 +229,42 @@ namespace_files = {
     CLONE_NEWNS: "ns/mnt",
     CLONE_NEWTIME: "ns/time_for_children",
 }
+
+PR_SET_PDEATHSIG = 1
+PR_GET_PDEATHSIG = 2
+PR_SET_NAME = 15
+PR_GET_NAME = 16
+
+
+def set_process_name(name):
+    if not libc:
+        _load_libc()
+
+    # Why does uncommenting this cause failure?
+    # libc.prctl.argtypes = (
+    #     ctypes.c_int,
+    #     ctypes.c_ulong,
+    #     ctypes.c_ulong,
+    #     ctypes.c_ulong,
+    #     ctypes.c_ulong,
+    # )
+
+    s = ctypes.create_string_buffer(bytes(name, encoding="ascii"))
+    sr = ctypes.byref(s)
+    libc.prctl(PR_SET_NAME, sr, 0, 0, 0)
+
+
+def set_parent_death_signal(signum):
+    if not libc:
+        _load_libc()
+
+    # Why does uncommenting this cause failure?
+    libc.prctl.argtypes = (
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    )
+
+    libc.prctl(PR_SET_PDEATHSIG, signum, 0, 0, 0)
