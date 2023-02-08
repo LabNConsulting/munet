@@ -36,7 +36,7 @@ def main(*args):
         help="optional shell-command to execute on NODE",
     )
     args = ap.parse_args()
-    rundir = args.rundir if args.rundir else "/tmp/unet-" + os.environ["USER"]
+    rundir = args.rundir if args.rundir else "/tmp/munet"
     if not os.path.exists(rundir):
         print(f'rundir "{rundir}" doesn\'t exist')
         return 1
@@ -65,8 +65,8 @@ def main(*args):
     env["MUNET_RUNDIR"] = rundir
 
     for k in envcfg:
-        envcfg[k] = envcfg[k].replace("%NAME%", name)
-        envcfg[k] = envcfg[k].replace("%RUNDIR%", rundir)
+        envcfg[k] = envcfg[k].replace("%NAME%", str(name))
+        envcfg[k] = envcfg[k].replace("%RUNDIR%", str(rundir))
 
     ecmd = "/usr/bin/nsenter"
     eargs = [ecmd, "-F"]

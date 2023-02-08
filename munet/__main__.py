@@ -188,7 +188,7 @@ def main(*args):
         print(metadata.version("munet"))
         sys.exit(0)
 
-    rundir = args.rundir if args.rundir else "/tmp/unet-" + os.environ["USER"]
+    rundir = args.rundir if args.rundir else "/tmp/munet"
     args.rundir = rundir
 
     if args.cleanup:

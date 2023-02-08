@@ -21,6 +21,7 @@
 """A module that implements core functionality for library or standalone use."""
 import asyncio
 import datetime
+import errno
 import getpass
 import ipaddress
 import logging
@@ -36,8 +37,13 @@ import tempfile
 import time as time_mod
 
 from collections import defaultdict
+from multiprocessing import Process
+from multiprocessing import Queue
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Union
 
-from munet import unshare
+from munet import linux
 
 
 try:
@@ -60,12 +66,28 @@ class MunetError(Exception):
     """A generic munet error."""
 
 
+class CalledProcessError(subprocess.CalledProcessError):
+    def __str__(self):
+        o = self.output.strip() if self.output else ""
+        e = self.stderr.strip() if self.stderr else ""
+        s = f"returncode: {self.returncode} command: {self.cmd}"
+        o = "\n\tstdout: " + o if o else ""
+        e = "\n\tstderr: " + e if e else ""
+        return s + o + e
+
+    def __repr__(self):
+        o = self.output.strip() if self.output else ""
+        e = self.stderr.strip() if self.stderr else ""
+        return f"munet.base.CalledProcessError({self.returncode}, {self.cmd}, {o}, {e})"
+
+
 class Timeout:
     """An object to passively monitor for timeouts."""
 
     def __init__(self, delta):
+        self.delta = datetime.timedelta(seconds=delta)
         self.started_on = datetime.datetime.now()
-        self.expires_on = self.started_on + datetime.timedelta(seconds=delta)
+        self.expires_on = self.started_on + self.delta
 
     def elapsed(self):
         elapsed = datetime.datetime.now() - self.started_on
@@ -73,6 +95,27 @@ class Timeout:
 
     def is_expired(self):
         return datetime.datetime.now() > self.expires_on
+
+    def remaining(self):
+        remaining = self.expires_on - datetime.datetime.now()
+        return remaining.total_seconds()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        remaining = self.remaining()
+        if remaining <= 0:
+            raise StopIteration()
+        return remaining
+
+
+def fsafe_name(name):
+    return "".join(x if x.isalnum() else "_" for x in name)
+
+
+def indent(s):
+    return "\t" + s.replace("\n", "\n\t")
 
 
 def shell_quote(command):
@@ -87,6 +130,14 @@ def cmd_error(rc, o, e):
     o = "\n\tstdout: " + o.strip() if o and o.strip() else ""
     e = "\n\tstderr: " + e.strip() if e and e.strip() else ""
     return s + o + e
+
+
+def proc_str(p):
+    if hasattr(p, "args"):
+        args = p.args if isinstance(p.args, str) else " ".join(p.args)
+    else:
+        args = ""
+    return f"proc pid: {p.pid} args: {args}"
 
 
 def proc_error(p, o, e):
@@ -211,12 +262,21 @@ class Commander:  # pylint: disable=R0904
 
     tmux_wait_gen = 0
 
-    def __init__(self, name, logger=None, **kwargs):
-        """Create a Commander."""
+    def __init__(self, name, logger=None, unet=None, **kwargs):
+        """Create a Commander.
+
+        Args:
+            name: name of the commander object
+            logger: logger to use for logging commands a defualt is supplied if this
+                is None
+            unet: unet that owns this object, only used by Commander in run_in_window,
+                otherwise can be None.
+        """
         # del kwargs  # deal with lint warning
         # logging.warning("Commander: name %s kwargs %s", name, kwargs)
 
         self.name = name
+        self.unet = unet
         self.deleting = False
         self.last = None
         self.exec_paths = {}
@@ -468,7 +528,7 @@ class Commander:  # pylint: disable=R0904
 
         Raises:
             pexpect.TIMEOUT, pexpect.EOF as documented in `pexpect`
-            subprocess.CalledProcessError if EOF is seen and `cmd` exited then
+            CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
         if is_file_like(cmd):
@@ -538,21 +598,26 @@ class Commander:  # pylint: disable=R0904
             )
             return p
         except pexpect.TIMEOUT:
-            self.logger.warning(
-                "%s: TIMEOUT looking for spawned_re '%s' buffer: '%s'",
+            self.logger.error(
+                "%s: TIMEOUT looking for spawned_re '%s' expect buffer so far:\n%s",
                 self,
                 spawned_re,
-                p.buffer,
+                indent(p.buffer),
             )
             raise
         except pexpect.EOF as eoferr:
             if p.isalive():
                 raise
-            p.close()
             rc = p.status
-            error = subprocess.CalledProcessError(rc, ac)
-            p.expect(pexpect.EOF)
-            error.stdout = p.before
+            before = indent(p.before)
+            error = CalledProcessError(rc, ac, output=before)
+            self.logger.error(
+                "%s: EOF looking for spawned_re '%s' before EOF:\n%s",
+                self,
+                spawned_re,
+                before,
+            )
+            p.close()
             raise error from eoferr
 
     async def shell_spawn(
@@ -690,35 +755,32 @@ class Commander:  # pylint: disable=R0904
             None on success, the ``p`` if multiple timeouts occur even
             after a SIGKILL sent.
         """
-        if not p or p.returncode is not None:
+        if not p:
             return None
 
-        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
+        if p.returncode is not None:
+            if isinstance(p, subprocess.Popen):
+                _, _ = p.communicate()
+            else:
+                _, _ = await p.communicate()
+            return None
 
-        # XXX Are we calling this -p.pid on cmd_p which isn't setup right for that?
-        os.kill(-p.pid, signal.SIGTERM)
+        self.logger.debug("%s: terminate process: %s", self, proc_str(p))
         try:
-            assert not isinstance(p, subprocess.Popen)
-            await asyncio.wait_for(p.communicate(), timeout=10)
-        except asyncio.TimeoutError:
-            self.logger.warning(
-                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
-            )
-            os.kill(-p.pid, signal.SIGKILL)
-            try:
-                assert not isinstance(p, subprocess.Popen)
-                await asyncio.wait_for(p.communicate(), timeout=2)
-            except asyncio.TimeoutError:
-                self.logger.warning("%s: kill timeout", self)
-                return p
-            except Exception as error:
-                self.logger.warning(
-                    "%s: kill unexpected exception: %s", self, error, exc_info=True
-                )
+            # this used to be os.kill(-p.pid)
+            await self.cleanup_pid(p.pid)
+            if isinstance(p, subprocess.Popen):
+                _, _ = p.communicate(timeout=1)
+            else:
+                _, _ = await asyncio.wait_for(p.communicate(), timeout=1)
+        except (asyncio.TimeoutError, subprocess.TimeoutExpired):
+            self.logger.warning("%s: SIGKILL timeout", self)
+            return p
         except Exception as error:
             self.logger.warning(
-                "%s: terminate unexpected exception: %s", self, error, exc_info=True
+                "%s: kill unexpected exception: %s", self, error, exc_info=True
             )
+            return p
         return None
 
     @staticmethod
@@ -738,9 +800,7 @@ class Commander:  # pylint: disable=R0904
             if raises:
                 # error = Exception("stderr: {}".format(stderr))
                 # This annoyingly doesnt' show stderr when printed normally
-                error = subprocess.CalledProcessError(rc, ac)
-                error.stdout, error.stderr = o, e
-                raise error
+                raise CalledProcessError(rc, ac, o, e)
         return rc, o, e
 
     def _cmd_status(self, cmds, raises=False, warn=True, stdin=None, **kwargs):
@@ -872,13 +932,18 @@ class Commander:  # pylint: disable=R0904
         _, stdout, _ = self._cmd_status(cmd, raises=True, **kwargs)
         return stdout
 
+    def cmd_nostatus_nsonly(self, cmd, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return self.cmd_nostatus(cmd, ns_only=True, **kwargs)
+
     def cmd_status_nsonly(self, cmd, **kwargs):
         # Make sure the command runs on the host and not in any container.
         return self._cmd_status(cmd, ns_only=True, **kwargs)
 
     def cmd_raises_nsonly(self, cmd, **kwargs):
         # Make sure the command runs on the host and not in any container.
-        return self._cmd_status(cmd, raises=True, ns_only=True, **kwargs)
+        _, stdout, _ = self._cmd_status(cmd, raises=True, ns_only=True, **kwargs)
+        return stdout
 
     async def async_cmd_status(self, cmd, **kwargs):
         """Run given command returning status and outputs.
@@ -987,6 +1052,7 @@ class Commander:  # pylint: disable=R0904
         """Run a command in a new window (TMUX, Screen or XTerm).
 
         Args:
+            cmd: string to execute.
             wait_for: True to wait for exit from command or `str` as channel neme to
                 signal on exit, otherwise False
             background: Do not change focus to new window.
@@ -1006,6 +1072,11 @@ class Commander:  # pylint: disable=R0904
             channel = "{}-wait-{}".format(os.getpid(), Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
 
+        if forcex or ("TMUX" not in os.environ and "STY" not in os.environ):
+            root_level = False
+        else:
+            root_level = True
+
         # SUDO: The important thing to note is that with all these methods we are
         # executing on the users windowing system, so even though we are normally
         # running as root, we will not be when the command is dispatched. Also
@@ -1015,13 +1086,9 @@ class Commander:  # pylint: disable=R0904
 
         # XXX need to test ssh in screen
         # XXX need to test ssh in Xterm
-
-        if isinstance(self, SSHRemote):
-            if isinstance(cmd, str):
-                cmd = shlex.split(cmd)
-            cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
-            nscmd = self._get_pre_cmd(False, True, ns_only=ns_only) + cmd
-        elif self.is_vm and self.use_ssh:  # pylint: disable=E1101
+        sudo_path = get_exec_path_host(["sudo"])
+        # This first test case seems same as last but using list instead of string?
+        if self.is_vm and self.use_ssh:  # pylint: disable=E1101
             if isinstance(cmd, str):
                 cmd = shlex.split(cmd)
             cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
@@ -1030,11 +1097,11 @@ class Commander:  # pylint: disable=R0904
             cmd = self._get_pre_cmd(False, True, ns_only=ns_only) + [shlex.join(cmd)]
             unet = self.unet  # pylint: disable=E1101
             uns_cmd = unet._get_pre_cmd(  # pylint: disable=W0212
-                False, True, ns_only=True
+                False, True, ns_only=True, root_level=root_level
             )
             # get the nsenter for munet
             nscmd = [
-                get_exec_path_host(["sudo"]),
+                sudo_path,
                 *uns_cmd,
                 *cmd,
             ]
@@ -1048,7 +1115,7 @@ class Commander:  # pylint: disable=R0904
             nscmd = (
                 sudo_path
                 + " "
-                + self._get_pre_cmd(True, True, ns_only=ns_only)
+                + self._get_pre_cmd(True, True, ns_only=ns_only, root_level=root_level)
                 + " "
                 + cmd
             )
@@ -1120,9 +1187,9 @@ class Commander:  # pylint: disable=R0904
             # if channel:
             #    return self.cmd_raises(cmd, skip_pre_cmd=True)
             # else:
-            p = self.popen(
+            p = commander.popen(
                 cmd,
-                skip_pre_cmd=True,
+                # skip_pre_cmd=True,
                 stdin=None,
                 shell=False,
             )
@@ -1137,21 +1204,26 @@ class Commander:  # pylint: disable=R0904
             )
             raise Exception("Window requestd but TMUX, Screen and X11 not available")
 
-        pane_info = self.cmd_raises(cmd, skip_pre_cmd=True, ns_only=True).strip()
+        # pane_info = self.cmd_raises(cmd, skip_pre_cmd=True, ns_only=True).strip()
+        # We are prepending the nsenter command, so use unet.rootcmd
+        pane_info = commander.cmd_raises(cmd).strip()
 
         # Re-adjust the layout
         if "TMUX" in os.environ:
-            commander.cmd_status(
-                "tmux select-layout -t {} tiled".format(
-                    pane_info if not tmux_target else tmux_target
-                ),
-                skip_pre_cmd=True,
-            )
+            cmd = [
+                get_exec_path_host("tmux"),
+                "select-layout",
+                "-t",
+                pane_info if not tmux_target else tmux_target,
+                "tiled",
+            ]
+            commander.cmd_status(cmd)
 
         # Wait here if we weren't handed the channel to wait for
         if channel and wait_for is True:
             cmd = [get_exec_path_host("tmux"), "wait", channel]
-            commander.cmd_status(cmd, skip_pre_cmd=True)
+            # commander.cmd_status(cmd, skip_pre_cmd=True)
+            commander.cmd_status(cmd)
 
         return pane_info
 
@@ -1378,96 +1450,6 @@ class InterfaceMixin:
         self.cmd_raises(f"tc qdisc show dev {nsifname}")
 
 
-class SSHRemote(Commander):
-    """SSHRemote a node representing an ssh connection to something."""
-
-    def __init__(
-        self,
-        name,
-        server,
-        port=22,
-        user=None,
-        password=None,
-        unet=None,
-        logger=None,
-        **kwargs,
-    ):
-        super().__init__(name, logger=logger)
-
-        self.logger.debug("%s: creating", self)
-
-        self.unet = unet
-        self.config = kwargs.get("config", {})
-        self.mgmt_ip = None
-        self.mgmt_ip6 = None
-
-        self.port = port
-
-        if user:
-            self.user = user
-        elif "SUDO_USER" in os.environ:
-            self.user = os.environ["SUDO_USER"]
-        else:
-            self.user = getpass.getuser()
-        self.password = password
-
-        self.server = f"{self.user}@{server}"
-
-        # Setup our base `pre-cmd` values
-        #
-        # We maybe should add environment variable transfer here in particular
-        # MUNET_NODENAME. The problem is the user has to explicitly approve
-        # of SendEnv variables.
-        self.__base_cmd = [
-            get_exec_path_host("sudo"),
-            "-E",
-            f"-u{self.user}",
-            get_exec_path_host("ssh"),
-        ]
-        if port != 22:
-            self.__base_cmd.append(f"-p{port}")
-        self.__base_cmd.append("-q")
-        self.__base_cmd.append("-oStrictHostKeyChecking=no")
-        self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
-        # Would be nice but has to be accepted by server config so not very useful.
-        # self.__base_cmd.append("-oSendVar='TEST'")
-        self.__base_cmd_pty = list(self.__base_cmd)
-        self.__base_cmd_pty.append("-t")
-        self.__base_cmd.append(self.server)
-        self.__base_cmd_pty.append(self.server)
-        # self.set_pre_cmd(pre_cmd, pre_cmd_tty)
-
-        self.logger.info("%s: created", self)
-
-    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
-        if ns_only:
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
-
-        # XXX grab the env from kwargs and add to podman exec
-        # env = kwargs.get("env", {})
-        if use_pty:
-            pre_cmd = self.__base_cmd_pty
-        else:
-            pre_cmd = self.__base_cmd
-        return shlex.join(pre_cmd) if use_str else pre_cmd
-
-    def _get_cmd_as_list(self, cmd):
-        """Given a list or string return a list form for execution.
-
-        If cmd is a string then [cmd] is returned, for most other
-        node types ["bash", "-c", cmd] is returned but in our case
-        ssh is the shell.
-
-        Args:
-            cmd: list or string representing the command to execute.
-            str_shell: if True and `cmd` is a string then run the
-              command using bash -c
-        Returns:
-            list of commands to execute.
-        """
-        return [cmd] if isinstance(cmd, str) else cmd
-
-
 class LinuxNamespace(Commander, InterfaceMixin):
     """A linux Namespace.
 
@@ -1488,7 +1470,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         unshare_inline=False,
         set_hostname=True,
         private_mounts=None,
-        logger=None,
         **kwargs,
     ):
         """Create a new linux namespace.
@@ -1513,77 +1494,318 @@ class LinuxNamespace(Commander, InterfaceMixin):
         """
         # logging.warning("LinuxNamespace: name %s kwargs %s", name, kwargs)
 
-        super().__init__(name, logger=logger, **kwargs)
+        super().__init__(name, **kwargs)
+
+        unet = self.unet
 
         self.logger.debug("%s: creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
 
-        nslist = []
-        # cmd = [] if os.geteuid() == 0 else ["/usr/bin/sudo"]
-        cmd = []
-        cmd += ["/usr/bin/unshare"]
-        flags = ""
-        self.a_flags = []
+        cmd = ["/usr/bin/unshare"]
+        self.nsflags = []
         self.ifnetns = {}
         self.uflags = 0
         self.p_ns_fds = None
         self.p_ns_fnames = None
+        self.pid_ns = False
+        self.init_pid = None
+        self.unshare_inline = unshare_inline
+        self.nsenter_fork = True
 
+        #
+        # Collect the namespaces to unshare
+        #
+        if hasattr(self, "proc_path") and self.proc_path:
+            pp = Path(self.proc_path)
+        else:
+            pp = unet.proc_path if unet else Path("/proc")
+        pp_pid = unet.pid if unet else os.getpid()
+        pp = pp.joinpath("%P%", "ns")
+
+        flags = ""
         uflags = 0
+        nslist = []
+        nsflags = []
         if cgroup:
-            nslist.append("cgroup")
+            nselm = "cgroup"
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "C"
-            uflags |= unshare.CLONE_NEWCGROUP
+            uflags |= linux.CLONE_NEWCGROUP
         if ipc:
-            nslist.append("ipc")
+            nselm = "ipc"
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "i"
-            uflags |= unshare.CLONE_NEWIPC
-        if mount:
-            nslist.append("mnt")
+            uflags |= linux.CLONE_NEWIPC
+        if mount or pid:
+            # We need a new mount namespace for pid
+            nselm = "mnt"
+            nslist.append(nselm)
+            nsflags.append(f"--mount={pp / nselm}")
+            mount = True
             flags += "m"
-            uflags |= unshare.CLONE_NEWNS
+            uflags |= linux.CLONE_NEWNS
         if net:
-            nslist.append("net")
+            nselm = "net"
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             # if pid:
             #     os.system(f"touch /tmp/netns-{name}")
             #     cmd.append(f"--net=/tmp/netns-{name}")
             # else:
             flags += "n"
-            uflags |= unshare.CLONE_NEWNET
+            uflags |= linux.CLONE_NEWNET
         if pid:
-            nslist.append("pid")
-            flags += "f"
-            flags += "p"
+            self.pid_ns = True
+            # We look for this b/c the unshare pid will share with /sibn/init
+            nselm = "pid_for_children"
+            nslist.append(nselm)
+            nsflags.append(f"--pid={pp / nselm}")
+            # mutini now forks when created this way
+            cmd.append("--pid")
+            cmd.append("--fork")
+            cmd.append("--kill-child=SIGHUP")
             cmd.append("--mount-proc")
-            uflags |= unshare.CLONE_NEWPID
+            uflags |= linux.CLONE_NEWPID
         if time:
-            nslist.append("time")
+            nselm = "time"
+            # XXX time_for_children?
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "T"
-            uflags |= unshare.CLONE_NEWTIME
+            uflags |= linux.CLONE_NEWTIME
         if user:
-            nslist.append("user")
+            nselm = "user"
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "U"
             cmd.append("--keep-caps")
-            uflags |= unshare.CLONE_NEWUSER
+            uflags |= linux.CLONE_NEWUSER
         if uts:
-            nslist.append("uts")
+            nselm = "uts"
+            nslist.append(nselm)
+            nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "u"
-            uflags |= unshare.CLONE_NEWUTS
+            uflags |= linux.CLONE_NEWUTS
 
         if flags:
-            if aflags := flags.replace("f", ""):
-                self.a_flags = ["-" + x for x in aflags]
             cmd.extend(["-" + x for x in flags])
             # cmd.append(f"-{flags}")
 
         if pid:
-            cmd.append(get_exec_path_host("tini"))
-            cmd.append("-vvv")
-        cmd.append("/bin/cat")
+            # Should look this up using resources I guess
+            cmd.append(get_exec_path_host("mutini"))
+            cmd.append("-v")
+            fname = fsafe_name(self.name) + "-mutini.log"
+            fname = (unet or self).rundir.joinpath(fname)
+            stdout = open(fname, "w", encoding="utf-8")
+            stderr = subprocess.STDOUT
+        else:
+            cmd.append("/bin/cat")
+            stdout = subprocess.PIPE
+            stderr = subprocess.PIPE
+
+        #
+        # Save the current namespace info to compare against later
+        #
+
+        if not unet:
+            nsdict = {x: os.readlink(f"/proc/self/ns/{x}") for x in nslist}
+        else:
+            nsdict = {
+                x: os.readlink(f"{unet.proc_path}/{unet.pid}/ns/{x}") for x in nslist
+            }
+
+        #
+        # (A) Basically we need to save the pid of the unshare call for nsenter.
+        #
+        # For `unet is not None` (node case) the level this exists at is based on wether
+        # unet is using a forking nsenter or not. So if unet.nsenter_fork == True then
+        # we need the child pid of the p.pid (child of pid returned to us), otherwise
+        # unet.nsenter_fork == False and we just use p.pid as it will be unshare after
+        # nsenter exec's it.
+        #
+        # For the `unet is None` (unet case) the unshare is at the top level or
+        # non-existent so we always save the returned p.pid. If we are unshare_inline we
+        # won't have a __pre_cmd but we can save our child_pid to kill later, otherwise
+        # we set unet.pid to None b/c there's literally nothing to do.
+        #
+        # ---------------------------------------------------------------------------
+        # Breakdown for nested (non-unet) namespace creation, and what PID
+        # to use for __pre_cmd nsenter use.
+        # ---------------------------------------------------------------------------
+        #
+        # tl;dr
+        #   - for non-inline unshare: Use BBB with pid_for_children, unless none/none
+        #     #then (AAA) returned
+        #   - for inline unshare: use returned pid (AAA) with pid_for_children
+        #
+        # All commands use unet.popen to launch the unshare of mutini or cat.
+        # mutini for PID unshare, otherwise cat. AAA is the returned pid BBB is the
+        # child of the returned.
+        #
+        # Unshare Variant
+        # ---------------
+        #
+        # Here we are running mutini if we are creating new pid namespace workspace,
+        # cat otherwise.
+        #
+        # [PID+PID] pid tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    -   uuu  AAA  nsenter (forking, from unet) (in unet namespaces -pid)
+        # BBB    -   AAA  AAA  unshare --fork --kill-child (forking)
+        # CCC    1   BBB  CCC  mutini (non-forking since it is pid 1 in new namespace)
+        #
+        # Use BBB if we use pid_for_children, CCC for all
+        #
+        # [PID+none] For non-pid workspace creation (but unet pid) we use cat and pid
+        # tree looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        # AAA  uuu  AAA  nsenter (forking) (in unet namespaces -pid)
+        # BBB  AAA  AAA  unshare -> cat (from unshare non-forking)
+        #
+        # Use BBB for all
+        #
+        # [none+PID] For pid workspace creation (but NOT unet pid) we use mutini and pid
+        # tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    -   uuu  AAA  nsenter -> unshare --fork --kill-child
+        # BBB    1   AAA  AAA  mutini (non-forking since it is pid 1 in new namespace)
+        #
+        # Use AAA if we use pid_for_children, BBB for all
+        #
+        # [none+none] For non-pid workspace and non-pid unet we use cat and pid tree
+        # looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        # AAA  uuu  AAA  nsenter -> unshare -> cat
+        #
+        # Use AAA for all, there's no BBB
+        #
+        # Inline-Unshare Variant
+        # ----------------------
+        #
+        # For unshare_inline and new PID namespace we have unshared all but our PID
+        # namespace, but our children end up in the new namespace so the fork popen
+        # does is good enough.
+        #
+        # [PID+PID] pid tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    -   uuu  AAA  unshare --fork --kill-child (forking)
+        # BBB    1   AAA  BBB  mutini
+        #
+        # Use AAA if we use pid_for_children, BBB for all
+        #
+        # [PID+none] For non-pid workspace creation (but unet pid) we use cat and pid
+        # tree looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        # AAA  uuu  AAA  unshare -> cat
+        #
+        # Use AAA for all
+        #
+        # [none+PID] For pid workspace creation (but NOT unet pid) we use mutini and pid
+        # tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    -   uuu  AAA  unshare --fork --kill-child
+        # BBB    1   AAA  BBB  mutini
+        #
+        # Use AAA if we use pid_for_children, BBB for all
+        #
+        # [none+none] For non-pid workspace and non-pid unet we use cat and pid tree
+        # looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        # AAA  uuu  AAA  unshare -> cat
+        #
+        # Use AAA for all.
+        #
+        #
+        # ---------------------------------------------------------------------------
+        # Breakdown for unet namespace creation, and what PID to use for __pre_cmd
+        # ---------------------------------------------------------------------------
+        #
+        # tl;dr: save returned PID or nothing.
+        #   - for non-inline unshare: Use AAA with pid_for_children (returned pid)
+        #   - for inline unshare: no __precmd as the fork in popen is enough.
+        #
+        # Use commander to launch the unshare mutini/cat (for PID/none
+        # workspace PID) for non-inline case. AAA is the returned pid BBB is the child
+        # of the returned.
+        #
+        # Unshare Variant
+        # ---------------
+        #
+        # Here we are running mutini if we are creating new pid namespace workspace,
+        # cat otherwise.
+        #
+        # [PID] for unet pid creation pid tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    -   uuu  AAA  unshare --fork --kill-child (forking)
+        # BBB    1   AAA  BBB  mutini
+        #
+        # Use AAA if we use pid_for_children, BBB for all
+        #
+        # [none] for unet non-pid, pid tree looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        # AAA  uuu  AAA  unshare -> cat
+        #
+        # Use AAA for all
+        #
+        # Inline-Unshare Variant
+        # -----------------------
+        #
+        # For unshare_inline and new PID namespace we have unshared all but our PID
+        # namespace, but our children end up in the new namespace so the fork in popen
+        # does is good enough.
+        #
+        # [PID] for unet pid creation pid tree looks like this:
+        #
+        # PID  NSPID PPID PGID
+        # uuu    -   N/A  uuu  main unet process
+        # AAA    1   uuu  AAA  mutini
+        #
+        # Save p / p.pid, but don't configure any nsenter, uneeded.
+        #
+        # Use nothing as the fork when doing a popen is enough to be in all the right
+        # namepsaces.
+        #
+        # [none] for unet non-pid, pid tree looks like this:
+        #
+        # PID  PPID PGID
+        # uuu  N/A  uuu  main unet process
+        #
+        # Nothing, no __pre_cmd.
+        #
+        #
 
         self.ppid = os.getppid()
+        self.unshare_inline = unshare_inline
         if unshare_inline:
+            assert unet is None
+            self.uflags = uflags
+            #
+            # Open file descriptors for current namespaces for later resotration.
+            #
             try:
                 kversion = [int(x) for x in platform.release().split("-")[0].split(".")]
                 kvok = kversion[0] > 5 or (kversion[0] == 5 and kversion[1] >= 8)
@@ -1603,8 +1825,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     if (tmpflags & v) == 0:
                         continue
                     tmpflags &= ~v
-                    if v in unshare.namespace_files:
-                        path = os.path.join("/proc/self", unshare.namespace_files[v])
+                    if v in linux.namespace_files:
+                        path = os.path.join("/proc/self", linux.namespace_files[v])
                         if os.path.exists(path):
                             self.p_ns_fds.append(os.open(path, 0))
                             self.p_ns_fnames.append(f"{path} -> {os.readlink(path)}")
@@ -1619,17 +1841,40 @@ class LinuxNamespace(Commander, InterfaceMixin):
             else:
                 self.p_ns_fds = None
                 self.p_ns_fnames = None
-                self.ppid_fd = unshare.pidfd_open(self.ppid)
+                self.ppid_fd = linux.pidfd_open(self.ppid)
 
             self.logger.debug(
                 "%s: unshare to new namespaces %s",
                 self,
-                unshare.clone_flag_string(uflags),
+                linux.clone_flag_string(uflags),
             )
-            unshare.unshare(uflags)
-            self.pid = os.getpid()
-            self.uflags = uflags
-            p = None
+
+            linux.unshare(uflags)
+
+            if not pid:
+                p = None
+                self.pid = None
+                self.nsenter_fork = False
+            else:
+                # Need to fork to create the PID namespace, but we need to continue
+                # running from the parent so that things like pytest work. We'll execute
+                # a mutini process to manage the child init 1 duties.
+                #
+                # We (the parent pid) can no longer create threads, due to that being
+                # restricted by the kernel. See EINVAL in clone(2).
+                #
+                p = commander.popen(
+                    [get_exec_path_host("mutini"), "-v"],
+                    stdin=subprocess.PIPE,
+                    stdout=stdout,
+                    stderr=stderr,
+                    text=True,
+                    # new session/pgid so signals don't propagate
+                    start_new_session=True,
+                    shell=False,
+                )
+                self.pid = p.pid
+                self.nsenter_fork = False
         else:
             # Using cat and a stdin PIPE is nice as it will exit when we do. However,
             # we also detach it from the pgid so that signals do not propagate to it.
@@ -1638,67 +1883,132 @@ class LinuxNamespace(Commander, InterfaceMixin):
             # main network namespace with it, which will remove the bridges and the
             # veth pair (because the bridge side veth is deleted).
             self.logger.debug("%s: creating namespace process: %s", self, cmd)
-            p = subprocess.Popen(
+
+            # Use the parent unet process if we have one this will cause us to inherit
+            # the namespaces correctly even in the non-inline case.
+            parent = self.unet if self.unet else commander
+
+            p = parent.popen(
                 cmd,
                 stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=stdout,
+                stderr=stderr,
                 text=True,
-                start_new_session=True,  # detach from pgid so signals don't propagate
+                start_new_session=not unet,
                 shell=False,
             )
+
+            # The pid number returned is in the global pid namespace. For unshare_inline
+            # this can be unfortunate b/c our /proc has been remounted in our new pid
+            # namespace and won't contain global pid namespace pids. To solve for this
+            # we get all the pid values for the process below.
+
+            # See (A) above for when we need the child pid.
+            self.logger.debug("%s: namespace process: %s", self, proc_str(p))
             self.pid = p.pid
+            if unet and unet.nsenter_fork:
+                assert not unet.unshare_inline
+                # Need child pid of p.pid
+                pgrep = roothost.get_exec_path("pgrep")
+                # a sing fork was done
+                child_pid = roothost.cmd_raises([pgrep, "-o", "-P", str(p.pid)])
+                self.pid = int(child_pid.strip())
+                self.logger.debug("%s: child of namespace process: %s", self, pid)
 
         self.p = p
-        self.logger.debug("%s: namespace pid: %d", self, self.pid)
+
+        #
+        # Let's find all our pids in the nested PID namespaces
+        #
+        pid_status = open(
+            f"/tmp/mu-global-proc/{self.pid}/status", "r", encoding="ascii"
+        ).read()
+        m = re.search(r"\nNSpid:((?:\t[0-9]+)+)\n", pid_status)
+        self.pids = [int(x) for x in m.group(1).strip().split("\t")]
+        assert self.pids[0] == self.pid
 
         # -----------------------------------------------
         # Now let's wait until unshare completes it's job
         # -----------------------------------------------
         timeout = Timeout(30)
-        while (p is None or p.poll() is None) and not timeout.is_expired():
-            for fname in tuple(nslist):
-                if p is None:
-                    # self is changing so compare with parent pid's NS
-                    pidnsf = os.readlink("/proc/{}/ns/{}".format(self.ppid, fname))
+        if self.pid is not None:
+            while (not p or p.poll()) and not timeout.is_expired():
+                # check new namespace values against old (nsdict), unshare
+                # can actually take a bit to complete.
+                for fname in tuple(nslist):
+                    # self.pid will be the global pid b/c we didn't unshare_inline
+                    nsf = os.readlink(f"/tmp/mu-global-proc/{self.pid}/ns/{fname}")
+                    if nsdict[fname] != nsf:
+                        nslist.remove(fname)
+                if not nslist:
+                    break
+
+                elapsed = int(timeout.elapsed())
+                if elapsed <= 3:
+                    time_mod.sleep(0.1)
                 else:
-                    # new pid is changing so compare with self's NS
-                    pidnsf = os.readlink("/proc/{}/ns/{}".format(self.pid, fname))
-                selfnsf = os.readlink("/proc/self/ns/{}".format(fname))
-                # See if their namespace is different and remove from check if so
-                if selfnsf != pidnsf:
-                    nslist.remove(fname)
-            if not nslist or (pid and nslist == ["pid"]):
-                break
-            elapsed = int(timeout.elapsed())
-            if elapsed <= 3:
-                time_mod.sleep(0.1)
-            elif elapsed > 10:
-                self.logger.warning(
-                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
-                )
-                time_mod.sleep(3)
-            else:
-                self.logger.info(
-                    "%s: unshare taking more than %ss: %s", self, elapsed, nslist
-                )
-                time_mod.sleep(1)
-        if p is not None:
-            if p.poll():
-                self.logger.error(
-                    "%s: namespace process failed: %s", self, comm_error(p)
-                )
-            assert p.poll() is None, "unshare unexpectedly exited!"
-        # assert not nslist, "unshare never unshared!"
+                    self.logger.info(
+                        "%s: unshare taking more than %ss: %s", self, elapsed, nslist
+                    )
+                    time_mod.sleep(1)
 
-        # Set pre-command based on our namespace proc
-        self.__base_pre_cmd = ["/usr/bin/nsenter", *self.a_flags, "-t", str(self.pid)]
-        if not pid:
-            self.__base_pre_cmd.append("-F")
-        self.__pre_cmd = self.__base_pre_cmd
+        if p is not None and p.poll():
+            self.logger.error("%s: namespace process failed: %s", self, comm_error(p))
+            assert p.poll() is None, "unshare failed"
 
-        if self.p is None:
-            self.cmd_raises("mount --make-rprivate /")
+        #
+        # Setup the pre-command to enter the target namespace from the running munet
+        # process using self.pid
+        #
+
+        if pid:
+            nsenter_fork = True
+        elif unet and unet.nsenter_fork:
+            # if unet created a pid namespace we need to enter it since we aren't
+            # entering a child pid namespace we created for the node. Otherwise
+            # we have a /proc remounted under unet, but our process is running in
+            # the root pid namepsace
+            nselm = "pid_for_children"
+            nsflags.append(f"--pid={pp / nselm}")
+            nsenter_fork = True
+        else:
+            # We dont need a fork.
+            nsflags.append("-F")
+            nsenter_fork = False
+
+        # Save nsenter values if running from root namespace
+        # we need this for the unshare_inline case when run externally (e.g., from
+        # within tmux server).
+        root_nsflags = [x.replace("%P%", str(self.pid)) for x in nsflags]
+        self.__root_base_pre_cmd = ["/usr/bin/nsenter", *root_nsflags]
+        self.__root_pre_cmd = list(self.__root_base_pre_cmd)
+
+        if unshare_inline:
+            assert unet is None
+            # We have nothing to do here since our process is now in the correct
+            # namespaces and children will inherit from us, even the PID namespace will
+            # be corrent b/c commands are run by first forking.
+            self.nsenter_fork = False
+            self.nsflags = []
+            self.__base_pre_cmd = []
+        else:
+            # We will use nsenter
+            self.nsenter_fork = nsenter_fork
+            self.nsflags = nsflags
+            self.__base_pre_cmd = list(self.__root_base_pre_cmd)
+
+        self.__pre_cmd = list(self.__base_pre_cmd)
+
+        # Always mark new mount namespaces as recursive private
+        if mount:
+            # if self.p is None and not pid:
+            self.cmd_raises_nsonly("mount --make-rprivate /")
+
+        # We need to remount the procfs for the new PID namespace, since we aren't using
+        # unshare(1) which does that for us.
+        if pid and unshare_inline:
+            assert mount
+            self.cmd_raises_nsonly("mount -t proc proc /proc")
 
         # We do not want cmd_status in child classes (e.g., container) for
         # the remaining setup calls in this __init__ function.
@@ -1707,31 +2017,30 @@ class LinuxNamespace(Commander, InterfaceMixin):
             # Remount /sys to pickup any changes in the network, but keep root
             # /sys/fs/cgroup. This pattern could be made generic and supported for any
             # overlapping mounts
-            tmpmnt = f"/tmp/cgm-{self.pid}"
-            self.cmd_status_nsonly(
-                f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}"
-            )
-            self.cmd_status_nsonly("mount -t sysfs sysfs /sys")
-            self.cmd_status_nsonly(
-                f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}"
-            )
-            # self.cmd_raises(
-            #     f"mount -N {self.pid} --bind /sys/fs/cgroup /sys/fs/cgroup",
-            #     skip_pre_cmd=True,
-            # )
-            # o = self.cmd_raises("ls -l /sys/fs/cgroup")
-            # self.logger.warning("XXX %s", o)
+            if mount:
+                tmpmnt = f"/tmp/cgm-{self.pid}"
+                self.cmd_status_nsonly(
+                    f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}"
+                )
+                self.cmd_status_nsonly("mount -t sysfs sysfs /sys")
+                self.cmd_status_nsonly(
+                    f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}"
+                )
 
         # Set the hostname to the namespace name
-        if uts and set_hostname and self.p is not None:
-            # Debugging get the root hostname
+        if uts and set_hostname:
+            oroot = subprocess.check_output("hostname")
             self.cmd_status_nsonly("hostname " + self.name)
             nroot = subprocess.check_output("hostname")
-            if root_hostname != nroot:
-                result = self.p.poll()
-                assert root_hostname == nroot, "STATE of namespace process {}".format(
-                    result
-                )
+            if unshare_inline or (unet and unet.unshare_inline):
+                assert (
+                    root_hostname != nroot
+                ), f'hostname unchanged from "{nroot}" wanted "{self.name}"'
+            else:
+                # Assert that we didn't just change the host hostname
+                assert (
+                    root_hostname == nroot
+                ), f'root hostname "{root_hostname}" changed to "{nroot}"!'
 
         if private_mounts:
             if isinstance(private_mounts, str):
@@ -1743,17 +2052,24 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 else:
                     self.bind_mount(s[0], s[1])
 
-        o = self.cmd_status_nsonly("ls -l /proc/{}/ns".format(self.pid))
+        # this will fail if running inside the namespace with PID
+        if pid:
+            o = self.cmd_status_nsonly("ls -l /proc/1/ns")
+        else:
+            o = self.cmd_nostatus_nsonly(cmd=shlex.split("/usr/bin/ls -l /proc/self"))
+            o = self.cmd_nostatus_nsonly(cmd=shlex.split("ls -l /proc/self/ns"))
+
         self.logger.debug("namespaces:\n %s", o)
 
         # will cache the path, which is important in delete to avoid running a shell
         # which can hang during cleanup
         self.ip_path = get_exec_path_host("ip")
-        self.cmd_status_nsonly([self.ip_path, "link", "set", "lo", "up"])
+        if net:
+            self.cmd_status_nsonly([self.ip_path, "link", "set", "lo", "up"])
 
         self.logger.info("%s: created", self)
 
-    def _get_pre_cmd(self, use_str, use_pty, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, root_level=False, **kwargs):
         """Get the pre-user-command values.
 
         The values returned here should be what is required to cause the user's command
@@ -1761,7 +2077,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
         """
         del kwargs
         del use_pty
-        return shlex.join(self.__pre_cmd) if use_str else self.__pre_cmd
+        pre_cmd = self.__root_pre_cmd if root_level else self.__pre_cmd
+        return shlex.join(pre_cmd) if use_str else pre_cmd
 
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
@@ -1844,40 +2161,45 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 cmd = "tc -n " + self.ifnetns[intf] + cmd[2:]
         self.cmd_raises_nsonly(cmd)
 
-    def set_ns_cwd(self, cwd):
+    def set_ns_cwd(self, cwd: Union[str, Path]):
         """Common code for changing pre_cmd and pre_nscmd."""
         self.logger.debug("%s: new CWD %s", self, cwd)
-        self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
+        self.__root_pre_cmd = self.__root_base_pre_cmd + ["--wd=" + str(cwd)]
+        if self.__pre_cmd:
+            self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + str(cwd)]
+        elif self.unshare_inline:
+            os.chdir(cwd)
 
-    def cleanup_proc(self, p):
-        if not p or p.returncode is not None:
-            return None
+    async def cleanup_pid(self, pid):
+        """Signal a pid to exit with escalating forcefulness."""
+        for sn in (signal.SIGHUP, signal.SIGKILL):
+            self.logger.debug(
+                "%s: %s pid %s to exit", self, signal.Signals(sn).name, pid
+            )
 
-        self.logger.debug("%s: terminate process: %s (%s)", self, p.pid, p)
-        os.kill(-p.pid, signal.SIGTERM)
-        try:
-            assert isinstance(p, subprocess.Popen)
-            p.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.logger.warning(
-                "%s: terminate timeout, killing %s (%s)", self, p.pid, p
-            )
-            os.kill(-p.pid, signal.SIGKILL)
-            try:
-                assert isinstance(p, subprocess.Popen)
-                p.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.logger.warning("%s: kill timeout", self)
-                return p
-            except Exception as error:
-                self.logger.warning(
-                    "%s: kill unexpected exception: %s", self, error, exc_info=True
-                )
-        except Exception as error:
-            self.logger.warning(
-                "%s: terminate unexpected exception: %s", self, error, exc_info=True
-            )
-        return None
+            os.kill(pid, sn)
+
+            # No need to wait after this.
+            if sn == signal.SIGKILL:
+                return
+
+            # try each signal, waiting 2.5 seconds for exit before advancing
+            self.logger.debug("%s: waiting 2.5s for pid to exit", self)
+            for _ in range(0, 25):
+                try:
+                    status = os.waitpid(pid, os.WNOHANG)
+                    if status == (0, 0):
+                        await asyncio.sleep(0.1)
+                    else:
+                        return
+                except OSError as error:
+                    if error.errno == errno.ECHILD:
+                        self.logger.debug("%s: pid %s was reaped", self, pid)
+                    else:
+                        self.logger.warning(
+                            "%s: error trying to signal %s: %s", self, pid, error
+                        )
+                    return
 
     async def _async_delete(self):
         if type(self) == LinuxNamespace:  # pylint: disable=C0123
@@ -1885,23 +2207,31 @@ class LinuxNamespace(Commander, InterfaceMixin):
         else:
             self.logger.debug("%s: LinuxNamespace sub-class deleting", self)
 
+        # Signal pid namespace proc to exit
+        if (self.p is None or self.p.pid != self.pid) and self.pid:
+            await self.cleanup_pid(self.pid)
+
         if self.p is not None:
-            self.cleanup_proc(self.p)
-        # return to the previous namespace
+            await self.async_cleanup_proc(self.p)
+
+        # return to the previous namespace, need to do this in case anothe munet
+        # is being created, especially when it plans to inherit the parent's (host)
+        # namespace.
         if self.uflags:
+            logging.info("restoring from inline unshare: cwd: %s", os.getcwd())
             # This only works in linux>=5.8
             if self.p_ns_fds is None:
                 self.logger.debug(
                     "%s: restoring namespaces %s",
                     self,
-                    unshare.clone_flag_string(self.uflags),
+                    linux.clone_flag_string(self.uflags),
                 )
-                # fd = unshare.pidfd_open(self.ppid)
+                # fd = linux.pidfd_open(self.ppid)
                 fd = self.ppid_fd
                 retry = 3
                 for i in range(0, retry):
                     try:
-                        unshare.setns(fd, self.uflags)
+                        linux.setns(fd, self.uflags)
                     except OSError as error:
                         self.logger.warning(
                             "%s: could not reset to old namespace fd %s: %s",
@@ -1923,7 +2253,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     retry = 3
                     for i in range(0, retry):
                         try:
-                            unshare.setns(fd, 0)
+                            linux.setns(fd, 0)
                             break
                         except OSError as error:
                             self.logger.warning(
@@ -1939,8 +2269,11 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     os.close(fd)
                 self.p_ns_fds = None
                 self.p_ns_fnames = None
+            logging.info("restored from unshare: cwd: %s", os.getcwd())
 
+        self.__root_base_pre_cmd = ["/bin/false"]
         self.__base_pre_cmd = ["/bin/false"]
+        self.__root_pre_cmd = ["/bin/false"]
         self.__pre_cmd = ["/bin/false"]
 
         await super()._async_delete()
@@ -1952,7 +2285,7 @@ class SharedNamespace(Commander):
     An object that executes commands in an existing pid's linux namespace
     """
 
-    def __init__(self, name, pid=None, aflags=("-a",), logger=None, **kwargs):
+    def __init__(self, name, pid=None, nsflags=None, **kwargs):
         """Share a linux namespace.
 
         Args:
@@ -1961,19 +2294,19 @@ class SharedNamespace(Commander):
             aflags: nsenter flags to pass to inherit namespaces from
             logger: logger to use for this object.
         """
-        super().__init__(name, logger=logger, **kwargs)
+        super().__init__(name, **kwargs)
 
         self.logger.debug("%s: Creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
         self.pid = pid if pid is not None else os.getpid()
 
-        self.__base_pre_cmd = ["/usr/bin/nsenter", *aflags, "-t", str(self.pid)]
+        nsflags = (x.replace("%P%", str(self.pid)) for x in nsflags) if nsflags else []
+        self.__base_pre_cmd = ["/usr/bin/nsenter", *nsflags] if nsflags else []
         self.__pre_cmd = self.__base_pre_cmd
-
         self.ip_path = self.get_exec_path("ip")
 
-    def _get_pre_cmd(self, use_str, use_pty, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, root_level=False, **kwargs):
         """Get the pre-user-command values.
 
         The values returned here should be what is required to cause the user's command
@@ -1981,12 +2314,13 @@ class SharedNamespace(Commander):
         """
         del kwargs
         del use_pty
+        assert not root_level
         return shlex.join(self.__pre_cmd) if use_str else self.__pre_cmd
 
-    def set_ns_cwd(self, cwd):
+    def set_ns_cwd(self, cwd: Union[str, Path]):
         """Common code for changing pre_cmd and pre_nscmd."""
         self.logger.debug("%s: new CWD %s", self, cwd)
-        self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + cwd]
+        self.__pre_cmd = self.__base_pre_cmd + ["--wd=" + str(cwd)]
 
 
 class Bridge(SharedNamespace, InterfaceMixin):
@@ -2001,14 +2335,13 @@ class Bridge(SharedNamespace, InterfaceMixin):
         Bridge.next_ord = n + 1
         return n
 
-    def __init__(self, name=None, unet=None, logger=None, mtu=None, **kwargs):
+    def __init__(self, name=None, mtu=None, unet=None, **kwargs):
         """Create a linux Bridge."""
         self.id = self._get_next_id()
         if not name:
             name = "br{}".format(self.id)
-        super().__init__(
-            name, pid=unet.pid, aflags=unet.a_flags, logger=logger, **kwargs
-        )
+
+        super().__init__(name, pid=unet.pid, nsflags=unet.nsflags, unet=unet, **kwargs)
 
         self.set_intf_basename(self.name + "-e")
 
@@ -2024,6 +2357,9 @@ class Bridge(SharedNamespace, InterfaceMixin):
         self.cmd_raises(f"ip link set {name} up")
 
         self.logger.debug("%s: Created, Running", self)
+
+    def get_ifname(self, netname):
+        return self.net_intfs[netname] if netname in self.net_intfs else None
 
     async def _async_delete(self):
         """Stop the bridge (i.e., delete the linux resources)."""
@@ -2058,7 +2394,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
 class BaseMunet(LinuxNamespace):
     """Munet."""
 
-    def __init__(self, name="munet", isolated=True, **kwargs):
+    def __init__(self, name="munet", isolated=True, pid=True, rundir=None, **kwargs):
         """Create a Munet."""
         # logging.warning("BaseMunet: %s", name)
 
@@ -2075,7 +2411,50 @@ class BaseMunet(LinuxNamespace):
         self.cli_in_window_cmds = {}
         self.cli_run_cmds = {}
 
-        super().__init__(name, mount=True, net=isolated, uts=isolated, **kwargs)
+        #
+        # We need a directory for various files
+        #
+        if not rundir:
+            rundir = "/tmp/munet"
+        self.rundir = Path(rundir)
+
+        #
+        # Always having a global /proc come in handy. It's always the same
+        # (regardless of mount times) so the very unlikely race condition here between
+        # check and mount is fine
+        #
+        proc_path = Path("/tmp/mu-global-proc")
+        if not proc_path.exists():
+            proc_path.mkdir(0o755, parents=True, exist_ok=True)
+            linux.mount("proc", str(proc_path), "proc", "")
+        self.proc_path = proc_path
+
+        #
+        # Now create a root level commander that works regardless of whether we inline
+        # unshare or not. Save it in the global variable as well
+        #
+
+        if not self.isolated:
+            self.rootcmd = commander
+        else:
+            # XXX user
+            nsflags = (
+                f"--pid={self.proc_path / '1/ns/pid_for_children'}",
+                f"--mount={self.proc_path / '1/ns/mnt'}",
+                f"--net={self.proc_path / '1/ns/net'}",
+                f"--uts={self.proc_path / '1/ns/uts'}",
+                # f"--ipc={self.proc_path / '1/ns/ipc'}",
+                # f"--time={self.proc_path / '1/ns/time'}",
+                # f"--cgroup={self.proc_path / '1/ns/cgroup'}",
+            )
+            self.rootcmd = SharedNamespace("root", pid=1, nsflags=nsflags)
+        global roothost  # pylint: disable=global-statement
+
+        roothost = self.rootcmd
+
+        super().__init__(
+            name, mount=True, net=isolated, uts=isolated, pid=pid, unet=None, **kwargs
+        )
 
         # This allows us to cleanup any leftover running munet's
         if "MUNET_PID" in os.environ:
@@ -2102,7 +2481,7 @@ class BaseMunet(LinuxNamespace):
         """Add a host to munet."""
         self.logger.debug("%s: add_host %s(%s)", self, cls.__name__, name)
 
-        self.hosts[name] = cls(name, **kwargs)
+        self.hosts[name] = cls(name, unet=self, **kwargs)
 
         # Create a new mounted FS for tracking nested network namespaces creatd by the
         # user with `ip netns add`
@@ -2158,35 +2537,34 @@ class BaseMunet(LinuxNamespace):
         if isp2p:
             lhost, rhost = self.hosts[name1], self.hosts[name2]
             lifname = "i1{:x}".format(lhost.pid)
-            rifname = "i2{:x}".format(rhost.pid)
-            self.cmd_raises_nsonly(
-                "ip link add {} type veth peer name {}".format(lifname, rifname)
-            )
 
+            # Done at root level
             nsif1 = lhost.get_ns_ifname(if1)
             nsif2 = rhost.get_ns_ifname(if2)
 
-            self.cmd_raises_nsonly("ip link set {} netns {}".format(lifname, lhost.pid))
+            # Use pids[-1] to get the unet scoped pid for hosts
+            self.cmd_raises_nsonly(
+                f"ip link add {lifname} type veth peer name {nsif2}"
+                f" netns {rhost.pids[-1]}"
+            )
+            self.cmd_raises_nsonly(f"ip link set {lifname} netns {lhost.pids[-1]}")
+
             lhost.cmd_raises_nsonly("ip link set {} name {}".format(lifname, nsif1))
             if mtu:
                 lhost.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif1, mtu))
             lhost.cmd_raises_nsonly("ip link set {} up".format(nsif1))
             lhost.register_interface(if1)
 
-            self.cmd_raises_nsonly("ip link set {} netns {}".format(rifname, rhost.pid))
-            rhost.cmd_raises_nsonly("ip link set {} name {}".format(rifname, nsif2))
             if mtu:
                 rhost.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif2, mtu))
             rhost.cmd_raises_nsonly("ip link set {} up".format(nsif2))
             rhost.register_interface(if2)
         else:
             switch = self.switches[name1]
-            host = self.hosts[name2]
-            lifname = "i1{:x}".format(switch.pid)
-            rifname = "i2{:x}".format(host.pid)
+            rhost = self.hosts[name2]
 
             nsif1 = switch.get_ns_ifname(if1)
-            nsif2 = host.get_ns_ifname(if2)
+            nsif2 = rhost.get_ns_ifname(if2)
 
             if mtu is None:
                 mtu = switch.mtu
@@ -2198,12 +2576,13 @@ class BaseMunet(LinuxNamespace):
             assert len(nsif1) <= 16 and len(nsif2) <= 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
+
+            # Use pids[-1] to get the unet scoped pid for hosts
+            # switch is already in our namespace so nothing to convert.
             self.cmd_raises_nsonly(
-                f"ip link add {lifname} type veth peer name {rifname} netns {host.pid}"
+                f"ip link add {nsif1} type veth peer name {nsif2}"
+                f" netns {rhost.pids[-1]}"
             )
-            self.cmd_raises_nsonly(f"ip link set {lifname} netns {switch.pid}")
-            switch.cmd_raises_nsonly(f"ip link set {lifname} name {nsif1}")
-            host.cmd_raises_nsonly(f"ip link set {rifname} name {nsif2}")
 
             if mtu:
                 # if switch.mtu:
@@ -2212,16 +2591,16 @@ class BaseMunet(LinuxNamespace):
                 #         "ip link set {} mtu {}".format(if1, switch.mtu)
                 #     )
                 switch.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif1, mtu))
-                host.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif2, mtu))
+                rhost.cmd_raises_nsonly("ip link set {} mtu {}".format(nsif2, mtu))
 
             switch.register_interface(if1)
-            host.register_interface(if2)
-            host.register_network(switch.name, if2)
+            rhost.register_interface(if2)
+            rhost.register_network(switch.name, if2)
 
             switch.cmd_raises_nsonly(f"ip link set {nsif1} master {switch.name}")
 
             switch.cmd_raises_nsonly(f"ip link set {nsif1} up")
-            host.cmd_raises_nsonly(f"ip link set {nsif2} up")
+            rhost.cmd_raises_nsonly(f"ip link set {nsif2} up")
 
         # Cache the MAC values, and reverse mapping
         self.get_mac(name1, nsif1)
@@ -2268,12 +2647,12 @@ class BaseMunet(LinuxNamespace):
             warn=False,
         )
         if rc:
-            self.logger.error(
-                "Error deleting veth pair %s: %s", lname, cmd_error(rc, o, e)
-            )
+            self.logger.error("Err del veth pair %s: %s", lname, cmd_error(rc, o, e))
 
-    def _delete_links(self):
-        return asyncio.gather(*[self._delete_link(x) for x in self.links])
+    async def _delete_links(self):
+        # for x in self.links:
+        #     await self._delete_link(x)
+        return await asyncio.gather(*[self._delete_link(x) for x in self.links])
 
     async def _async_delete(self):
         """Delete the munet topology."""
@@ -2329,7 +2708,18 @@ class BaseMunet(LinuxNamespace):
                 "%s: error saving history file: %s", self, error, exc_info=True
             )
 
+        # XXX for some reason setns during the delete is changing our dir to /.
+        cwd = os.getcwd()
+
         await super()._async_delete()
+
+        os.chdir(cwd)
+
+        # We leave this alone as we only mount it once and multiple runs may be using
+        # it. It's not hurting anyone and it's in "tmp" so it's "ok" to litter. :)
+        #
+        # if self.proc_path:
+        #     linux.umount(self.proc_path, linux.MNT_DETACH)
 
         if BaseMunet.g_unet == self:
             BaseMunet.g_unet = None
@@ -2505,9 +2895,7 @@ if True:  # pylint: disable=using-constant-test
             """
             rc, output = self.cmd_status(cmd, timeout)
             if rc:
-                error = subprocess.CalledProcessError(rc, cmd)
-                error.stdout = output
-                raise error
+                raise CalledProcessError(rc, cmd, output)
             return output
 
 
@@ -2525,3 +2913,4 @@ def get_exec_path_host(binary):
 
 
 commander = Commander("munet")
+roothost = None

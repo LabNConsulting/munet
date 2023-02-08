@@ -84,7 +84,7 @@
           "cmd": {
             "type": "string"
           },
-          "cleanup_cmd": {
+          "cleanup-cmd": {
             "type": "string"
           },
           "image": {
@@ -389,7 +389,7 @@
               "cmd": {
                 "type": "string"
               },
-              "cleanup_cmd": {
+              "cleanup-cmd": {
                 "type": "string"
               },
               "image": {

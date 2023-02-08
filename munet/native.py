@@ -34,16 +34,15 @@ import time
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
-from .base import InterfaceMixin
+from .base import Commander
 from .base import LinuxNamespace
 from .base import MunetError
-from .base import SharedNamespace
-from .base import SSHRemote
 from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
 from .base import cmd_error
 from .base import commander
+from .base import fsafe_name
 from .base import get_exec_path_host
 from .config import config_subst
 from .config import config_to_dict_with_key
@@ -73,6 +72,15 @@ def make_ip_network(net, inc):
     )
 
 
+def make_ip_interface(ia, inc):
+    ia = ipaddress.ip_interface(ia)
+    # this turns into a /32 fix this
+    ia = ia + ia.network.num_addresses * inc
+    # IPv6
+    ia = ipaddress.ip_interface(str(ia).replace("/32", "/24").replace("/128", "/64"))
+    return ia
+
+
 def get_ip_network(c, brid, ipv6=False):
     ip = c.get("ipv6" if ipv6 else "ip")
     if ip and str(ip) != "auto":
@@ -84,8 +92,8 @@ def get_ip_network(c, brid, ipv6=False):
         except ValueError:
             return ipaddress.ip_network(ip)
     if ipv6:
-        return make_ip_network("fc00::/64", brid)
-    return make_ip_network("10.0.0.0/24", brid)
+        return make_ip_interface("fc00::fe/64", brid)
+    return make_ip_interface("10.0.0.254/24", brid)
 
 
 def parse_pciaddr(devaddr):
@@ -138,7 +146,6 @@ class L2Bridge(Bridge):
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
-        self.unet = unet
 
     async def _async_delete(self):
         self.logger.debug("%s: deleting", self)
@@ -153,7 +160,6 @@ class L3Bridge(Bridge):
         super().__init__(name=name, unet=unet, logger=logger, mtu=mtu)
 
         self.config = config if config else {}
-        self.unet = unet
 
         self.ip_interface = get_ip_network(self.config, self.id)
         if hasattr(self.ip_interface, "network"):
@@ -167,7 +173,8 @@ class L3Bridge(Bridge):
         self.logger.debug("%s: set IPv4 network address to %s", self, self.ip_interface)
         self.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
 
-        if unet.ipv6_enable:
+        self.ip6_interface = None
+        if self.unet.ipv6_enable:
             self.ip6_interface = get_ip_network(self.config, self.id, ipv6=True)
             if hasattr(self.ip6_interface, "network"):
                 self.ip6_address = self.ip6_interface.ip
@@ -190,6 +197,13 @@ class L3Bridge(Bridge):
                 f"! -o {self.name} -j MASQUERADE"
             )
 
+    def get_intf_addr(self, ifname, ipv6=False):
+        # None is a valid interface, we have the same address for all interfaces
+        # just make sure they aren't asking for something we don't have.
+        if ifname is not None and ifname not in self.intfs:
+            return None
+        return self.ip6_interface if ipv6 else self.ip_interface
+
     async def _async_delete(self):
         self.logger.debug("%s: deleting", self)
 
@@ -202,10 +216,7 @@ class L3Bridge(Bridge):
         await super()._async_delete()
 
 
-# Would maybe like to refactor this into L3 and Node
-class L3NodeMixin:
-    """A linux namespace with IP attributes."""
-
+class NodeMixin:
     next_ord = 1
 
     @classmethod
@@ -215,23 +226,408 @@ class L3NodeMixin:
         L3NodeMixin.next_ord = n + 1
         return n
 
-    def __init__(self, *args, config=None, unet=None, **kwargs):
-        """Create a linux Bridge."""
-        # logging.warning(
-        #     "L3NodeMixin: config %s unet %s kwargs %s", config, unet, kwargs
-        # )
-
+    def __init__(self, *args, config=None, **kwargs):
+        """Create a Node."""
         super().__init__(*args, **kwargs)
 
         self.config = config if config else {}
         config = self.config
 
+        self.id = int(config["id"]) if "id" in config else self._get_next_ord()
+
         self.cmd_p = None
         self.container_id = None
-        self.id = int(config["id"]) if "id" in config else self._get_next_ord()
-        assert unet is not None
-        self.unet = unet
         self.cleanup_called = False
+
+        # Clear and create rundir early
+        assert self.unet is not None
+        self.rundir = self.unet.rundir.joinpath(self.name)
+        commander.cmd_raises(f"rm -rf {self.rundir}")
+        commander.cmd_raises(f"mkdir -p {self.rundir}")
+
+    def _shebang_prep(self, config_key):
+        cmd = self.config.get(config_key, "").strip()
+        if not cmd:
+            return
+
+        script_name = fsafe_name(config_key)
+
+        # shell_cmd is a union and can be boolean or string
+        shell_cmd = self.config.get("shell", "/bin/bash")
+        if not isinstance(shell_cmd, str):
+            if shell_cmd:
+                # i.e., "shell: true"
+                shell_cmd = "/bin/bash"
+            else:
+                # i.e., "shell: false"
+                shell_cmd = ""
+
+        # If we have a shell_cmd then we create a cleanup_cmds file in run_cmd
+        # and volume mounted it
+        if shell_cmd:
+            # Create cleanup cmd file
+            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
+            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
+            cmd = cmd.replace("%NAME%", str(self.name))
+            cmd += "\n"
+
+            # Write out our cleanup cmd file at this time too.
+            cmdpath = os.path.join(self.rundir, f"{script_name}.shebang")
+            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
+                cmdfile.write(f"#!{shell_cmd}\n")
+                cmdfile.write(cmd)
+                cmdfile.flush()
+            commander.cmd_raises(f"chmod 755 {cmdpath}")
+
+            if self.container_id:
+                # XXX this counts on it being mounted in container, ugly
+                cmds = [f"/tmp/{script_name}.shebang"]
+            else:
+                cmds = [cmdpath]
+        else:
+            cmds = []
+            if isinstance(cmd, str):
+                cmds.extend(shlex.split(cmd))
+            else:
+                cmds.extend(cmd)
+            cmds = [
+                x.replace("%CONFIGDIR%", str(self.unet.config_dirname)) for x in cmds
+            ]
+            cmds = [x.replace("%RUNDIR%", str(self.rundir)) for x in cmds]
+            cmds = [x.replace("%NAME%", str(self.name)) for x in cmds]
+
+        return cmds
+
+    async def _async_shebang_cmd(self, config_key, warn=True):
+        cmds = self._shebang_prep(config_key)
+        if not cmds:
+            return 0
+
+        rc, o, e = await self.async_cmd_status(cmds, warn=warn)
+        if not rc and warn and (o or e):
+            self.logger.info(
+                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
+            )
+        elif rc and warn:
+            self.logger.warning(
+                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
+            )
+        else:
+            self.logger.debug(
+                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
+            )
+
+        return rc
+
+    def has_run_cmd(self) -> bool:
+        return bool(self.config.get("cmd", "").strip())
+
+    async def run_cmd(self):
+        """Run the configured commands for this node."""
+        self.logger.debug(
+            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
+        )
+
+        cmds = self._shebang_prep("cmd")
+        if not cmds:
+            return
+
+        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
+        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
+        self.cmd_p = await self.async_popen(
+            cmds,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,  # allows us to signal all children to exit
+        )
+
+        self.logger.debug(
+            "%s: async_popen %s => %s",
+            self,
+            cmds,
+            self.cmd_p.pid,
+        )
+
+        self.pytest_hook_run_cmd(stdout, stderr)
+
+        return self.cmd_p
+
+    async def _async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node.
+
+        This function is called by subclass' async_cleanup_cmd
+        """
+        self.cleanup_called = True
+
+        return await self._async_shebang_cmd("cleanup-cmd")
+
+    def has_cleanup_cmd(self) -> bool:
+        return bool(self.config.get("cleanup-cmd", "").strip())
+
+    async def async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node."""
+        return await self._async_cleanup_cmd()
+
+    def has_ready_cmd(self) -> bool:
+        return bool(self.config.get("ready-cmd", "").strip())
+
+    async def async_ready_cmd(self):
+        """Run the configured ready commands for this node."""
+        return not await self._async_shebang_cmd("ready-cmd", warn=False)
+
+    def cmd_completed(self, future):
+        self.logger.debug("%s: cmd completed called", self)
+        try:
+            n = future.result()
+            self.logger.debug("%s: node cmd completed result: %s", self, n)
+        except asyncio.CancelledError:
+            # Should we stop the container if we have one?
+            self.logger.debug("%s: node cmd wait() canceled", future)
+
+    def pytest_hook_run_cmd(self, stdout, stderr):
+        """Handle pytest options related to running the node cmd.
+
+        This function does things such as launch tail'ing windows
+        on the given files if requested by the user.
+
+        Args:
+            stdout: file-like object with a ``name`` attribute, or a path to a file.
+            stderr: file-like object with a ``name`` attribute, or a path to a file.
+        """
+        if not self.unet or not self.unet.pytest_config:
+            return
+
+        outopt = self.unet.pytest_config.getoption("--stdout")
+        outopt = outopt if outopt is not None else ""
+        if outopt == "all" or self.name in outopt.split(","):
+            outname = stdout.name if hasattr(stdout, "name") else stdout
+            self.run_in_window(f"tail -F {outname}", title=f"O:{self.name}")
+
+        if stderr:
+            erropt = self.unet.pytest_config.getoption("--stderr")
+            erropt = erropt if erropt is not None else ""
+            if erropt == "all" or self.name in erropt.split(","):
+                errname = stderr.name if hasattr(stderr, "name") else stderr
+                self.run_in_window(f"tail -F {errname}", title=f"E:{self.name}")
+
+    def pytest_hook_open_shell(self):
+        if not self.unet or not self.unet.pytest_config:
+            return
+
+        gdbcmd = self.config.get("gdb-cmd")
+        shellopt = self.unet.pytest_config.getoption("--gdb", "")
+        should_gdb = gdbcmd and (shellopt == "all" or self.name in shellopt.split(","))
+        use_emacs = self.unet.pytest_config.getoption("--gdb-use-emacs", False)
+
+        if should_gdb and not use_emacs:
+            cmds = self.config.get("gdb-target-cmds", [])
+            for cmd in cmds:
+                gdbcmd += f" '-ex={cmd}'"
+
+            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
+            for bp in bps:
+                gdbcmd += f" '-ex=b {bp}'"
+
+            cmds = self.config.get("gdb-run-cmd", [])
+            for cmd in cmds:
+                gdbcmd += f" '-ex={cmd}'"
+
+            self.run_in_window(gdbcmd)
+        elif should_gdb and use_emacs:
+            gdbcmd = gdbcmd.replace("gdb ", "gdb -i=mi ")
+            ecbin = self.get_exec_path("emacsclient")
+            # output = self.cmd_raises(
+            #     [ecbin, "--eval", f"(gdb \"{gdbcmd} -ex='p 123456'\")"]
+            # )
+            _ = self.cmd_raises([ecbin, "--eval", f'(gdb "{gdbcmd}")'])
+
+            # can't figure out how to wait until symbols are loaded, until we do we just
+            # have to wait "long enough" for the symbol load to finish :/
+            # for _ in range(100):
+            #     output = self.cmd_raises(
+            #         [
+            #             ecbin,
+            #             "--eval",
+            #             f"gdb-first-prompt",
+            #         ]
+            #     )
+            #     if output == "nil\n":
+            #         break
+            #     time.sleep(0.25)
+
+            time.sleep(10)
+
+            cmds = self.config.get("gdb-target-cmds", [])
+            for cmd in cmds:
+                # we may want to quote quotes in the cmd string
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+
+            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
+            for bp in bps:
+                cmd = f"br {bp}"
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+
+            cmds = self.config.get("gdb-run-cmds", [])
+            for cmd in cmds:
+                # we may want to quote quotes in the cmd string
+                self.cmd_raises(
+                    [
+                        ecbin,
+                        "--eval",
+                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
+                    ]
+                )
+                gdbcmd += f" '-ex={cmd}'"
+
+        shellopt = self.unet.pytest_config.getoption("--shell")
+        shellopt = shellopt if shellopt is not None else ""
+        if shellopt == "all" or self.name in shellopt.split(","):
+            self.run_in_window("bash")
+
+    async def _async_delete(self):
+        self.logger.debug("%s: NodeMixin sub-class _async_delete", self)
+
+        if self.cmd_p:
+            await self.async_cleanup_proc(self.cmd_p)
+            self.cmd_p = None
+
+        # Next call users "cleanup_cmd:"
+        try:
+            if not self.cleanup_called:
+                await self.async_cleanup_cmd()
+        except Exception as error:
+            self.logger.warning(
+                "Got an error during delete from async_cleanup_cmd: %s", error
+            )
+
+        # delete the LinuxNamespace/InterfaceMixin
+        await super()._async_delete()
+
+
+class SSHRemote(NodeMixin, Commander):
+    """SSHRemote a node representing an ssh connection to something."""
+
+    def __init__(
+        self,
+        name,
+        server,
+        port=22,
+        user=None,
+        password=None,
+        idfile=None,
+        **kwargs,
+    ):
+        super().__init__(name, **kwargs)
+
+        self.logger.debug("%s: creating", self)
+
+        # Things done in LinuxNamepsace we need to replicate here.
+        self.rundir = self.unet.rundir.joinpath(self.name)
+        self.unet.cmd_raises(f"rm -rf {self.rundir}")
+        self.unet.cmd_raises(f"mkdir -p {self.rundir}")
+
+        self.mgmt_ip = None
+        self.mgmt_ip6 = None
+
+        self.port = port
+
+        if user:
+            self.user = user
+        elif "SUDO_USER" in os.environ:
+            self.user = os.environ["SUDO_USER"]
+        else:
+            self.user = getpass.getuser()
+        self.password = password
+        self.idfile = idfile
+
+        self.server = f"{self.user}@{server}"
+
+        # Setup our base `pre-cmd` values
+        #
+        # We maybe should add environment variable transfer here in particular
+        # MUNET_NODENAME. The problem is the user has to explicitly approve
+        # of SendEnv variables.
+        self.__base_cmd = [
+            get_exec_path_host("sudo"),
+            "-E",
+            f"-u{self.user}",
+            get_exec_path_host("ssh"),
+        ]
+        if port != 22:
+            self.__base_cmd.append(f"-p{port}")
+        self.__base_cmd.append("-q")
+        self.__base_cmd.append("-oStrictHostKeyChecking=no")
+        self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
+        if self.idfile:
+            self.__base_cmd.append(f"-i{self.idfile}")
+        # Would be nice but has to be accepted by server config so not very useful.
+        # self.__base_cmd.append("-oSendVar='TEST'")
+        self.__base_cmd_pty = list(self.__base_cmd)
+        self.__base_cmd_pty.append("-t")
+        self.__base_cmd.append(self.server)
+        self.__base_cmd_pty.append(self.server)
+        # self.set_pre_cmd(pre_cmd, pre_cmd_tty)
+
+        self.logger.info("%s: created", self)
+
+    def has_ready_cmd(self) -> bool:
+        return bool(self.config.get("ready-cmd", "").strip())
+
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
+        pre_cmd = []
+        if self.unet:
+            pre_cmd = self.unet._get_pre_cmd(False, use_pty, **kwargs)
+        if ns_only:
+            return pre_cmd
+
+        # XXX grab the env from kwargs and add to podman exec
+        # env = kwargs.get("env", {})
+        if use_pty:
+            pre_cmd = pre_cmd + self.__base_cmd_pty
+        else:
+            pre_cmd = pre_cmd + self.__base_cmd
+        return shlex.join(pre_cmd) if use_str else pre_cmd
+
+    def _get_cmd_as_list(self, cmd):
+        """Given a list or string return a list form for execution.
+
+        If cmd is a string then [cmd] is returned, for most other
+        node types ["bash", "-c", cmd] is returned but in our case
+        ssh is the shell.
+
+        Args:
+            cmd: list or string representing the command to execute.
+            str_shell: if True and `cmd` is a string then run the
+              command using bash -c
+        Returns:
+            list of commands to execute.
+        """
+        return [cmd] if isinstance(cmd, str) else cmd
+
+
+# Would maybe like to refactor this into L3 and Node
+class L3NodeMixin(NodeMixin):
+    """A linux namespace with IP attributes."""
+
+    def __init__(self, *args, unet=None, **kwargs):
+        """Create an L3Node."""
+        # logging.warning(
+        #     "L3NodeMixin: config %s unet %s kwargs %s", config, unet, kwargs
+        # )
+        super().__init__(*args, unet=unet, **kwargs)
 
         self.mgmt_ip = None  # set in parser.py
         self.mgmt_ip6 = None  # set in parser.py
@@ -243,11 +639,6 @@ class L3NodeMixin:
 
         self.intf_tc_count = 0
 
-        # Clear and create rundir early
-        self.rundir = os.path.join(unet.rundir, self.name)
-        commander.cmd_raises(f"rm -rf {self.rundir}")
-        commander.cmd_raises(f"mkdir -p {self.rundir}")
-
         # super().__init__(name=name, **kwargs)
 
         self.mount_volumes()
@@ -255,7 +646,7 @@ class L3NodeMixin:
         # -----------------------
         # Setup node's networking
         # -----------------------
-        if not self.unet.ipv6_enable:
+        if not unet.ipv6_enable:
             # Disable IPv6
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
@@ -285,17 +676,16 @@ class L3NodeMixin:
 
         # Create a hosts file to map our name
         hosts_file = os.path.join(self.rundir, "hosts.txt")
-        if not os.path.exists(hosts_file):
-            with open(hosts_file, "w+", encoding="ascii") as hf:
-                hf.write(
-                    f"""127.0.0.1\tlocalhost {self.name}
+        with open(hosts_file, "w", encoding="ascii") as hf:
+            hf.write(
+                f"""127.0.0.1\tlocalhost {self.name}
 ::1\tip6-localhost ip6-loopback
 fe00::0\tip6-localnet
 ff00::0\tip6-mcastprefix
 ff02::1\tip6-allnodes
 ff02::2\tip6-allrouters
-."""
-                )
+"""
+            )
         if hasattr(self, "bind_mount"):
             self.bind_mount(hosts_file, "/etc/hosts")
 
@@ -415,137 +805,6 @@ ff02::2\tip6-allrouters
                 return c["name"]
         return None
 
-    async def run_cmd(self):
-        """Run the configured commands for this node."""
-        self.logger.debug(
-            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
-        )
-
-        shell_cmd = self.config.get("shell", "/bin/bash")
-        if not isinstance(shell_cmd, str):
-            if shell_cmd:
-                shell_cmd = "/bin/bash"
-            else:
-                shell_cmd = ""
-
-        cmd = self.config.get("cmd", "").strip()
-        if not cmd:
-            return None
-
-        # See if we have a custom update for this `kind`
-        if kind := self.config.get("kind", None):
-            if kind in kind_run_cmd_update:
-                await kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
-
-        if shell_cmd:
-            cmd = cmd.rstrip()
-            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmd = cmd.replace("%RUNDIR%", self.rundir)
-            cmd = cmd.replace("%NAME%", self.name)
-            cmd += "\n"
-            cmdpath = os.path.join(self.rundir, "cmd.shebang")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(f"#!{shell_cmd}\n")
-                cmdfile.write(cmd)
-                cmdfile.flush()
-            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
-            cmds = [cmdpath]
-        else:
-            cmds = shlex.split(cmd)
-            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
-            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
-            cmds = [x.replace("%NAME%", self.name) for x in cmds]
-
-        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
-        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
-        self.cmd_p = await self.async_popen(
-            cmds,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,  # allows us to signal all children to exit
-        )
-
-        self.logger.debug(
-            "%s: async_popen %s => %s",
-            self,
-            cmds,
-            self.cmd_p.pid,
-        )
-
-        self.pytest_hook_run_cmd(stdout, stderr)
-
-        return self.cmd_p
-
-    async def _async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node.
-
-        This function is called by subclass' async_cleanup_cmd
-        """
-        self.cleanup_called = True
-
-        cmd = self.config.get("cleanup_cmd", "").strip()
-        if not cmd:
-            return
-
-        # shell_cmd is a union and can be boolean or string
-        shell_cmd = self.config.get("shell", "/bin/bash")
-        if not isinstance(shell_cmd, str):
-            if shell_cmd:
-                shell_cmd = "/bin/bash"
-            else:
-                shell_cmd = ""
-
-        # If we have a shell_cmd then we create a cleanup_cmds file in run_cmd
-        # and volume mounted it
-        if shell_cmd:
-            # Create cleanup cmd file
-            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmd = cmd.replace("%RUNDIR%", self.rundir)
-            cmd = cmd.replace("%NAME%", self.name)
-            cmd += "\n"
-
-            # Write out our cleanup cmd file at this time too.
-            cmdpath = os.path.join(self.rundir, "cleanup_cmd.shebang")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(f"#!{shell_cmd}\n")
-                cmdfile.write(cmd)
-                cmdfile.flush()
-            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
-
-            if self.container_id:
-                cmds = ["/tmp/cleanup_cmds.shebang"]
-            else:
-                cmds = [cmdpath]
-        else:
-            cmds = []
-            if isinstance(cmd, str):
-                cmds.extend(shlex.split(cmd))
-            else:
-                cmds.extend(cmd)
-            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
-            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
-            cmds = [x.replace("%NAME%", self.name) for x in cmds]
-
-        rc, o, e = await self.async_cmd_status(cmds)
-        if not rc and (o or e):
-            self.logger.info("async_cleanup_cmd: %s", cmd_error(rc, o, e))
-
-        return rc
-
-    async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node."""
-        return await self._async_cleanup_cmd()
-
-    def cmd_completed(self, future):
-        self.logger.debug("%s: cmd completed called", self)
-        try:
-            n = future.result()
-            self.logger.debug("%s: node cmd completed result: %s", self, n)
-        except asyncio.CancelledError:
-            # Should we stop the container if we have one?
-            self.logger.debug("%s: node cmd wait() canceled", future)
-
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
@@ -597,118 +856,6 @@ ff02::2\tip6-allrouters
                         switch.ip_address if ip.version == 4 else switch.ip6_address
                     )
                     self.cmd_raises(ipcmd + f"route add default via {swaddr}")
-
-    def pytest_hook_run_cmd(self, stdout, stderr):
-        """Handle pytest options related to running the node cmd.
-
-        This function does things such as launch tail'ing windows
-        on the given files if requested by the user.
-
-        Args:
-            stdout: file-like object with a ``name`` attribute, or a path to a file.
-            stderr: file-like object with a ``name`` attribute, or a path to a file.
-        """
-        if not self.unet or not self.unet.pytest_config:
-            return
-
-        outopt = self.unet.pytest_config.getoption("--stdout")
-        outopt = outopt if outopt is not None else ""
-        if outopt == "all" or self.name in outopt.split(","):
-            outname = stdout.name if hasattr(stdout, "name") else stdout
-            self.run_in_window(f"tail -F {outname}", title=f"O:{self.name}")
-
-        if stderr:
-            erropt = self.unet.pytest_config.getoption("--stderr")
-            erropt = erropt if erropt is not None else ""
-            if erropt == "all" or self.name in erropt.split(","):
-                errname = stderr.name if hasattr(stderr, "name") else stderr
-                self.run_in_window(f"tail -F {errname}", title=f"E:{self.name}")
-
-    def pytest_hook_open_shell(self):
-        if not self.unet or not self.unet.pytest_config:
-            return
-
-        gdbcmd = self.config.get("gdb-cmd")
-        shellopt = self.unet.pytest_config.getoption("--gdb", "")
-        should_gdb = gdbcmd and (shellopt == "all" or self.name in shellopt.split(","))
-        use_emacs = self.unet.pytest_config.getoption("--gdb-use-emacs", False)
-
-        if should_gdb and not use_emacs:
-            cmds = self.config.get("gdb-target-cmds", [])
-            for cmd in cmds:
-                gdbcmd += f" '-ex={cmd}'"
-
-            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
-            for bp in bps:
-                gdbcmd += f" '-ex=b {bp}'"
-
-            cmds = self.config.get("gdb-run-cmd", [])
-            for cmd in cmds:
-                gdbcmd += f" '-ex={cmd}'"
-
-            self.run_in_window(gdbcmd)
-        elif should_gdb and use_emacs:
-            gdbcmd = gdbcmd.replace("gdb ", "gdb -i=mi ")
-            ecbin = self.get_exec_path("emacsclient")
-            # output = self.cmd_raises(
-            #     [ecbin, "--eval", f"(gdb \"{gdbcmd} -ex='p 123456'\")"]
-            # )
-            _ = self.cmd_raises([ecbin, "--eval", f'(gdb "{gdbcmd}")'])
-
-            # can't figure out how to wait until symbols are loaded, until we do we just
-            # have to wait "long enough" for the symbol load to finish :/
-            # for _ in range(100):
-            #     output = self.cmd_raises(
-            #         [
-            #             ecbin,
-            #             "--eval",
-            #             f"gdb-first-prompt",
-            #         ]
-            #     )
-            #     if output == "nil\n":
-            #         break
-            #     time.sleep(0.25)
-
-            time.sleep(10)
-
-            cmds = self.config.get("gdb-target-cmds", [])
-            for cmd in cmds:
-                # we may want to quote quotes in the cmd string
-                self.cmd_raises(
-                    [
-                        ecbin,
-                        "--eval",
-                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
-                    ]
-                )
-
-            bps = self.unet.pytest_config.getoption("--gdb-breakpoints", "").split(",")
-            for bp in bps:
-                cmd = f"br {bp}"
-                self.cmd_raises(
-                    [
-                        ecbin,
-                        "--eval",
-                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
-                    ]
-                )
-
-            cmds = self.config.get("gdb-run-cmds", [])
-            for cmd in cmds:
-                # we may want to quote quotes in the cmd string
-                self.cmd_raises(
-                    [
-                        ecbin,
-                        "--eval",
-                        f'(gud-gdb-run-command-fetch-lines "{cmd}" "*gud-gdb*")',
-                    ]
-                )
-                gdbcmd += f" '-ex={cmd}'"
-
-        shellopt = self.unet.pytest_config.getoption("--shell")
-        shellopt = shellopt if shellopt is not None else ""
-        if shellopt == "all" or self.name in shellopt.split(","):
-            self.run_in_window("bash")
 
     def _set_p2p_addr(self, other, cconf, occonf, ipv6=False):
         ipkey = "ipv6" if ipv6 else "ip"
@@ -898,18 +1045,7 @@ ff02::2\tip6-allrouters
     async def _async_delete(self):
         self.logger.debug("%s: L3NodeMixin sub-class _async_delete", self)
 
-        # First terminate any still running "cmd:"
-        # XXX We need to take care of this in container/qemu before getting here.
-        await self.async_cleanup_proc(self.cmd_p)
-
-        # Next call users "cleanup_cmd:"
-        try:
-            if not self.cleanup_called:
-                await self.async_cleanup_cmd()
-        except Exception as error:
-            self.logger.warning(
-                "Got an error during delete from async_cleanup_cmd: %s", error
-            )
+        # XXX do we need to run the cleanup command before these infra changes?
 
         # remove any hostintf interfaces
         for hname in list(self.host_intfs):
@@ -926,14 +1062,14 @@ ff02::2\tip6-allrouters
 class L3NamespaceNode(L3NodeMixin, LinuxNamespace):
     """A namespace L3 node."""
 
-    def __init__(self, name, **kwargs):
+    def __init__(self, name, pid=True, **kwargs):
         # logging.warning(
         #     "L3NamespaceNode: name %s MRO: %s kwargs %s",
         #     name,
         #     L3NamespaceNode.mro(),
         #     kwargs,
         # )
-        super().__init__(name, **kwargs)
+        super().__init__(name, pid=pid, **kwargs)
         super().pytest_hook_open_shell()
 
     async def _async_delete(self):
@@ -952,14 +1088,16 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         self.extra_mounts = []
         assert self.container_image
 
+        self.cmd_p = None
         self.__base_cmd = []
         self.__base_cmd_pty = []
 
+        # don't we have a mutini or cat process?
         super().__init__(
             name=name,
             config=config,
-            # cgroup=True,
             # pid=True,
+            # cgroup=True,
             # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],
             **kwargs,
         )
@@ -994,22 +1132,24 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
 
     def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
         if ns_only:
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
-
+            return super()._get_pre_cmd(use_str, use_pty, **kwargs)
         if not self.cmd_p:
             if self.container_id:
                 s = f"{self}: Running command in namespace b/c container exited"
                 self.logger.warning("%s", s)
                 raise L3ContainerNotRunningError(s)
             self.logger.debug("%s: Running command in namespace b/c no container", self)
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+            return super()._get_pre_cmd(use_str, use_pty, **kwargs)
+
+        # We need to enter our namespaces when running the podman command
+        pre_cmd = super()._get_pre_cmd(False, use_pty, **kwargs)
 
         # XXX grab the env from kwargs and add to podman exec
         # env = kwargs.get("env", {})
         if use_pty:
-            pre_cmd = self.__base_cmd_pty
+            pre_cmd = pre_cmd + self.__base_cmd_pty
         else:
-            pre_cmd = self.__base_cmd
+            pre_cmd = pre_cmd + self.__base_cmd
         return shlex.join(pre_cmd) if use_str else pre_cmd
 
     def tmpfs_mount(self, inner):
@@ -1021,6 +1161,10 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
     def bind_mount(self, outer, inner):
         # eventually would be nice to support live mounting
         assert not self.container_id
+        # First bind the mount in the parent this allows things like /etc/hosts to work
+        # correctly when running "nsonly" commands
+        super().bind_mount(outer, inner)
+        # Then arrange for binding in the container as well.
         self.logger.debug("Bind mounting %s on %s", outer, inner)
         if not self.test_nsonly("-e", outer):
             self.cmd_raises_nsonly(f"mkdir -p {outer}")
@@ -1068,6 +1212,9 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             # Need to work on a way to mount into live container too
             self.extra_mounts += args
 
+    def has_run_cmd(self) -> bool:
+        return True
+
     async def run_cmd(self):
         """Run the configured commands for this node."""
         self.logger.debug("%s: starting container", self.name)
@@ -1080,7 +1227,8 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             get_exec_path_host("podman"),
             "run",
             f"--name={self.container_id}",
-            f"--net=ns:/proc/{self.pid}/ns/net",
+            # f"--net=ns:/proc/{self.pid}/ns/net",
+            f"--net=ns:/tmp/mu-global-proc/{self.pid}/ns/net",
             f"--hostname={self.name}",
             f"--add-host={self.name}:127.0.0.1",
             # We can't use --rm here b/c podman fails on "stop".
@@ -1134,18 +1282,20 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             else:
                 shell_cmd = ""
 
-        # Create cleanup cmd file
-        cleanup_cmd = self.config.get("cleanup_cmd", "").strip()
-        if shell_cmd and cleanup_cmd:
-            # Will write the file contents out when the command is run
-            cleanup_cmdpath = os.path.join(self.rundir, "cleanup_cmd.shebang")
-            await self.async_cmd_raises_nsonly(f"touch {cleanup_cmdpath}")
-            await self.async_cmd_raises_nsonly(f"chmod 755 {cleanup_cmdpath}")
-            cmds += [
-                # How can we override this?
-                # u'--entrypoint=""',
-                f"--volume={cleanup_cmdpath}:/tmp/cleanup_cmds.shebang",
-            ]
+        # Create shebang files, filled later on
+        for key in ("cleanup-cmd", "ready-cmd"):
+            shebang_cmd = self.config.get(key, "").strip()
+            if shell_cmd and shebang_cmd:
+                script_name = fsafe_name(key)
+                # Will write the file contents out when the command is run
+                shebang_cmdpath = os.path.join(self.rundir, f"{script_name}.shebang")
+                await self.async_cmd_raises_nsonly(f"touch {shebang_cmdpath}")
+                await self.async_cmd_raises_nsonly(f"chmod 755 {shebang_cmdpath}")
+                cmds += [
+                    # How can we override this?
+                    # u'--entrypoint=""',
+                    f"--volume={shebang_cmdpath}:/tmp/{script_name}.shebang",
+                ]
 
         cmd = self.config.get("cmd", "").strip()
 
@@ -1159,9 +1309,9 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             assert isinstance(cmd, str)
             # make cmd \n terminated for script
             cmd = cmd.rstrip()
-            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmd = cmd.replace("%RUNDIR%", self.rundir)
-            cmd = cmd.replace("%NAME%", self.name)
+            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
+            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
+            cmd = cmd.replace("%NAME%", str(self.name))
             cmd += "\n"
             cmdpath = os.path.join(self.rundir, "cmd.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
@@ -1185,22 +1335,21 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                 else:
                     cmds.extend(cmd)
 
-            cmds = [x.replace("%CONFIGDIR%", self.unet.config_dirname) for x in cmds]
-            cmds = [x.replace("%RUNDIR%", self.rundir) for x in cmds]
-            cmds = [x.replace("%NAME%", self.name) for x in cmds]
+            cmds = [
+                x.replace("%CONFIGDIR%", str(self.unet.config_dirname)) for x in cmds
+            ]
+            cmds = [x.replace("%RUNDIR%", str(self.rundir)) for x in cmds]
+            cmds = [x.replace("%NAME%", str(self.name)) for x in cmds]
 
         stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
         stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
+        # Using nsonly avoids using `podman exec` to execute the cmds.
         self.cmd_p = await self.async_popen_nsonly(
             cmds,
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
-            # We don't need this here b/c we are only ever running podman and that's all
-            # we need to kill for cleanup
-            # start_new_session=True,  # allows us to signal all children to exit
-            # Skip running with `podman exec` we are creating that ability here.
-            skip_pre_cmd=True,
+            start_new_session=True,  # keeps main tty signals away from podman
         )
 
         self.logger.debug("%s: async_popen => %s", self, self.cmd_p.pid)
@@ -1265,7 +1414,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         """Run the configured cleanup commands for this node."""
         self.cleanup_called = True
 
-        if "cleanup_cmd" not in self.config:
+        if "cleanup-cmd" not in self.config:
             return
 
         if not self.cmd_p:
@@ -1300,6 +1449,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         if contid := self.container_id:
             try:
                 if not self.cleanup_called:
+                    self.logger.debug("calling user cleanup cmd")
                     await self.async_cleanup_cmd()
             except Exception as error:
                 self.logger.warning(
@@ -1312,6 +1462,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             o = ""
             e = ""
             if self.cmd_p:
+                self.logger.debug("podman stop on container: %s", contid)
                 if (rc := self.cmd_p.returncode) is None:
                     rc, o, e = await self.async_cmd_status_nsonly(
                         [get_exec_path_host("podman"), "stop", contid]
@@ -1327,6 +1478,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                     self.cmd_p = None
 
             # now remove the container
+            self.logger.debug("podman rm on container: %s", contid)
             rc, o, e = await self.async_cmd_status_nsonly(
                 [get_exec_path_host("podman"), "rm", contid]
             )
@@ -1334,11 +1486,15 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                 self.logger.warning(
                     "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
                 )
+            else:
+                self.logger.debug(
+                    "podman removed container %s: %s", contid, cmd_error(rc, o, e)
+                )
 
         await super()._async_delete()
 
 
-class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
+class L3QemuVM(L3NodeMixin, LinuxNamespace):
     """An VM (qemu) based L3 node."""
 
     def __init__(self, name, config, **kwargs):
@@ -1361,9 +1517,9 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
         self.__base_cmd = []
         self.__base_cmd_pty = []
 
-        super().__init__(name=name, config=config, **kwargs)
+        super().__init__(name=name, config=config, pid=False, **kwargs)
 
-        self.sockdir = os.path.join(self.rundir, "s")
+        self.sockdir = self.rundir.joinpath("s")
         self.cmd_raises(f"mkdir -p {self.sockdir}")
 
         self.qemu_config = config_subst(
@@ -1549,17 +1705,12 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
             else:
                 shell_cmd = ""
 
-        # See if we have a custom update for this `kind`
-        if kind := self.config.get("kind", None):
-            if kind in kind_run_cmd_update:
-                await kind_run_cmd_update[kind](self, shell_cmd, [], cmd)
-
         if shell_cmd:
             cmd = cmd.rstrip()
             cmd = f"#!{shell_cmd}\n" + cmd
-            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmd = cmd.replace("%RUNDIR%", self.rundir)
-            cmd = cmd.replace("%NAME%", self.name)
+            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
+            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
+            cmd = cmd.replace("%NAME%", str(self.name))
             cmd += "\n"
 
             # Write a copy to the rundir
@@ -1573,9 +1724,9 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
             self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
             cmds = "/tmp/cmd.shebang"
         else:
-            cmd = cmd.replace("%CONFIGDIR%", self.unet.config_dirname)
-            cmd = cmd.replace("%RUNDIR%", self.rundir)
-            cmd = cmd.replace("%NAME%", self.name)
+            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
+            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
+            cmd = cmd.replace("%NAME%", str(self.name))
             cmds = cmd
 
         # class future_proc:
@@ -2152,7 +2303,7 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
         """Run the configured cleanup commands for this node."""
         self.cleanup_called = True
 
-        if "cleanup_cmd" not in self.config:
+        if "cleanup-cmd" not in self.config:
             return
 
         if not self.launch_p:
@@ -2165,11 +2316,13 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
     async def _async_delete(self):
         self.logger.debug("%s: deleting", self)
 
+        # Need to cleanup early b/c it is running on the VM
         if self.cmd_p:
             await self.async_cleanup_proc(self.cmd_p)
             self.cmd_p = None
 
         try:
+            # Need to cleanup early b/c it is running on the VM
             if not self.cleanup_called:
                 await self.async_cleanup_cmd()
         except Exception as error:
@@ -2191,15 +2344,17 @@ class L3QemuVM(L3NodeMixin, InterfaceMixin, SharedNamespace):
 class Munet(BaseMunet):
     """Munet."""
 
-    def __init__(self, rundir=None, config=None, pytestconfig=None, **kwargs):
+    def __init__(self, rundir=None, config=None, pytestconfig=None, pid=True, **kwargs):
         # logging.warning("Munet")
 
-        super().__init__("munet", **kwargs)
+        if not rundir:
+            rundir = "/tmp/munet"
+
+        super().__init__("munet", pid=pid, rundir=rundir, **kwargs)
 
         self.built = False
         self.tapcount = 0
 
-        self.rundir = rundir if rundir else "/tmp/unet-" + os.environ["USER"]
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.set_ns_cwd(self.rundir)
 
@@ -2215,15 +2370,36 @@ class Munet(BaseMunet):
 
         self.pytest_config = pytestconfig
 
-        # We need some way to actually get back to the root namespace
-        if not self.isolated:
-            self.rootcmd = commander
-        else:
-            self.rootcmd = SharedNamespace("host", pid=1)
+        # Done in BaseMunet now
+        # # We need some way to actually get back to the root namespace
+        # if not self.isolated:
+        #     self.rootcmd = commander
+        # else:
+        #     spid = str(pid)
+        #     nsflags = (f"--mount={self.proc_path / spid / 'ns/mnt'}",
+        #                f"--net={self.proc_path / spid / 'ns/net'}",
+        #                f"--uts={self.proc_path / spid / 'ns/uts'}",
+        #                f"--ipc={self.proc_path / spid / 'ns/ipc'}",
+        #                f"--cgroup={self.proc_path / spid / 'ns/cgroup'}",
+        #                f"--pid={self.proc_path / spid / 'ns/net'}",
+        #     self.rootcmd = SharedNamespace("host", pid=1, nsflags=nsflags)
 
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
+
+        hosts_file = os.path.join(self.rundir, "hosts.txt")
+        with open(hosts_file, "w", encoding="ascii") as hf:
+            hf.write(
+                f"""127.0.0.1\tlocalhost {self.name}
+::1\tip6-localhost ip6-loopback
+fe00::0\tip6-localnet
+ff00::0\tip6-mcastprefix
+ff02::1\tip6-allnodes
+ff02::2\tip6-allrouters
+"""
+            )
+        self.bind_mount(hosts_file, "/etc/hosts")
 
         # Common CLI commands for any topology
         cdict = {
@@ -2504,9 +2680,15 @@ class Munet(BaseMunet):
             cls = SSHRemote
             kwargs["server"] = config["server"]
             kwargs["port"] = int(config.get("server-port", 22))
+            if "ssh-identity-file" in config:
+                kwargs["idfile"] = config.get("ssh-identity-file")
+            if "ssh-user" in config:
+                kwargs["user"] = config.get("ssh-user")
+            if "ssh-password" in config:
+                kwargs["password"] = config.get("ssh-password")
         else:
             cls = L3NamespaceNode
-        return super().add_host(name, cls=cls, unet=self, config=config, **kwargs)
+        return super().add_host(name, cls=cls, config=config, **kwargs)
 
     def add_network(self, name, config=None, **kwargs):
         """Add a l2 or l3 switch to munet."""
@@ -2520,12 +2702,12 @@ class Munet(BaseMunet):
     async def run(self):
         tasks = []
 
-        launch_nodes = [x for x in self.hosts.values() if hasattr(x, "launch")]
+        hosts = self.hosts.values()
+        launch_nodes = [x for x in hosts if hasattr(x, "launch")]
         launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
-
-        run_nodes = [x for x in self.hosts.values() if hasattr(x, "run_cmd")]
-        run_nodes = [
-            x for x in run_nodes if x.config.get("cmd") or x.config.get("image")
+        run_nodes = [x for x in hosts if hasattr(x, "has_run_cmd") and x.has_run_cmd()]
+        ready_nodes = [
+            x for x in hosts if hasattr(x, "has_ready_cmd") and x.has_ready_cmd()
         ]
 
         if not self.pytest_config:
@@ -2551,7 +2733,8 @@ class Munet(BaseMunet):
                 )
 
         if launch_nodes:
-            logging.info("Launching nodes")
+            # would like a info when verbose here.
+            logging.debug("Launching nodes")
             await asyncio.gather(*[x.launch() for x in launch_nodes])
 
         # Watch for launched processes to exit
@@ -2563,8 +2746,29 @@ class Munet(BaseMunet):
             tasks.append(task)
 
         if run_nodes:
-            logging.info("Running `cmd` on nodes")
+            # would like a info when verbose here.
+            logging.debug("Running `cmd` on nodes")
             await asyncio.gather(*[x.run_cmd() for x in run_nodes])
+
+        # Wait for nodes to be ready
+        if ready_nodes:
+
+            async def wait_until_ready(x):
+                while not await x.async_ready_cmd():
+                    logging.debug("Waiting for ready on: %s", x)
+                    await asyncio.sleep(0.25)
+                logging.debug("%s is ready!", x)
+
+            logging.debug("Waiting for ready on nodes: %s", ready_nodes)
+            done, pending = await asyncio.wait(
+                [wait_until_ready(x) for x in ready_nodes], timeout=30
+            )
+            if pending:
+                logging.warning("Timeout waiting for ready: %s", pending)
+                for nr in pending:
+                    nr.cancel()
+                raise asyncio.TimeoutError()
+            logging.debug("All nodes ready")
 
         # Watch for run_cmd processes to exit
         for node in run_nodes:
@@ -2603,7 +2807,11 @@ class Munet(BaseMunet):
 
         # XXX should we cancel launch and run tasks?
 
-        await super()._async_delete()
+        try:
+            await super()._async_delete()
+        except Exception as error:
+            self.logger.error("Error cleaning up: %s", error, exc_info=True)
+            raise
 
 
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
@@ -2655,4 +2863,5 @@ async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):
     return cmds, [cmd] + args
 
 
+# XXX this is only used by the container code
 kind_run_cmd_update = {"ceos": run_cmd_update_ceos}

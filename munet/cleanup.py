@@ -96,17 +96,17 @@ def _cleanup_pids(ours):
         return
 
     t = "current" if ours else "previous"
-    logging.info("Reaping %s  munet processes", t)
+    logging.info("Reaping %s munet processes", t)
 
-    _kill_piddict(pids_by_upid, signal.SIGTERM)
+    # _kill_piddict(pids_by_upid, signal.SIGTERM)
 
-    # Give them 5 second to exit cleanly
-    logging.info("Waiting up to 5s to allow for clean exit of abandon'd pids")
-    for _ in range(0, 5):
-        pids_by_upid = _get_pids_by_upid(ours).items()
-        if not pids_by_upid:
-            return
-        time.sleep(1)
+    # # Give them 5 second to exit cleanly
+    # logging.info("Waiting up to 5s to allow for clean exit of abandon'd pids")
+    # for _ in range(0, 5):
+    #     pids_by_upid = _get_pids_by_upid(ours).items()
+    #     if not pids_by_upid:
+    #         return
+    #     time.sleep(1)
 
     pids_by_upid = _get_pids_by_upid(ours).items()
     _kill_piddict(pids_by_upid, signal.SIGKILL)
