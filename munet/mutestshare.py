@@ -149,7 +149,6 @@ def restore_namespace(ppid_fd, uflags):
 def create_thread_test():
     def runthread(name):
         logging.info("In thread: %s", name)
-        return
 
     logging.info("Create thread")
     thread = threading.Thread(target=runthread, args=(1,))
@@ -222,7 +221,6 @@ def run(args):
     try:
         create_thread_test()
     except Exception as error:
-        breakpoint()
         print(error)
 
     #

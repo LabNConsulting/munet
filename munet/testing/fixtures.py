@@ -177,12 +177,6 @@ def module_autouse(request):
 @pytest.fixture(scope="module")
 def event_loop():
     """Create an instance of the default event loop for the session."""
-
-    # loop = asyncio.get_event_loop_policy().new_event_loop()
-
-    #
-    # new - add this when we figure out how to make it work :)
-
     # see https://github.com/pytest-dev/pytest-asyncio/issues/73
     # asyncio.set_event_loop(None)
     policy = asyncio.get_event_loop_policy()

@@ -218,7 +218,6 @@ def pytest_runtest_makereport(item, call):
                 call.excinfo,
                 "".join(traceback.format_tb(call.excinfo.tb)),
             )
-            breakpoint()
             pause_test(f"after teardown after test '{item.nodeid}'")
         elif call.when == "teardown" and call.result:
             pause_test(f"after test '{item.nodeid}'")

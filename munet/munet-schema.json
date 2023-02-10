@@ -87,6 +87,9 @@
           "cleanup-cmd": {
             "type": "string"
           },
+          "ready-cmd": {
+            "type": "string"
+          },
           "image": {
             "type": "string"
           },
@@ -390,6 +393,9 @@
                 "type": "string"
               },
               "cleanup-cmd": {
+                "type": "string"
+              },
+              "ready-cmd": {
                 "type": "string"
               },
               "image": {

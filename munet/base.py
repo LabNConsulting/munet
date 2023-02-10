@@ -22,7 +22,6 @@
 import asyncio
 import datetime
 import errno
-import getpass
 import ipaddress
 import logging
 import os
@@ -37,10 +36,7 @@ import tempfile
 import time as time_mod
 
 from collections import defaultdict
-from multiprocessing import Process
-from multiprocessing import Queue
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Union
 
 from munet import linux
@@ -67,6 +63,8 @@ class MunetError(Exception):
 
 
 class CalledProcessError(subprocess.CalledProcessError):
+    """Improved logging subclass of subprocess.CalledProcessError."""
+
     def __str__(self):
         o = self.output.strip() if self.output else ""
         e = self.stderr.strip() if self.stderr else ""
@@ -364,6 +362,37 @@ class Commander:  # pylint: disable=R0904
     def path_exists(self, path):
         """Check if path exists."""
         return self.test("-e", path)
+
+    async def cleanup_pid(self, pid):
+        """Signal a pid to exit with escalating forcefulness."""
+        for sn in (signal.SIGHUP, signal.SIGKILL):
+            self.logger.debug(
+                "%s: %s pid %s to exit", self, signal.Signals(sn).name, pid
+            )
+
+            os.kill(pid, sn)
+
+            # No need to wait after this.
+            if sn == signal.SIGKILL:
+                return
+
+            # try each signal, waiting 2.5 seconds for exit before advancing
+            self.logger.debug("%s: waiting 2.5s for pid to exit", self)
+            for _ in range(0, 25):
+                try:
+                    status = os.waitpid(pid, os.WNOHANG)
+                    if status == (0, 0):
+                        await asyncio.sleep(0.1)
+                    else:
+                        return
+                except OSError as error:
+                    if error.errno == errno.ECHILD:
+                        self.logger.debug("%s: pid %s was reaped", self, pid)
+                    else:
+                        self.logger.warning(
+                            "%s: error trying to signal %s: %s", self, pid, error
+                        )
+                    return
 
     def _get_sub_args(self, cmd_list, defaults, use_pty=False, ns_only=False, **kwargs):
         """Returns pre-command, cmd, and default keyword args."""
@@ -1484,8 +1513,8 @@ class LinuxNamespace(Commander, InterfaceMixin):
             pid: Create PID namespace, also mounts new /proc.
             time: Create time namespace.
             user: Create user namespace, also keeps capabilities.
-                set_hostname: Set the hostname to `name`, uts must also be True.
-                private_mounts: List of strings of the form
+            set_hostname: Set the hostname to `name`, uts must also be True.
+            private_mounts: List of strings of the form
                 "[/external/path:]/internal/path. If no external path is specified a
                 tmpfs is mounted on the internal path. Any paths specified are first
                 passed to `mkdir -p`.
@@ -1516,11 +1545,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
         #
         # Collect the namespaces to unshare
         #
-        if hasattr(self, "proc_path") and self.proc_path:
-            pp = Path(self.proc_path)
+        if hasattr(self, "proc_path") and self.proc_path:  # pylint: disable=no-member
+            pp = Path(self.proc_path)  # pylint: disable=no-member
         else:
             pp = unet.proc_path if unet else Path("/proc")
-        pp_pid = unet.pid if unet else os.getpid()
         pp = pp.joinpath("%P%", "ns")
 
         flags = ""
@@ -2029,7 +2057,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # Set the hostname to the namespace name
         if uts and set_hostname:
-            oroot = subprocess.check_output("hostname")
             self.cmd_status_nsonly("hostname " + self.name)
             nroot = subprocess.check_output("hostname")
             if unshare_inline or (unet and unet.unshare_inline):
@@ -2069,13 +2096,14 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         self.logger.info("%s: created", self)
 
-    def _get_pre_cmd(self, use_str, use_pty, root_level=False, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, root_level=False, **kwargs):
         """Get the pre-user-command values.
 
         The values returned here should be what is required to cause the user's command
         to execute in the correct context (e.g., namespace, container, sshremote).
         """
         del kwargs
+        del ns_only
         del use_pty
         pre_cmd = self.__root_pre_cmd if root_level else self.__pre_cmd
         return shlex.join(pre_cmd) if use_str else pre_cmd
@@ -2170,37 +2198,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
         elif self.unshare_inline:
             os.chdir(cwd)
 
-    async def cleanup_pid(self, pid):
-        """Signal a pid to exit with escalating forcefulness."""
-        for sn in (signal.SIGHUP, signal.SIGKILL):
-            self.logger.debug(
-                "%s: %s pid %s to exit", self, signal.Signals(sn).name, pid
-            )
-
-            os.kill(pid, sn)
-
-            # No need to wait after this.
-            if sn == signal.SIGKILL:
-                return
-
-            # try each signal, waiting 2.5 seconds for exit before advancing
-            self.logger.debug("%s: waiting 2.5s for pid to exit", self)
-            for _ in range(0, 25):
-                try:
-                    status = os.waitpid(pid, os.WNOHANG)
-                    if status == (0, 0):
-                        await asyncio.sleep(0.1)
-                    else:
-                        return
-                except OSError as error:
-                    if error.errno == errno.ECHILD:
-                        self.logger.debug("%s: pid %s was reaped", self, pid)
-                    else:
-                        self.logger.warning(
-                            "%s: error trying to signal %s: %s", self, pid, error
-                        )
-                    return
-
     async def _async_delete(self):
         if type(self) == LinuxNamespace:  # pylint: disable=C0123
             self.logger.info("%s: deleting", self)
@@ -2291,8 +2288,7 @@ class SharedNamespace(Commander):
         Args:
             name: Internal name for the namespace.
             pid: PID of the process to share with.
-            aflags: nsenter flags to pass to inherit namespaces from
-            logger: logger to use for this object.
+            nsflags: nsenter flags to pass to inherit namespaces from
         """
         super().__init__(name, **kwargs)
 
@@ -2306,13 +2302,14 @@ class SharedNamespace(Commander):
         self.__pre_cmd = self.__base_pre_cmd
         self.ip_path = self.get_exec_path("ip")
 
-    def _get_pre_cmd(self, use_str, use_pty, root_level=False, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, root_level=False, **kwargs):
         """Get the pre-user-command values.
 
         The values returned here should be what is required to cause the user's command
         to execute in the correct context (e.g., namespace, container, sshremote).
         """
         del kwargs
+        del ns_only
         del use_pty
         assert not root_level
         return shlex.join(self.__pre_cmd) if use_str else self.__pre_cmd

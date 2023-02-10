@@ -18,9 +18,11 @@
 # with this program; see the file COPYING; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
+# pylint: disable=protected-access
 """A module that defines objects for standalone use."""
 import asyncio
 import errno
+import getpass
 import ipaddress
 import logging
 import os
@@ -217,6 +219,8 @@ class L3Bridge(Bridge):
 
 
 class NodeMixin:
+    """Node attributes and functionality."""
+
     next_ord = 1
 
     @classmethod
@@ -248,7 +252,7 @@ class NodeMixin:
     def _shebang_prep(self, config_key):
         cmd = self.config.get(config_key, "").strip()
         if not cmd:
-            return
+            return []
 
         script_name = fsafe_name(config_key)
 
@@ -589,7 +593,7 @@ class SSHRemote(NodeMixin, Commander):
     def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
         pre_cmd = []
         if self.unet:
-            pre_cmd = self.unet._get_pre_cmd(False, use_pty, **kwargs)
+            pre_cmd = self.unet._get_pre_cmd(False, use_pty, ns_only=False, **kwargs)
         if ns_only:
             return pre_cmd
 
@@ -1130,19 +1134,25 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         """
         return get_exec_path_host(binary)
 
-    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, root_level=False, **kwargs):
         if ns_only:
-            return super()._get_pre_cmd(use_str, use_pty, **kwargs)
+            return super()._get_pre_cmd(
+                use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
+            )
         if not self.cmd_p:
             if self.container_id:
                 s = f"{self}: Running command in namespace b/c container exited"
                 self.logger.warning("%s", s)
                 raise L3ContainerNotRunningError(s)
             self.logger.debug("%s: Running command in namespace b/c no container", self)
-            return super()._get_pre_cmd(use_str, use_pty, **kwargs)
+            return super()._get_pre_cmd(
+                use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
+            )
 
         # We need to enter our namespaces when running the podman command
-        pre_cmd = super()._get_pre_cmd(False, use_pty, **kwargs)
+        pre_cmd = super()._get_pre_cmd(
+            False, use_pty, ns_only=True, root_level=root_level, **kwargs
+        )
 
         # XXX grab the env from kwargs and add to podman exec
         # env = kwargs.get("env", {})
@@ -1594,19 +1604,25 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             return [cmd] if isinstance(cmd, str) else cmd
         return super()._get_cmd_as_list(cmd)
 
-    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
+    def _get_pre_cmd(self, use_str, use_pty, ns_only=False, root_level=False, **kwargs):
         if ns_only:
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+            return super()._get_pre_cmd(
+                use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
+            )
 
         if not self.launch_p:
             self.logger.debug("%s: Running command in namespace b/c no VM", self)
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+            return super()._get_pre_cmd(
+                use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
+            )
 
         if not self.use_ssh:
             self.logger.debug(
                 "%s: Running command in namespace b/c no SSH configured", self
             )
-            return super()._get_pre_cmd(use_str, use_pty, ns_only=True)
+            return super()._get_pre_cmd(
+                use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
+            )
 
         # XXX grab the env from kwargs and add to podman exec
         # env = kwargs.get("env", {})
@@ -2760,7 +2776,7 @@ ff02::2\tip6-allrouters
                 logging.debug("%s is ready!", x)
 
             logging.debug("Waiting for ready on nodes: %s", ready_nodes)
-            done, pending = await asyncio.wait(
+            _, pending = await asyncio.wait(
                 [wait_until_ready(x) for x in ready_nodes], timeout=30
             )
             if pending:

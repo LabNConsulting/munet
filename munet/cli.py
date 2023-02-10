@@ -21,7 +21,6 @@
 """A module that implements a CLI."""
 import argparse
 import asyncio
-import concurrent.futures
 import functools
 import logging
 import multiprocessing
@@ -223,7 +222,7 @@ def win_cmd_host_split(unet, cmd, kinds, defall):
 
 
 def proc_readline(fd, prompt, histfile):
-    """Read a line of input from user while running in a sub-process"""
+    """Read a line of input from user while running in a sub-process."""
     # How do we change the command though, that's what's displayed in ps normally
     linux.set_process_name("Munet CLI")
     try:
@@ -244,7 +243,7 @@ def proc_readline(fd, prompt, histfile):
 
 
 async def async_input_reader(rfd):
-    """Read a line of input from the user input sub-process pipe"""
+    """Read a line of input from the user input sub-process pipe."""
     rpipe = os.fdopen(rfd, mode="r")
     reader = asyncio.StreamReader()
 
@@ -273,7 +272,7 @@ async def async_input_reader(rfd):
 # restriction.
 #
 async def async_input(prompt, histfile):
-    """Asynchronously read a line from the user"""
+    """Asynchronously read a line from the user."""
     rfd, wfd = os.pipe()
     p = multiprocessing.Process(target=proc_readline, args=(wfd, prompt, histfile))
     p.start()

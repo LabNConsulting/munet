@@ -23,7 +23,6 @@ import glob
 import logging
 import os
 import signal
-import time
 
 
 def get_pids_with_env(has_var, has_val=None):

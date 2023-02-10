@@ -25,7 +25,6 @@ import ctypes.util  # pylint: disable=C0415
 import errno
 import functools
 import os
-import signal
 
 
 libc = None
