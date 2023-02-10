@@ -17,4 +17,10 @@ topology:
           ip: 10.0.1.2/24
       cmd: tail -f /dev/null
     - name: remote1
-      server: localhost
+      kind: remotessh
+      server: sshsrv
+    - name: sshsrv
+      kind: sshserver
+      connections:
+        - to: "mgmt0"
+          ip: 10.0.1.4/24

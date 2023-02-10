@@ -6,7 +6,7 @@ kinds:
       chown frr:frr -R /var/log/frr
       /usr/lib/frr/frrinit.sh start
       tail -F /var/log/frr/frr.log
-    cleanup_cmd: |
+    cleanup-cmd: |
       /usr/lib/frr/frrinit.sh stop
     volumes:
       - "./%NAME%/etc.frr:/etc/frr"

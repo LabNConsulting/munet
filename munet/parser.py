@@ -183,19 +183,26 @@ def append_hosts_files(unet, netname):
         return
 
     entries = []
-    for name, node in unet.hosts.items():
-        if not hasattr(node, "_intf_addrs"):
-            continue
-        ifname = node.get_ifname(netname)
+    for name in ("munet", *list(unet.hosts)):
+        if name == "munet":
+            node = unet.switches[netname]
+            ifname = None
+        else:
+            node = unet.hosts[name]
+            if not hasattr(node, "_intf_addrs"):
+                continue
+            ifname = node.get_ifname(netname)
 
         for b in (False, True):
             ifaddr = node.get_intf_addr(ifname, ipv6=b)
-            if ifaddr:
+            if ifaddr and hasattr(ifaddr, "ip"):
                 entries.append((name, ifaddr.ip))
-    for name, node in unet.hosts.items():
+
+    for name in ("munet", *list(unet.hosts)):
+        node = unet if name == "munet" else unet.hosts[name]
         if not hasattr(node, "rundir"):
             continue
-        with open(os.path.join(node.rundir, "hosts.txt"), "w+", encoding="ascii") as hf:
+        with open(os.path.join(node.rundir, "hosts.txt"), "a+", encoding="ascii") as hf:
             hf.write("\n")
             for e in entries:
                 hf.write(f"{e[1]}\t{e[0]}\n")
@@ -285,10 +292,11 @@ async def async_build_topology(
     logger=None,
     rundir=None,
     args=None,
-    unshare_inline=True,
+    unshare_inline=False,
     pytestconfig=None,
     search_root=None,
 ):
+
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)

@@ -125,7 +125,7 @@ def config_subst(config: Iterable, **kwargs) -> Iterable:
                 "converting automatically for now."
             )
         for name, value in kwargs.items():
-            config = config.replace(f"%{name.upper()}%", value)
+            config = config.replace(f"%{name.upper()}%", str(value))
     elif isinstance(config, Iterable):
         try:
             return {k: config_subst(config[k], **kwargs) for k in config}

@@ -24,6 +24,7 @@ import asyncio
 import concurrent.futures
 import functools
 import logging
+import multiprocessing
 import os
 import pty
 import re
@@ -37,6 +38,7 @@ import tempfile
 import termios
 import tty
 
+from . import linux
 from .config import list_to_dict_with_key
 
 
@@ -221,27 +223,66 @@ def win_cmd_host_split(unet, cmd, kinds, defall):
 
 
 def proc_readline(fd, prompt, histfile):
-    histfile = init_history(None, histfile)
+    """Read a line of input from user while running in a sub-process"""
+    # How do we change the command though, that's what's displayed in ps normally
+    linux.set_process_name("Munet CLI")
     try:
-        sys.stdin = os.fdopen(fd)
+        # For some reason sys.stdin is fileno == 16 and useless
+        sys.stdin = os.fdopen(0)
+        histfile = init_history(None, histfile)
         line = input(prompt)
         readline.write_history_file(histfile)
+        if line is None:
+            os.write(fd, b"\n")
+        os.write(fd, bytes(f":{str(line)}\n", encoding="utf-8"))
+    except EOFError:
+        os.write(fd, b"\n")
     except KeyboardInterrupt:
-        print("^C\n% Exiting from KeyboardInterrupt")
-        return None
-    except BaseException:
-        return None
-    if line is None:
-        return None
-    return str(line)
+        os.write(fd, b"I\n")
+    except Exception as error:
+        os.write(fd, bytes(f"E{str(error)}\n", encoding="utf-8"))
 
 
+async def async_input_reader(rfd):
+    """Read a line of input from the user input sub-process pipe"""
+    rpipe = os.fdopen(rfd, mode="r")
+    reader = asyncio.StreamReader()
+
+    def protocol_factory():
+        return asyncio.StreamReaderProtocol(reader)
+
+    loop = asyncio.get_event_loop()
+    transport, _ = await loop.connect_read_pipe(protocol_factory, rpipe)
+    o = await reader.readline()
+    transport.close()
+
+    o = o.decode("utf-8").strip()
+    if not o:
+        return None
+    if o[0] == "I":
+        raise KeyboardInterrupt()
+    if o[0] == "E":
+        raise Exception(o[1:])
+    assert o[0] == ":"
+    return o[1:]
+
+
+#
+# A lot of work to add async `input` handling without creating a thread. We cannot use
+# threads when unshare_inline is used with pid namespace per kernel clone(2)
+# restriction.
+#
 async def async_input(prompt, histfile):
-    loop = asyncio.get_running_loop()
-    partial = functools.partial(proc_readline, sys.stdin.fileno(), prompt, histfile)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as input_pool:
-        result = await loop.run_in_executor(input_pool, partial)
-        return result
+    """Asynchronously read a line from the user"""
+    rfd, wfd = os.pipe()
+    p = multiprocessing.Process(target=proc_readline, args=(wfd, prompt, histfile))
+    p.start()
+    logging.debug("started async_input input process: %s", p)
+    try:
+        return await async_input_reader(rfd)
+    finally:
+        logging.debug("joining async_input input process")
+        p.join()
 
 
 def make_help_str(unet):
@@ -311,18 +352,18 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
         ucmd = execfmt
 
     # Do substitution for munet variables
-    ucmd = ucmd.replace("%CONFIGDIR%", unet.config_dirname)
+    ucmd = ucmd.replace("%CONFIGDIR%", str(unet.config_dirname))
     if host is None or host is unet:
-        ucmd = ucmd.replace("%RUNDIR%", unet.rundir)
+        ucmd = ucmd.replace("%RUNDIR%", str(unet.rundir))
         return ucmd.replace("%NAME%", ".")
-    ucmd = ucmd.replace("%RUNDIR%", os.path.join(unet.rundir, host))
+    ucmd = ucmd.replace("%RUNDIR%", str(os.path.join(unet.rundir, host)))
     if h.mgmt_ip:
         ucmd = ucmd.replace("%IPADDR%", str(h.mgmt_ip))
     elif h.mgmt_ip6:
         ucmd = ucmd.replace("%IPADDR%", str(h.mgmt_ip6))
     if h.mgmt_ip6:
         ucmd = ucmd.replace("%IP6ADDR%", str(h.mgmt_ip6))
-    return ucmd.replace("%NAME%", host)
+    return ucmd.replace("%NAME%", str(host))
 
 
 async def run_command(

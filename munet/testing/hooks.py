@@ -27,6 +27,7 @@ To use in your project, in your conftest.py add:
 import logging
 import os
 import sys
+import traceback
 
 import pytest
 
@@ -162,6 +163,7 @@ def pytest_configure(config):
 def pytest_runtest_makereport(item, call):
     """Pause or invoke CLI as directed by config."""
     isatty = sys.stdout.isatty()
+
     pause = bool(item.config.getoption("--pause"))
     skipped = False
 
@@ -210,6 +212,14 @@ def pytest_runtest_makereport(item, call):
         # check for a result to try and catch setup (or module setup) failure
         # e.g., after a module level fixture fails, we do not want to pause on every
         # skipped test.
+        elif call.when == "teardown" and call.excinfo:
+            logging.warning(
+                "Caught exception during teardown: %s\n:Traceback:\n%s",
+                call.excinfo,
+                "".join(traceback.format_tb(call.excinfo.tb)),
+            )
+            breakpoint()
+            pause_test(f"after teardown after test '{item.nodeid}'")
         elif call.when == "teardown" and call.result:
             pause_test(f"after test '{item.nodeid}'")
         elif error:

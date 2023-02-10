@@ -48,7 +48,7 @@ module: labn-munet-config
   |  +--rw cap-add*       string
   |  +--rw cap-remove*    string
   |  +--rw cmd?           string
-  |  +--rw cleanup_cmd?   string
+  |  +--rw cleanup-cmd?   string
   |  +--rw image?         string
   |  +--rw server?        string
   |  +--rw server-port?   uint16
@@ -116,7 +116,7 @@ module: labn-munet-config
   |     +--rw cap-add*       string
   |     +--rw cap-remove*    string
   |     +--rw cmd?           string
-  |     +--rw cleanup_cmd?   string
+  |     +--rw cleanup-cmd?   string
   |     +--rw image?         string
   |     +--rw server?        string
   |     +--rw server-port?   uint16
@@ -506,15 +506,20 @@ munet>
         type string;
         description "Shell command[s] to execute when creating the node.";
       }
-      leaf cleanup_cmd {
+      leaf cleanup-cmd {
         type string;
         description
           "Shell command[s] to execute when deleting the node.
 
-           NOTE: With container nodes, the cleanup_cmd will be run
+           NOTE: With container nodes, the cleanup-cmd will be run
            prior to the `cmd` being killed, so that the container is
            present. For Qemu/VM nodes the cleanup command is run prior
            to the VM being brought down.";
+      }
+      leaf ready-cmd {
+        type string;
+        description
+          "Shell command[s] to execute to determine if the node is ready";
       }
       leaf image {
         type string;

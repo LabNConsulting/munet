@@ -95,7 +95,7 @@ Tree diagram for node config::
    |     +--rw cap-add*       string
    |     +--rw cap-remove*    string
    |     +--rw cmd?           string
-   |     +--rw cleanup_cmd?   string
+   |     +--rw cleanup-cmd?   string
    |     +--rw image?         string
    |     +--rw server?        string
    |     +--rw server-port?   uint16

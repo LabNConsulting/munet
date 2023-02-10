@@ -30,17 +30,15 @@ cli:
       help: "Echo the hostname"
 
 topology:
+  networks-autonumber: true
+  dns-network: "net0"
   networks:
     - name: net0
       ip: auto
   nodes:
     - name: r1
+      kind: sshserver
       connections: ["net0", "r2"]
-      cmd: |
-        ip addr show
-        # Adding the line below causes downstream failures, looks due to failed
-        # cleanup. Need to debug why cleanup fails in this case.
-        tail -f /dev/null
     - name: r2
       image: docker.io/labn/docker-ci-test:20.04
       connections: ["net0", "r1"]
@@ -48,4 +46,6 @@ topology:
         ip addr show
         tail -f /dev/null
     - name: r3
-      server: localhost
+      kind: remotessh
+      server: r1
+      ready-cmd: "nc -z -v r1 5222"

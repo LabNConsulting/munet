@@ -25,10 +25,12 @@ To use in your project, in your conftest.py add:
   from munet.testing.fixtures import *
 """
 import asyncio
+import contextlib
 import logging
 import os
 
 from pathlib import Path
+from typing import Union
 
 import pytest
 import pytest_asyncio
@@ -44,15 +46,32 @@ from munet.testing.util import async_pause_test
 from munet.testing.util import pause_test
 
 
-def _cd_to_test_dir(request, tag):
-    cwd = os.getcwd()
-    sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("conftest: %s: changing cwd from %s to %s", tag, cwd, sdir)
-    os.chdir(sdir)
+@contextlib.asynccontextmanager
+async def achdir(ndir: Union[str, Path], desc=""):
+    odir = os.getcwd()
+    os.chdir(ndir)
+    if desc:
+        logging.debug("%s: chdir from %s to %s", desc, odir, ndir)
+    try:
+        yield
+    finally:
+        if desc:
+            logging.debug("%s: chdir back from %s to %s", desc, ndir, odir)
+        os.chdir(odir)
 
-    yield
 
-    os.chdir(cwd)
+@contextlib.contextmanager
+def chdir(ndir: Union[str, Path], desc=""):
+    odir = os.getcwd()
+    os.chdir(ndir)
+    if desc:
+        logging.debug("%s: chdir from %s to %s", desc, odir, ndir)
+    try:
+        yield
+    finally:
+        if desc:
+            logging.debug("%s: chdir back from %s to %s", desc, ndir, odir)
+        os.chdir(odir)
 
 
 def get_test_logdir(nodeid=None, module=False):
@@ -61,20 +80,53 @@ def get_test_logdir(nodeid=None, module=False):
     mode = os.getenv("PYTEST_XDIST_MODE", "no")
 
     # nodeid: all_protocol_startup/test_all_protocol_startup.py::test_router_running
+    # may be missing "::testname" if module is True
     if not nodeid:
         nodeid = os.environ["PYTEST_CURRENT_TEST"].split(" ")[0]
+
     cur_test = nodeid.replace("[", "_").replace("]", "_")
-    path, testname = cur_test.split("::")
-    testname = testname.replace("/", ".")
+    if module:
+        idx = cur_test.rfind("::")
+        path = cur_test if idx == -1 else cur_test[:idx]
+        testname = ""
+    else:
+        path, testname = cur_test.split("::")
+        testname = testname.replace("/", ".")
     path = path[:-3].replace("/", ".")
 
     # We use different logdir paths based on how xdist is running.
     if mode == "each":
+        if module:
+            return os.path.join(path, "worker-logs", xdist_worker)
         return os.path.join(path, testname, xdist_worker)
-    if mode == "load":
-        return os.path.join(path, testname)
-    assert mode in ("no", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
+    assert mode in ("no", "load", "loadfile", "loadscope"), f"Unknown dist mode {mode}"
     return path if module else os.path.join(path, testname)
+
+
+def _push_log_handler(desc, logpath):
+    logpath = os.path.abspath(logpath)
+    logging.debug("conftest: adding %s logging at %s", desc, logpath)
+    root_logger = logging.getLogger()
+    handler = logging.FileHandler(logpath, mode="w")
+    fmt = logging.Formatter("%(asctime)s %(levelname)5s: %(message)s")
+    handler.setFormatter(fmt)
+    root_logger.addHandler(handler)
+    return handler
+
+
+def _pop_log_handler(handler):
+    root_logger = logging.getLogger()
+    logging.debug("conftest: removing logging handler %s", handler)
+    root_logger.removeHandler(handler)
+
+
+@contextlib.contextmanager
+def log_handler(desc, logpath):
+    handler = _push_log_handler(desc, logpath)
+    try:
+        yield
+    finally:
+        _pop_log_handler(handler)
 
 
 # =================
@@ -95,6 +147,9 @@ def session_autouse():
         # This is unfriendly to multi-instance
         cleanup_previous()
 
+    # We never pop as we want to keep logging
+    _push_log_handler("session", "/tmp/unet-test/pytest-session.log")
+
     yield
 
     if not is_worker:
@@ -108,28 +163,60 @@ def session_autouse():
 
 @pytest.fixture(autouse=True, scope="module")
 def module_autouse(request):
-    # _cd_to_test_dir(request, "module")
-    cwd = os.getcwd()
-    sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("conftest: module: changing cwd from %s to %s", cwd, sdir)
-    os.chdir(sdir)
+    logpath = get_test_logdir(request.node.name, True)
+    logpath = os.path.join("/tmp/unet-test", logpath, "pytest-exec.log")
+    with log_handler("module", logpath):
+        sdir = os.path.dirname(os.path.realpath(request.fspath))
+        with chdir(sdir, "module autouse fixture"):
+            yield
 
-    yield
-
-    if BaseMunet.g_unet:
-        raise Exception("Base Munet was not cleaned up/deleted")
-
-    os.chdir(cwd)
+        if BaseMunet.g_unet:
+            raise Exception("Base Munet was not cleaned up/deleted")
 
 
 @pytest.fixture(scope="module")
 def event_loop():
     """Create an instance of the default event loop for the session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    logging.debug("conftest: got event loop")
 
-    yield loop
-    loop.close()
+    # loop = asyncio.get_event_loop_policy().new_event_loop()
+
+    #
+    # new - add this when we figure out how to make it work :)
+
+    # see https://github.com/pytest-dev/pytest-asyncio/issues/73
+    # asyncio.set_event_loop(None)
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.get_event_loop()
+    owatcher = policy.get_child_watcher()
+    logging.debug(
+        "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
+        policy,
+        loop,
+        owatcher,
+    )
+
+    logging.debug("event_loop_fixture: remove and close old watcher")
+    policy.set_child_watcher(None)
+    owatcher.close()
+
+    watcher = asyncio.SafeChildWatcher()
+    # # watcher = asyncio.ThreadedChildWatcher()
+    # # watcher = asyncio.PidfdChildWatcher()
+    loop = policy.new_event_loop()
+    logging.debug(
+        "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
+        watcher,
+    )
+    watcher.attach_loop(loop)
+    policy.set_child_watcher(watcher)
+
+    assert asyncio.get_event_loop_policy().get_child_watcher() is watcher
+
+    try:
+        logging.debug("event_loop_fixture: yielding with new event loop and watcher")
+        yield loop
+    finally:
+        loop.close()
 
 
 @pytest.fixture(scope="module")
@@ -139,8 +226,20 @@ def rundir_module():
     return d
 
 
-async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
+async def _unet_impl(_rundir, _pytestconfig, unshare=None, param=None):
     try:
+        # Default is to unshare inline if not specified otherwise
+        unshare_default = True
+        if isinstance(param, (tuple, list)):
+            unshare_default = param[1]
+            param = param[0]
+        elif isinstance(param, bool):
+            unshare_default = param
+            param = None
+        if unshare is None:
+            unshare = unshare_default
+
+        logging.info("unet fixture: basename=%s unshare_inline=%s", param, unshare)
         _unet = await async_build_topology(
             config=get_config(basename=param) if param else None,
             rundir=_rundir,
@@ -148,13 +247,19 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
             pytestconfig=_pytestconfig,
         )
     except Exception as error:
-        logging.debug("unet fixture: unet build failed: %s", error, exc_info=True)
+        logging.debug(
+            "unet fixture: unet build failed: %s\nparam: %s",
+            error,
+            param,
+            exc_info=True,
+        )
         pytest.skip(
             f"unet fixture: unet build failed: {error}", allow_module_level=True
         )
         raise
 
     try:
+        logging.debug("unet fixture: run")
         tasks = await _unet.run()
     except Exception as error:
         logging.debug("unet fixture: unet run failed: %s", error, exc_info=True)
@@ -170,6 +275,7 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
     except Exception as error:
         logging.error("unet fixture: yield unet unexpected exception: %s", error)
 
+    logging.debug("unet fixture: module done, deleting unet")
     await _unet.async_delete()
 
     # No one ever awaits these so cancel them
@@ -186,8 +292,10 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=True, param=None):
 @pytest.fixture(scope="module")
 async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
     param = request.param if hasattr(request, "param") else None
-    async for x in _unet_impl(rundir_module, pytestconfig, unshare=True, param=param):
-        yield x
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    async with achdir(sdir, "unet fixture"):
+        async for x in _unet_impl(rundir_module, pytestconfig, param=param):
+            yield x
 
 
 @pytest.fixture(scope="module")
@@ -199,8 +307,24 @@ async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W
     in the munet namespace which allowing things like scapy inline in tests to work.
     """
     param = request.param if hasattr(request, "param") else None
-    async for x in _unet_impl(rundir_module, pytestconfig, unshare=False, param=param):
-        yield x
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    async with achdir(sdir, "unet_share fixture"):
+        async for x in _unet_impl(
+            rundir_module, pytestconfig, unshare=False, param=param
+        ):
+            yield x
+
+
+@pytest.fixture(scope="module")
+async def unet_unshare(request, rundir_module, pytestconfig):  # pylint: disable=W0621
+    """A unet creating fixutre."""
+    param = request.param if hasattr(request, "param") else None
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    async with achdir(sdir, "unet_unshare fixture"):
+        async for x in _unet_impl(
+            rundir_module, pytestconfig, unshare=True, param=param
+        ):
+            yield x
 
 
 # =================
@@ -209,16 +333,11 @@ async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W
 
 
 @pytest.fixture(autouse=True, scope="function")
-def function_autouse(request):
-    # u_cd_to_test_dir(request, "function")
-    cwd = os.getcwd()
-    sdir = os.path.dirname(os.path.realpath(request.fspath))
-    logging.debug("conftest: function: changing cwd from %s to %s", cwd, sdir)
-    os.chdir(sdir)
-
-    yield
-
-    os.chdir(cwd)
+async def function_autouse(request):
+    async with achdir(
+        os.path.dirname(os.path.realpath(request.fspath)), "func.fixture"
+    ):
+        yield
 
 
 @pytest.fixture(scope="function")
@@ -290,6 +409,13 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture
 async def unet_perfunc(request, rundir, pytestconfig):  # pylint: disable=W0621
+    param = request.param if hasattr(request, "param") else None
+    async for x in _unet_impl(rundir, pytestconfig, param=param):
+        yield x
+
+
+@pytest.fixture
+async def unet_perfunc_unshare(request, rundir, pytestconfig):  # pylint: disable=W0621
     """Build unet per test function with an optional topology basename parameter.
 
     The fixture can be parameterized to choose different config files.

@@ -19,6 +19,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
 "Testing of basic topology configuration."
+import asyncio
 import os
 import subprocess
 
@@ -29,13 +30,28 @@ import pytest
 pytestmark = pytest.mark.asyncio
 if "GITHUB_ACTION" in os.environ:
     pytestmark = pytest.mark.parametrize(
-        "unet_share", ["munet-ci"], indirect=["unet_share"]
+        "unet", [("munet-ci", False), ("munet-ci", True)], indirect=["unet"]
+    )
+else:
+    pytestmark = pytest.mark.parametrize(
+        "unet", [("munet", False), ("munet", True)], indirect=["unet"]
     )
 
 
+async def wait_remote_up(unet):
+    rnode = unet.hosts["sshsrv"]
+    t = rnode.rundir.joinpath("started")
+    for _ in range(0, 50):
+        if t.exists():
+            return
+        await asyncio.sleep(0.1)
+    assert False, "took more than 5 seconds to bring up sshd server"
+
+
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
-async def test_cmd_raises(unet_share, host):
-    unet = unet_share
+async def test_cmd_raises(unet, host):
+    if host == "remote1":
+        await wait_remote_up(unet)
     host = unet.hosts[host]
 
     o = host.cmd_raises("echo Foobar")
@@ -59,8 +75,9 @@ async def test_cmd_raises(unet_share, host):
 
 
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
-async def test_cmd_status(unet_share, host):
-    unet = unet_share
+async def test_cmd_status(unet, host):
+    if host == "remote1":
+        await wait_remote_up(unet)
     host = unet.hosts[host]
 
     rc, o, e = host.cmd_status("echo Foobar")
@@ -69,7 +86,7 @@ async def test_cmd_status(unet_share, host):
     assert rc == 0
 
     rc, o, e = host.cmd_status("ls ajfipoasdjiopa", warn=False)
-    assert rc == 2
+    assert rc == 2, f"o: {o}\n" + f"e: {e}\n"
     assert o == ""
     assert "No such file or directory" in e
 
@@ -85,8 +102,9 @@ async def test_cmd_status(unet_share, host):
 
 
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
-async def test_cmd_nostatus(unet_share, host):
-    unet = unet_share
+async def test_cmd_nostatus(unet, host):
+    if host == "remote1":
+        await wait_remote_up(unet)
     host = unet.hosts[host]
 
     o = host.cmd_nostatus("echo Foobar")
@@ -127,8 +145,9 @@ async def test_cmd_nostatus(unet_share, host):
 
 
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
-async def test_popen(unet_share, host):
-    unet = unet_share
+async def test_popen(unet, host):
+    if host == "remote1":
+        await wait_remote_up(unet)
     host = unet.hosts[host]
 
     p = host.popen("echo Foobar")
