@@ -21,7 +21,6 @@
 "Testing CLI configuration and use."
 import io
 import logging
-import os
 import re
 import sys
 
