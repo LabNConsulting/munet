@@ -48,7 +48,7 @@ root_logger = logging.getLogger("")
 exec_formatter = logging.Formatter("%(asctime)s %(levelname)5s: %(name)s: %(message)s")
 
 
-async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = True):
+async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = False):
     """Create and run a new Munet topology.
 
     The topology is built from the given ``config`` to run inside the path indicated
