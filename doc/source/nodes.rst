@@ -20,7 +20,7 @@ and :py:meth:`Commander.cmd_status` (and their `nostatus` and
 :py:meth:`Commander.spawn` method.
 
 ..
-  XXX add common functionallity sections about ``cmd:``, ``cleanup_cmd:``, etc
+  XXX add common functionallity sections about ``cmd:``, ``cleanup-cmd:``, etc
   configuration here. IOW document the node common but not qemu options
 
 The config created node types are described in the following sections.
