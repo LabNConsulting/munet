@@ -39,6 +39,6 @@ match_step(
 match_step(
     "host1",
     f"cd {sd} && mutest -d /tmp/mutest2/ --file-select='mut_*'",
-    "FAIL",
+    "FAIL.*A failing test case",
     "Verify FAIL case",
 )
