@@ -68,8 +68,9 @@ def main(*args):
         envcfg[k] = envcfg[k].replace("%NAME%", str(name))
         envcfg[k] = envcfg[k].replace("%RUNDIR%", str(rundir))
 
+    # Can't use -F if it's a new pid namespace
     ecmd = "/usr/bin/nsenter"
-    eargs = [ecmd, "-F"]
+    eargs = [ecmd]
 
     output = subprocess.check_output(["/usr/bin/nsenter", "--help"], encoding="utf-8")
     if " -a," in output:
