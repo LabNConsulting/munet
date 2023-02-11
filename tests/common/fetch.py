@@ -24,13 +24,14 @@ import argparse
 import datetime
 import logging
 import os
+import pprint
 import sys
 import time
 
 import requests
 
 
-def fetch(owner, repo, files, release="latest", dest="."):
+def fetch(owner, repo, files, release="latest", dest=".", token=""):
     bheader = {"Accept": "application/octet-stream"}
     api = "https://api.github.com/repos"
     base_url = f"{api}/{owner}/{repo}"
@@ -39,20 +40,29 @@ def fetch(owner, repo, files, release="latest", dest="."):
         os.mkdir(dest)
     assert os.path.isdir(dest)
 
+    headers = {}
+    if token:
+        headers["authorization"] = f"Bearer {token}"
+        bheader["authorization"] = f"Bearer {token}"
+
     remaining = list(files)
     qurl = base_url + f"/releases/{release}"
     if qurl in fetch.cache:
         jr = fetch.cache[qurl]
     else:
-        for i in range(0, 20):
-            jr = requests.get(qurl, timeout=60).json()
+        for i in range(0, 4):
+            jr = requests.get(qurl, headers=headers, timeout=60).json()
+            logging.debug(
+                "URL: %s content:\n%s", qurl, pprint.pformat(jr, indent=4, width=120)
+            )
             if "assets" in jr:
                 break
             logging.warning("query returned with no assets: %s", jr)
-            time.sleep(1)
+            time.sleep(5)
         else:
             raise Exception(f"Never got list of assest after {i} tries")
         fetch.cache[qurl] = jr
+
     for asset in jr["assets"]:
         name = asset["name"]
         if name not in files:
@@ -78,8 +88,8 @@ def fetch(owner, repo, files, release="latest", dest="."):
                 continue
 
         # Download the asset
-        logging.debug("Downloading %s", name)
         aurl = base_url + f"/releases/assets/{aid}"
+        logging.info("Downloading %s url: %s", name, aurl)
         r = requests.get(aurl, timeout=60, headers=bheader)
         assert (
             r.headers["Content-Type"] == "application/octet-stream"
@@ -111,6 +121,7 @@ def main():
     parser.add_argument(
         "-d", "--destination", default=".", help="directory to save files in"
     )
+    parser.add_argument("--token", default="", help="github api token")
     parser.add_argument("-v", "--verbose", action="store_true", help="Be verbose")
     parser.add_argument("files", nargs="+", help="artificat files to download")
     args = parser.parse_args()
@@ -118,10 +129,15 @@ def main():
     level = logging.DEBUG if bool(args.verbose) else logging.INFO
     logging.basicConfig(level=level, format="%(asctime)s %(levelname)s: %(message)s")
 
-    # token = os.getenv('GITHUB_TOKEN', '...')
-    # headers = {'Authorization': f'token {token}'}
     try:
-        fetch(args.owner, args.repo, args.files, args.release, args.destination)
+        fetch(
+            args.owner,
+            args.repo,
+            args.files,
+            args.release,
+            args.destination,
+            token=args.token,
+        )
     except AssertionError as error:
         logging.error("%s", error)
         return 1

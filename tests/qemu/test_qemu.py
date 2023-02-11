@@ -40,7 +40,8 @@ async def fetch_images():
     else:
         # XXX We neeed something better than existence.
         return
-    fetch("LabNConsulting", "iptfs-dev", assets)
+    token = os.environ.get("FETCH_GH_TOKEN", "")
+    fetch("LabNConsulting", "iptfs-dev", assets, token=token)
 
 
 async def test_qemu_up(unet):
