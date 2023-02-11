@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.12.0"
+version = "0.12.1"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -99,6 +99,7 @@ ignore = "E203,E741,W504"
 [tool.pylint.messages_control]
 disable = [
   "broad-except",
+  "broad-exception-raised",
   "consider-using-f-string",    # this would also be nice, but too much
   "consider-using-with",        # this would be nice if it wasn't so simple
   "duplicate-code",
