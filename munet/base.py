@@ -280,7 +280,9 @@ class Commander:  # pylint: disable=R0904
         self.exec_paths = {}
 
         if not logger:
-            self.logger = logging.getLogger(__name__ + ".commander." + name)
+            logname = f"munet.{self.__class__.__name__.lower()}.{name}"
+            self.logger = logging.getLogger(logname)
+            self.logger.setLevel(logging.DEBUG)
         else:
             self.logger = logger
 
@@ -296,6 +298,7 @@ class Commander:  # pylint: disable=R0904
 
     def set_logger(self, logfile):
         self.logger = logging.getLogger(__name__ + ".commander." + self.name)
+        self.logger.setLevel(logging.DEBUG)
         if isinstance(logfile, str):
             handler = logging.FileHandler(logfile, mode="w")
         else:
@@ -1948,27 +1951,54 @@ class LinuxNamespace(Commander, InterfaceMixin):
         #
         # Let's find all our pids in the nested PID namespaces
         #
+        if unet:
+            proc_path = unet.proc_path
+        else:
+            proc_path = self.proc_path if hasattr(self, "proc_path") else "/proc"
         pid_status = open(
-            f"/tmp/mu-global-proc/{self.pid}/status", "r", encoding="ascii"
+            f"{proc_path}/{self.pid}/status", "r", encoding="ascii"
         ).read()
         m = re.search(r"\nNSpid:((?:\t[0-9]+)+)\n", pid_status)
         self.pids = [int(x) for x in m.group(1).strip().split("\t")]
         assert self.pids[0] == self.pid
+
+        self.logger.debug("%s: our scoped pids: %s", self, self.pids)
 
         # -----------------------------------------------
         # Now let's wait until unshare completes it's job
         # -----------------------------------------------
         timeout = Timeout(30)
         if self.pid is not None:
-            while (not p or p.poll()) and not timeout.is_expired():
+            while (not p or not p.poll()) and not timeout.is_expired():
                 # check new namespace values against old (nsdict), unshare
                 # can actually take a bit to complete.
                 for fname in tuple(nslist):
                     # self.pid will be the global pid b/c we didn't unshare_inline
-                    nsf = os.readlink(f"/tmp/mu-global-proc/{self.pid}/ns/{fname}")
+                    nspath = f"{proc_path}/{self.pid}/ns/{fname}"
+                    try:
+                        nsf = os.readlink(nspath)
+                    except OSError as error:
+                        self.logger.debug(
+                            "unswitched: error (ok) checking %s: %s", nspath, error
+                        )
+                        continue
                     if nsdict[fname] != nsf:
+                        self.logger.debug(
+                            "switched: original %s current %s", nsdict[fname], nsf
+                        )
                         nslist.remove(fname)
+                    elif unshare_inline:
+                        logging.warning(
+                            "unshare_inline not unshared %s == %s", nsdict[fname], nsf
+                        )
+                    else:
+                        self.logger.debug(
+                            "unswitched: current %s elapsed: %s", nsf, timeout.elapsed()
+                        )
                 if not nslist:
+                    self.logger.debug(
+                        "all done waiting for unshare after %s", timeout.elapsed()
+                    )
                     break
 
                 elapsed = int(timeout.elapsed())
@@ -2416,15 +2446,11 @@ class BaseMunet(LinuxNamespace):
         self.rundir = Path(rundir)
 
         #
-        # Always having a global /proc come in handy. It's always the same
-        # (regardless of mount times) so the very unlikely race condition here between
-        # check and mount is fine
-        #
-        proc_path = Path("/tmp/mu-global-proc")
-        if not proc_path.exists():
-            proc_path.mkdir(0o755, parents=True, exist_ok=True)
-            linux.mount("proc", str(proc_path), "proc", "")
-        self.proc_path = proc_path
+        # Always having a global /proc is required to keep things from exploding
+        # complexity with nested new pid namespaces..
+        self.proc_path = Path(tempfile.mkdtemp(suffix="-proc", prefix="mu-"))
+        logging.debug("%s: mounting /proc on proc_path %s", name, self.proc_path)
+        linux.mount("proc", str(self.proc_path), "proc", "")
 
         #
         # Now create a root level commander that works regardless of whether we inline
@@ -2653,20 +2679,20 @@ class BaseMunet(LinuxNamespace):
 
     async def _async_delete(self):
         """Delete the munet topology."""
+        # logger = self.logger if False else logging
+        logger = self.logger
         if type(self) == BaseMunet:  # pylint: disable=C0123
-            self.logger.info("%s: deleting.", self)
+            logger.info("%s: deleting.", self)
         else:
-            self.logger.debug("%s: BaseMunet sub-class deleting.", self)
+            logger.debug("%s: BaseMunet sub-class deleting.", self)
 
-        self.logger.debug("Deleting links")
+        logger.debug("Deleting links")
         try:
             await self._delete_links()
         except Exception as error:
-            self.logger.error(
-                "%s: error deleting links: %s", self, error, exc_info=True
-            )
+            logger.error("%s: error deleting links: %s", self, error, exc_info=True)
 
-        self.logger.debug("Deleting hosts and bridges")
+        logger.debug("Deleting hosts and bridges")
         try:
             # Delete hosts and switches, wait for them all to complete
             # even if there is an exception.
@@ -2674,7 +2700,7 @@ class BaseMunet(LinuxNamespace):
             stask = [x.async_delete() for x in self.switches.values()]
             await asyncio.gather(*htask, *stask, return_exceptions=True)
         except Exception as error:
-            self.logger.error(
+            logger.error(
                 "%s: error deleting hosts and switches: %s", self, error, exc_info=True
             )
 
@@ -2692,7 +2718,7 @@ class BaseMunet(LinuxNamespace):
                 )
                 self.cli_sockpath = None
         except Exception as error:
-            self.logger.error(
+            logger.error(
                 "%s: error cli server or sockpaths: %s", self, error, exc_info=True
             )
 
@@ -2701,22 +2727,44 @@ class BaseMunet(LinuxNamespace):
                 readline.write_history_file(self.cli_histfile)
                 self.cli_histfile = None
         except Exception as error:
-            self.logger.error(
+            logger.error(
                 "%s: error saving history file: %s", self, error, exc_info=True
             )
 
         # XXX for some reason setns during the delete is changing our dir to /.
         cwd = os.getcwd()
 
-        await super()._async_delete()
-
+        try:
+            await super()._async_delete()
+        except Exception as error:
+            logger.error(
+                "%s: error deleting parent classes: %s", self, error, exc_info=True
+            )
         os.chdir(cwd)
 
-        # We leave this alone as we only mount it once and multiple runs may be using
-        # it. It's not hurting anyone and it's in "tmp" so it's "ok" to litter. :)
-        #
-        # if self.proc_path:
-        #     linux.umount(self.proc_path, linux.MNT_DETACH)
+        try:
+            if self.proc_path:
+                logger.debug("%s: umount, remove proc_path %s", self, self.proc_path)
+                linux.umount(str(self.proc_path), 0)
+                os.rmdir(self.proc_path)
+        except Exception as error:
+            logger.warning(
+                "%s: error umount and removing proc_path %s: %s",
+                self,
+                self.proc_path,
+                error,
+                exc_info=True,
+            )
+            try:
+                linux.umount(str(self.proc_path), linux.MNT_DETACH)
+            except Exception as error2:
+                logger.error(
+                    "%s: error umount with detach proc_path %s: %s",
+                    self,
+                    self.proc_path,
+                    error2,
+                    exc_info=True,
+                )
 
         if BaseMunet.g_unet == self:
             BaseMunet.g_unet = None

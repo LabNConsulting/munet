@@ -432,7 +432,7 @@ def main():
     config = parser.setup_logging(args, config_base="logconf-mutest")
     # Grab the exec formatter from the logging config
     if fconfig := config.get("formatters", {}).get("exec"):
-        global exec_formatter  # pylint: disable=W291
+        global exec_formatter  # pylint: disable=W291,W0603
         exec_formatter = logging.Formatter(
             fconfig.get("format"), fconfig.get("datefmt")
         )

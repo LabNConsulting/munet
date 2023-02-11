@@ -1233,12 +1233,13 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         )
 
         self.container_id = f"{self.name}-{os.getpid()}"
+        proc_path = self.unet.proc_path if self.unet else "/proc"
         cmds = [
             get_exec_path_host("podman"),
             "run",
             f"--name={self.container_id}",
             # f"--net=ns:/proc/{self.pid}/ns/net",
-            f"--net=ns:/tmp/mu-global-proc/{self.pid}/ns/net",
+            f"--net=ns:{proc_path}/{self.pid}/ns/net",
             f"--hostname={self.name}",
             f"--add-host={self.name}:127.0.0.1",
             # We can't use --rm here b/c podman fails on "stop".
@@ -2360,13 +2361,24 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 class Munet(BaseMunet):
     """Munet."""
 
-    def __init__(self, rundir=None, config=None, pytestconfig=None, pid=True, **kwargs):
+    def __init__(
+        self,
+        rundir=None,
+        config=None,
+        pytestconfig=None,
+        pid=True,
+        logger=None,
+        **kwargs,
+    ):
         # logging.warning("Munet")
 
         if not rundir:
             rundir = "/tmp/munet"
 
-        super().__init__("munet", pid=pid, rundir=rundir, **kwargs)
+        if logger is None:
+            logger = logging.getLogger("munet.unet")
+
+        super().__init__("munet", pid=pid, rundir=rundir, logger=logger, **kwargs)
 
         self.built = False
         self.tapcount = 0
