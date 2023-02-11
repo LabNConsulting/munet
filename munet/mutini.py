@@ -139,7 +139,7 @@ def sig_trasmit(signum, _):
     except OSError as error:
         if error.errno == errno.ESRCH:
             logging.info("No process to send signal to, quiting")
-            ec = os.waitstatus_to_exitcode(-signum)
+            ec = 0x80 | signum
             sys.exit(ec)
         logging.warning("got exception trying to forward signal: %s", error)
     except Exception as error:
@@ -285,7 +285,8 @@ def run(new_pg, exec_args):
             )
             status = os.wait()
             logging.debug("parent %s got chld exit status %s", os.getpid(), status)
-            sys.exit(os.waitstatus_to_exitcode(status))
+            ec = status >> 8 if bool(status & 0xFF00) else status | 0x80
+            sys.exit(ec)
 
         logging.debug("in child as pid %s", os.getpid())
         # We must be pid 1 now.

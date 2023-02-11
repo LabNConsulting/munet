@@ -48,7 +48,7 @@ def vdebug(*args, **kwargs):
 
 def exit_with_status(pid, status):
     try:
-        ec = os.waitstatus_to_exitcode(status)
+        ec = status >> 8 if bool(status & 0xFF00) else status | 0x80
         logging.debug("reaped our child, exiting %s", ec)
         sys.exit(ec)
     except ValueError:
