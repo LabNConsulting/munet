@@ -196,7 +196,7 @@ def event_loop():
     watcher = asyncio.SafeChildWatcher()
     # # watcher = asyncio.ThreadedChildWatcher()
     # # watcher = asyncio.PidfdChildWatcher()
-    loop = policy.new_event_loop()
+    loop = policy.get_event_loop()
     logging.debug(
         "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
         watcher,
