@@ -395,6 +395,42 @@ async def async_main(args):
     return status
 
 
+def get_event_loop():
+    """Configure and return our event loop.
+
+    This function configures a new child watcher to not use threads.
+    Threads cannot be used when we inline unshare a PID namespace.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.get_event_loop()
+    owatcher = policy.get_child_watcher()
+    logging.debug(
+        "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
+        policy,
+        loop,
+        owatcher,
+    )
+
+    policy.set_child_watcher(None)
+    owatcher.close()
+
+    try:
+        watcher = asyncio.PidfdChildWatcher()
+    except Exception:
+        watcher = asyncio.SafeChildWatcher()
+    loop = policy.get_event_loop()
+
+    logging.debug(
+        "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
+        watcher,
+    )
+    watcher.attach_loop(loop)
+    policy.set_child_watcher(watcher)
+    assert asyncio.get_event_loop_policy().get_child_watcher() is watcher
+
+    return loop
+
+
 def main():
     ap = ArgumentParser()
     ap.add_argument(
@@ -437,13 +473,18 @@ def main():
             fconfig.get("format"), fconfig.get("datefmt")
         )
 
+    loop = None
     status = 4
     try:
-        status = asyncio.run(async_main(args))
+        loop = get_event_loop()
+        status = loop.run_until_complete(async_main(args))
     except KeyboardInterrupt:
         logging.info("Exiting (main), received KeyboardInterrupt in main")
     except Exception as error:
         logging.info("Exiting (main), unexpected exception %s", error, exc_info=True)
+    finally:
+        if loop:
+            loop.close()
 
     sys.exit(status)
 
