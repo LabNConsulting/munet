@@ -28,14 +28,9 @@ import pytest
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
-if "GITHUB_ACTION" in os.environ:
-    pytestmark = pytest.mark.parametrize(
-        "unet", [("munet-ci", False), ("munet-ci", True)], indirect=["unet"]
-    )
-else:
-    pytestmark = pytest.mark.parametrize(
-        "unet", [("munet", False), ("munet", True)], indirect=["unet"]
-    )
+
+# How does this double assignment work, what's going on?
+pytestmark = pytest.mark.parametrize("unet", [True, False], indirect=["unet"])
 
 
 async def wait_remote_up(unet):

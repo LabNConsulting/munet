@@ -34,12 +34,6 @@ pytestmark = pytest.mark.asyncio
 @pytest.fixture(autouse=True, scope="module")
 async def fetch_images():
     assets = ["bzImage", "rootfs.cpio.gz"]
-    for asset in assets:
-        if not os.path.exists(asset):
-            break
-    else:
-        # XXX We neeed something better than existence.
-        return
     token = os.environ.get("FETCH_GH_TOKEN", "")
     fetch("LabNConsulting", "iptfs-dev", assets, token=token)
 
