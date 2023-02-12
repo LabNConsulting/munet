@@ -304,9 +304,9 @@ Basic Commands:
     - '.' for the parent munet
     - a regex specified between '/' (e.g., '/rtr.*/')
 
-New Window Commands:\n."""
+New Window Commands:\n"""
         + "\n".join([f"  {ww[v][0]}\t:: {ww[v][1]}" for v in w])
-        + """\nInline Commands:\n."""
+        + """\nInline Commands:\n"""
         + "\n".join([f"  {uu[v][0]}\t:: {uu[v][1]}" for v in u])
         + "\n"
     )
