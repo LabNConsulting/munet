@@ -678,6 +678,9 @@ class L3NodeMixin(NodeMixin):
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
 
+        with open(os.path.join(self.rundir, "nspids"), "w", encoding="ascii") as f:
+            f.write(f'{" ".join([str(x) for x in self.pids])}\n')
+
         # Create a hosts file to map our name
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         with open(hosts_file, "w", encoding="ascii") as hf:
@@ -2415,6 +2418,9 @@ class Munet(BaseMunet):
         # Save the namespace pid
         with open(os.path.join(self.rundir, "nspid"), "w", encoding="ascii") as f:
             f.write(f"{self.pid}\n")
+
+        with open(os.path.join(self.rundir, "nspids"), "w", encoding="ascii") as f:
+            f.write(f'{" ".join([str(x) for x in self.pids])}\n')
 
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         with open(hosts_file, "w", encoding="ascii") as hf:
