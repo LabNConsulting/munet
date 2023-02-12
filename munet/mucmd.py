@@ -25,6 +25,23 @@ import os
 import subprocess
 import sys
 
+from pathlib import Path
+
+
+def newest_file_in(filename, paths, has_sibling=None):
+    new = None
+    newst = None
+    items = (x for y in paths for x in Path(y).rglob(filename))
+    for e in items:
+        st = os.stat(e)
+        if has_sibling and not e.parent.joinpath(has_sibling).exists():
+            continue
+        if not new or st.st_mtime_ns > newst.st_mtime_ns:
+            new = e
+            newst = st
+            continue
+    return new, newst
+
 
 def main(*args):
     ap = argparse.ArgumentParser(args)
@@ -36,13 +53,23 @@ def main(*args):
         help="optional shell-command to execute on NODE",
     )
     args = ap.parse_args()
-    rundir = args.rundir if args.rundir else "/tmp/munet"
-    if not os.path.exists(rundir):
-        print(f'rundir "{rundir}" doesn\'t exist')
+    if args.rundir:
+        configpath = Path(args.rundir).joinpath("config.json")
+    else:
+        configpath, _ = newest_file_in(
+            "config.json",
+            ["/tmp/munet", "/tmp/mutest", "/tmp/unet-test"],
+            has_sibling=args.node,
+        )
+        print(f'Using "{configpath}"')
+
+    if not configpath.exists():
+        print(f'"{configpath}" not found')
         return 1
+    rundir = configpath.parent
 
     nodes = []
-    config = json.load(open(os.path.join(rundir, "config.json"), encoding="utf-8"))
+    config = json.load(open(configpath, encoding="utf-8"))
     nodes = list(config.get("topology", {}).get("nodes", []))
     envcfg = config.get("mucmd", {}).get("env", {})
 
@@ -54,15 +81,19 @@ def main(*args):
 
     if args.node:
         name = args.node
-        rundir = os.path.join(rundir, name)
+        nodedir = rundir.joinpath(name)
+        if not nodedir.exists():
+            print('"{name}" node doesn\'t exist in "{rundir}"')
+            return 1
+        rundir = nodedir
     else:
         name = "munet"
-    pidpath = os.path.join(rundir, "nspid")
+    pidpath = rundir.joinpath("nspid")
     pid = open(pidpath, encoding="ascii").read().strip()
 
     env = {**os.environ}
     env["MUNET_NODENAME"] = name
-    env["MUNET_RUNDIR"] = rundir
+    env["MUNET_RUNDIR"] = str(rundir)
 
     for k in envcfg:
         envcfg[k] = envcfg[k].replace("%NAME%", str(name))
@@ -83,7 +114,7 @@ def main(*args):
     eargs.append(f"--wd={rundir}")
     eargs.extend(["-t", pid])
     eargs += args.shellcmd
-    print(eargs)
+    # print("Using ", eargs)
     return os.execvpe(ecmd, eargs, {**env, **envcfg})
 
 
