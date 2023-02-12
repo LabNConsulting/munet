@@ -1597,7 +1597,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
             # mutini now forks when created this way
             cmd.append("--pid")
             cmd.append("--fork")
-            cmd.append("--kill-child=SIGHUP")
+            # Unsupported by centos 7 :(
+            # versions >= 2.34[.x]
+            # cmd.append("--kill-child=SIGHUP")
             cmd.append("--mount-proc")
             uflags |= linux.CLONE_NEWPID
         if time:
