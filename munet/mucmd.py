@@ -108,9 +108,10 @@ def main(*args):
         eargs.append("-a")
     else:
         # -U doesn't work
-        for flag in ["-u", "-i", "-m", "-n", "-p", "-C", "-T"]:
+        for flag in ["-u", "-i", "-m", "-n", "-C", "-T"]:
             if f" {flag}," in output:
                 eargs.append(flag)
+    eargs.append(f"--pid=/proc/{pid}/ns/pid_for_children")
     eargs.append(f"--wd={rundir}")
     eargs.extend(["-t", pid])
     eargs += args.shellcmd
