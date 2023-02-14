@@ -123,7 +123,7 @@ def umount(target, options):
 
 
 def pidfd_open(pid, flags=0):
-    if hasattr(os, "pidfd_open"):
+    if hasattr(os, "pidfd_open") and os.pidfd_open is not pidfd_open:
         return os.pidfd_open(pid, flags)  # pylint: disable=no-member
 
     if not libc:
@@ -143,6 +143,10 @@ def pidfd_open(pid, flags=0):
         raise_oserror(ctypes.get_errno())
 
     return fd
+
+
+if not hasattr(os, "pidfd_open"):
+    os.pidfd_open = pidfd_open
 
 
 def setns(fd, nstype):  # noqa: D402
