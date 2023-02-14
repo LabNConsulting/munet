@@ -255,6 +255,43 @@ def _get_exec_path(binary, cmdf, cache):
     return None
 
 
+def get_event_loop():
+    """Configure and return our non-thread using event loop.
+
+    This function configures a new child watcher to not use threads.
+    Threads cannot be used when we inline unshare a PID namespace.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.get_event_loop()
+    owatcher = policy.get_child_watcher()
+    logging.debug(
+        "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
+        policy,
+        loop,
+        owatcher,
+    )
+
+    policy.set_child_watcher(None)
+    owatcher.close()
+
+    try:
+        watcher = asyncio.PidfdChildWatcher()  # pylint: disable=no-member
+    except Exception:
+        watcher = asyncio.SafeChildWatcher()
+    loop = policy.get_event_loop()
+
+    logging.debug(
+        "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
+        watcher,
+    )
+    watcher.attach_loop(loop)
+    policy.set_child_watcher(watcher)
+    policy.set_event_loop(loop)
+    assert asyncio.get_event_loop_policy().get_child_watcher() is watcher
+
+    return loop
+
+
 class Commander:  # pylint: disable=R0904
     """An object that can execute commands."""
 
