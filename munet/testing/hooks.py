@@ -208,7 +208,13 @@ def pytest_runtest_makereport(item, call):
         elif call.when == "setup":
             if error:
                 item.skip_more_pause = True
-            pause_test(f"before test '{item.nodeid}'")
+
+            # we can't asyncio.run() (which pause does) if we are unhsare_inline
+            # at this point, count on an autouse fixture to pause instead in this
+            # case
+            if not BaseMunet.g_unet or not BaseMunet.g_unet.unshare_inline:
+                pause_test(f"before test '{item.nodeid}'")
+
         # check for a result to try and catch setup (or module setup) failure
         # e.g., after a module level fixture fails, we do not want to pause on every
         # skipped test.
