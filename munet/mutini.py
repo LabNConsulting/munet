@@ -30,26 +30,34 @@ import shlex
 import signal
 import subprocess
 import sys
-import time
 
 from signal import Signals as S
 
 from munet import linux
 
 
-child_pid = -1
-very_verbose = False
-restore_signals = set()
-g_exit_signal = False
-g_pid_status_cache = {}
+class g:
+    """Global variables for our program."""
+
+    child_pid = -1
+    orig_pid = os.getpid()
+    exit_signal = False
+    pid_status_cache = {}
+    restore_signals = set()
+    very_verbose = False
 
 
-logquit_signals = {
-    S.SIGHUP,
-    S.SIGINT,
-    S.SIGQUIT,
-    S.SIGTERM,
+unshare_flags = {
+    "C": linux.CLONE_NEWCGROUP,
+    "i": linux.CLONE_NEWIPC,
+    "m": linux.CLONE_NEWNS,
+    "n": linux.CLONE_NEWNET,
+    "p": linux.CLONE_NEWPID,
+    "u": linux.CLONE_NEWUTS,
+    "T": linux.CLONE_NEWTIME,
 }
+
+
 ignored_signals = {
     S.SIGTTIN,
     S.SIGTTOU,
@@ -69,39 +77,50 @@ no_prop_signals = abort_signals | ignored_signals | {S.SIGCHLD}
 
 
 def vdebug(*args, **kwargs):
-    if very_verbose:
+    if g.very_verbose:
         logging.debug(*args, **kwargs)
 
 
-def get_status_item(status, stat):
+def get_pid_status_item(status, stat):
     m = re.search(rf"(?:^|\n){stat}:\t(.*)(?:\n|$)", status)
     return m.group(1).strip() if m else None
 
 
-def pget_status_item(pid, stat):
-    if pid not in g_pid_status_cache:
+def pget_pid_status_item(pid, stat):
+    if pid not in g.pid_status_cache:
         with open(f"/proc/{pid}/status", "r", encoding="utf-8") as f:
-            g_pid_status_cache[pid] = f.read().strip()
-    return get_status_item(g_pid_status_cache[pid], stat).strip()
+            g.pid_status_cache[pid] = f.read().strip()
+    return get_pid_status_item(g.pid_status_cache[pid], stat).strip()
 
 
-def get_child_pids():
-    g_pid_status_cache.clear()
-    pids = (int(x) for x in os.listdir("/proc") if x.isdigit() and x != "1")
-    return (x for x in pids if x == child_pid or pget_status_item(x, "PPid") == "0")
+def get_pid_name(pid):
+    try:
+        return get_pid_status_item(g.pid_status_cache[pid], "Name")
+    except Exception:
+        return str(pid)
 
 
-def check_exit(signame):
-    if not g_exit_signal:
-        logging.info("Exit flag not set, not checking for exit")
-        return
+# def init_get_child_pids():
+#     """Return list of "children" pids.
+#     We consider any process with a 0 parent pid to also be our child as it
+#     nsentered our pid namespace from an external parent.
+#     """
+#     g.pid_status_cache.clear()
+#     pids = (int(x) for x in os.listdir("/proc") if x.isdigit() and x != "1")
+#     return (
+#         x for x in pids if x == g.child_pid or pget_pid_status_item(x, "PPid") == "0"
+#     )
 
-    pids = list(get_child_pids())
-    if not pids:
-        logging.info("Exiting on %s, no children left", signame)
-        sys.exit(0)
 
-    logging.info("Exit flag set but %s pids left (%s)", len(pids), pids)
+def exit_with_status(status):
+    if os.WIFEXITED(status):
+        ec = os.WEXITSTATUS(status)
+    elif os.WIFSIGNALED(status):
+        ec = 0x80 | os.WTERMSIG(status)
+    else:
+        ec = 255
+    logging.debug("exiting with code %s", ec)
+    sys.exit(ec)
 
 
 def waitpid(tag):
@@ -109,43 +128,36 @@ def waitpid(tag):
     idobj = os.waitid(os.P_ALL, 0, os.WEXITED)
     pid = idobj.si_pid
     status = idobj.si_status
-    logging.debug("%s: reaped zombie pid %s with status %s", tag, pid, status)
 
-    # If our child exited then we are just waiting for the rest to go before we do
-    if child_pid == pid:
-        logging.debug("child exited, set mutini exit signal flag")
-        global g_exit_signal
-        g_exit_signal = True
+    if pid != g.child_pid:
+        pidname = get_pid_name(pid)
+        logging.debug(
+            "%s: reaped zombie %s (%s) w/ status %s", tag, pid, pidname, status
+        )
+        return
 
-    check_exit(tag)
+    logging.debug("reaped child with status %s", status)
+    exit_with_status(status)
+    # NOTREACHED
 
 
 def sig_trasmit(signum, _):
-    global g_exit_signal
-
     signame = signal.Signals(signum).name
-    if signum in logquit_signals:
-        logging.debug("got transmit signal %s, set mutini exit signal flag", signame)
-        g_exit_signal = True
+    if g.child_pid == -1:
+        # We've received a signal after setting up to be init proc
+        # but prior to fork or fork returning with child pid
+        logging.debug("received %s prior to child exec, exiting", signame)
+        sys.exit(0x80 | signum)
 
     try:
-        #
-        # Signal all "children" (0 ppid or ours)
-        #
-        for pid in sorted(get_child_pids()):
-            pidname = get_status_item(g_pid_status_cache[pid], "Name")
-            logging.debug("%s child pid %s (%s)", signame, pid, pidname)
-            os.kill(pid, signum)
+        os.kill(g.child_pid, signum)
     except OSError as error:
-        if error.errno == errno.ESRCH:
-            logging.info("No process to send signal to, quiting")
-            ec = 0x80 | signum
-            sys.exit(ec)
-        logging.warning("got exception trying to forward signal: %s", error)
-    except Exception as error:
-        logging.warning("got exception trying to forward signal: %s", error)
-
-    check_exit(signame)
+        if error.errno != errno.ESRCH:
+            logging.error(
+                "error forwarding signal %s to child, exiting: %s", signum, error
+            )
+            sys.exit(0x80 | signum)
+        logging.debug("child pid %s exited prior to signaling", g.child_pid)
 
 
 def sig_sigchld(signum, _):
@@ -155,10 +167,8 @@ def sig_sigchld(signum, _):
     except ChildProcessError as error:
         logging.warning("got SIGCHLD but no pid to wait on: %s", error)
 
-    check_exit("SIGCHLD")
 
-
-def setup_signals():
+def setup_init_signals():
     valid = set(signal.valid_signals())
     named = set(x.value for x in signal.Signals)
     for snum in sorted(named):
@@ -169,21 +179,21 @@ def setup_signals():
 
         sname = signal.Signals(snum).name
         if snum == S.SIGCHLD:
-            restore_signals.add(snum)
             vdebug("installing local handler for %s", sname)
             signal.signal(snum, sig_sigchld)
+            g.restore_signals.add(snum)
         elif snum in ignored_signals:
-            restore_signals.add(snum)
             vdebug("installing ignore handler for %s", sname)
             signal.signal(snum, signal.SIG_IGN)
+            g.restore_signals.add(snum)
         elif snum in abort_signals:
             vdebug("leaving default handler for %s", sname)
             # signal.signal(snum, signal.SIG_DFL)
         else:
-            restore_signals.add(snum)
             vdebug("installing trasmit signal handler for %s", sname)
             try:
                 signal.signal(snum, sig_trasmit)
+                g.restore_signals.add(snum)
             except OSError as error:
                 logging.warning(
                     "failed installing signal handler for %s: %s", sname, error
@@ -191,6 +201,13 @@ def setup_signals():
 
 
 def new_process_group():
+    """Create and lead a new process group.
+
+    This function will create a new process group if we are not yet leading one, and
+    additionally foreground said process group in our session. This foregrounding
+    action is copied from tini, and I believe serves a purpose when serving as init
+    for a container (e.g., podman).
+    """
     pid = os.getpid()
     try:
         pgid = os.getpgrp()
@@ -227,25 +244,6 @@ def new_process_group():
     signal.signal(S.SIGTTOU, signal.SIG_DFL)
 
 
-def exec_child(exec_args):
-    # Restore signals to default handling:
-    for snum in restore_signals:
-        signal.signal(snum, signal.SIG_DFL)
-
-    # Create new process group.
-    new_process_group()
-
-    estring = shlex.join(exec_args)
-    try:
-        # and exec the process
-        logging.debug("child: executing '%s'", estring)
-        os.execvp(exec_args[0], exec_args)
-        # NOTREACHED
-    except Exception as error:
-        logging.warning("child: unable to execute '%s': %s", estring, error)
-        raise
-
-
 def is_creating_pid_namespace():
     p1name = subprocess.check_output(
         "readlink /proc/self/pid", stderr=subprocess.STDOUT, shell=True
@@ -256,42 +254,40 @@ def is_creating_pid_namespace():
     return p1name != p2name
 
 
-def run(new_pg, exec_args):
-    global child_pid  # pylint: disable=global-statement
-
+def be_init(new_pg, exec_args):
     #
     # Arrange for us to be killed when our parent dies, this will subsequently also kill
     # all procs in any PID namespace we are init for.
     #
+    logging.debug("set us to be SIGKILLed when parent exits")
     linux.set_parent_death_signal(signal.SIGKILL)
 
-    # Set (parent) signal handlers before fork to avoid race
-    # for non-exec case we'll log the signal and exit.
-    setup_signals()
-
     # If we are createing a new PID namespace for children...
-    pid = os.getpid()
-    if pid != 1:
-        logging.debug("started as pid %s not pid 1", pid)
-        if not is_creating_pid_namespace():
-            raise Exception("mutini must be (or able to become) pid 1 for a namespace")
+    if g.orig_pid != 1:
+        logging.debug("started as pid %s", g.orig_pid)
+        # assert is_creating_pid_namespace()
 
-        # Let's fork to become pid 1
+        # Fork to become pid 1
         logging.debug("forking to become pid 1")
         child_pid = os.fork()
         if child_pid:
-            logging.debug(
-                "in parent pid %s waiting on child pid %s to exit", pid, child_pid
-            )
+            logging.debug("in parent waiting on child pid %s to exit", child_pid)
             status = os.wait()
-            logging.debug("parent %s got chld exit status %s", os.getpid(), status)
-            ec = status >> 8 if bool(status & 0xFF00) else status | 0x80
-            sys.exit(ec)
+            logging.debug("got child exit status %s", status)
+            exit_with_status(status)
+            # NOTREACHED
 
-        logging.debug("in child as pid %s", os.getpid())
         # We must be pid 1 now.
+        logging.debug("in child as pid %s", os.getpid())
         assert os.getpid() == 1
-        child_pid = None
+
+        # We need a new /proc now.
+        logging.debug("mount new /proc")
+        linux.mount("proc", "/proc", "proc")
+
+        # If the parent exists kill us using SIGKILL
+        logging.debug("set us to be SIGKILLed when parent exits")
+        linux.set_parent_death_signal(signal.SIGKILL)
 
     if not exec_args:
         if not new_pg:
@@ -303,20 +299,66 @@ def run(new_pg, exec_args):
             logging.debug("no exec args, creating new process group")
             # No exec so we are the "child".
             new_process_group()
-    else:
-        logging.debug("forking to run: %s", exec_args)
-        child_pid = os.fork()
-        if child_pid == 0:
-            exec_child(exec_args)
-            # NOTREACHED
+
+        while True:
+            logging.info("parent: waiting to reap zombies")
+            linux.pause()
+        # NOTREACHED
+
+    # Set (parent) signal handlers before any fork to avoid race
+    setup_init_signals()
+
+    logging.debug("forking to execute child")
+    g.child_pid = os.fork()
+    if g.child_pid == 0:
+        # In child, restore signals to default handling:
+        for snum in g.restore_signals:
+            signal.signal(snum, signal.SIG_DFL)
+
+        # XXX is a new pg right?
+        new_process_group()
+        logging.debug("child: executing '%s'", shlex.join(exec_args))
+        os.execvp(exec_args[0], exec_args)
+        # NOTREACHED
 
     while True:
-        if child_pid != -1:
-            logging.info("parent: waiting for child pid %s to exit", child_pid)
-            waitpid("parent")
-        else:
-            logging.info("parent: waiting to reap zombies")
-            time.sleep(100)
+        logging.info("parent: waiting for child pid %s to exit", g.child_pid)
+        waitpid("parent")
+
+
+def unshare(flags):
+    """Unshare into new namespaces."""
+    uflags = 0
+    for flag in flags:
+        if flag not in unshare_flags:
+            raise ValueError(f"unknown unshare flag '{flag}'")
+        uflags |= unshare_flags[flag]
+    new_pid = bool(uflags & linux.CLONE_NEWPID)
+    new_mnt = bool(uflags & linux.CLONE_NEWNS)
+
+    logging.debug("unshareing with flags: %s", linux.clone_flag_string(uflags))
+    linux.unshare(uflags)
+
+    if new_pid and not new_mnt:
+        try:
+            # If we are not creating new mount namspace, remount /proc private
+            # so that our mount of a new /proc doesn't affect parent namespace
+            logging.debug("remount /proc recursive private")
+            linux.mount("none", "/proc", None, linux.MS_REC | linux.MS_PRIVATE)
+        except OSError as error:
+            # EINVAL is OK b/c /proc not mounted may cause an error
+            if error.errno != errno.EINVAL:
+                raise
+    if new_mnt:
+        # Remount root as recursive private.
+        logging.debug("remount / recursive private")
+        linux.mount("none", "/", None, linux.MS_REC | linux.MS_PRIVATE)
+
+    # if new_pid:
+    #     logging.debug("mount new /proc")
+    #     linux.mount("proc", "/proc", "proc")
+
+    return new_pid
 
 
 def main():
@@ -329,10 +371,19 @@ def main():
         "-P",
         "--no-proc-group",
         action="store_true",
-        help="Set to inherit the process group",
+        help="set to inherit the process group",
+    )
+    valid_flags = "".join(unshare_flags)
+    ap.add_argument(
+        "--unshare-flags",
+        help=(
+            f"string of unshare(1) flags. Supported values from '{valid_flags}'."
+            " 'm' will remount `/` recursive private. 'p' will remount /proc"
+            " and fork, and the child will be signaled to exit on exit of parent.."
+        ),
     )
     ap.add_argument(
-        "-v", dest="verbose", action="count", default=0, help="More -v's, more verbose"
+        "-v", dest="verbose", action="count", default=0, help="more -v's, more verbose"
     )
     ap.add_argument("rest", nargs=argparse.REMAINDER)
     args = ap.parse_args()
@@ -343,8 +394,7 @@ def main():
 
     level = logging.DEBUG if args.verbose else logging.INFO
     if args.verbose > 1:
-        global very_verbose  # pylint: disable=global-statement
-        very_verbose = True
+        g.very_verbose = True
     logging.basicConfig(
         level=level, format="%(asctime)s mutini: %(levelname)s: %(message)s"
     )
@@ -353,13 +403,27 @@ def main():
     # Run program
     #
 
-    status = 4
+    status = 5
     try:
-        run(not args.no_proc_group, args.rest)
+        new_pid = False
+        if args.unshare_flags:
+            new_pid = unshare(args.unshare_flags)
+
+        if g.orig_pid != 1 and not new_pid:
+            # Simply hold the namespaces
+            while True:
+                logging.info("holding namespace waiting to be signaled to exit")
+                linux.pause()
+            # NOTREACHED
+
+        be_init(not args.no_proc_group, args.rest)
+        # NOTREACHED
+        logging.critical("Exited from be_init!")
     except KeyboardInterrupt:
         logging.info("exiting (main), received KeyboardInterrupt in main")
+        status = 0x80 | signal.SIGINT
     except Exception as error:
-        logging.info("exiting (main), unexpected exception %s", error, exc_info=True)
+        logging.info("exiting (main), do to exception %s", error, exc_info=True)
 
     sys.exit(status)
 
