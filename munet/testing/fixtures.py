@@ -24,7 +24,6 @@ To use in your project, in your conftest.py add:
 
   from munet.testing.fixtures import *
 """
-import asyncio
 import contextlib
 import logging
 import os
@@ -37,6 +36,7 @@ import pytest_asyncio
 
 from munet.base import BaseMunet
 from munet.base import Bridge
+from munet.base import get_event_loop
 from munet.cleanup import cleanup_current
 from munet.cleanup import cleanup_previous
 from munet.native import L3NodeMixin
@@ -177,37 +177,9 @@ def module_autouse(request):
 @pytest.fixture(scope="module")
 def event_loop():
     """Create an instance of the default event loop for the session."""
-    # see https://github.com/pytest-dev/pytest-asyncio/issues/73
-    # asyncio.set_event_loop(None)
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.get_event_loop()
-    owatcher = policy.get_child_watcher()
-    logging.debug(
-        "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
-        policy,
-        loop,
-        owatcher,
-    )
-
-    logging.debug("event_loop_fixture: remove and close old watcher")
-    policy.set_child_watcher(None)
-    owatcher.close()
-
-    watcher = asyncio.SafeChildWatcher()
-    # # watcher = asyncio.ThreadedChildWatcher()
-    # # watcher = asyncio.PidfdChildWatcher()
-    loop = policy.get_event_loop()
-    logging.debug(
-        "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
-        watcher,
-    )
-    watcher.attach_loop(loop)
-    policy.set_child_watcher(watcher)
-
-    assert asyncio.get_event_loop_policy().get_child_watcher() is watcher
-
+    loop = get_event_loop()
     try:
-        logging.debug("event_loop_fixture: yielding with new event loop and watcher")
+        logging.info("event_loop_fixture: yielding with new event loop watcher")
         yield loop
     finally:
         loop.close()
@@ -222,8 +194,8 @@ def rundir_module():
 
 async def _unet_impl(_rundir, _pytestconfig, unshare=None, param=None):
     try:
-        # Default is to unshare inline if not specified otherwise
-        unshare_default = True
+        # Default is not to unshare inline if not specified otherwise
+        unshare_default = False
         if isinstance(param, (tuple, list)):
             unshare_default = param[1]
             param = param[0]
@@ -253,7 +225,6 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=None, param=None):
         raise
 
     try:
-        logging.debug("unet fixture: run")
         tasks = await _unet.run()
     except Exception as error:
         logging.debug("unet fixture: unet run failed: %s", error, exc_info=True)
@@ -332,6 +303,17 @@ async def function_autouse(request):
         os.path.dirname(os.path.realpath(request.fspath)), "func.fixture"
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+async def check_for_pause(request, pytestconfig):
+    # When we unshare inline we can't pause in the pytest_runtest_makereport hook
+    # so do it here.
+    if BaseMunet.g_unet and BaseMunet.g_unet.unshare_inline:
+        pause = bool(pytestconfig.getoption("--pause"))
+        if pause:
+            await async_pause_test(f"XXX before test '{request.node.name}'")
+    yield
 
 
 @pytest.fixture(scope="function")

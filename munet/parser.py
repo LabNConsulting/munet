@@ -31,10 +31,14 @@ import tempfile
 
 from pathlib import Path
 
-import jsonschema  # pylint: disable=C0415
-import jsonschema.validators  # pylint: disable=C0415
 
-from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
+try:
+    import jsonschema  # pylint: disable=C0415
+    import jsonschema.validators  # pylint: disable=C0415
+
+    from jsonschema.exceptions import ValidationError  # pylint: disable=C0415
+except ImportError:
+    jsonschema = None
 
 from .config import list_to_dict_with_key
 from .native import Munet
@@ -209,6 +213,10 @@ def append_hosts_files(unet, netname):
 
 
 def validate_config(config, logger, args):
+    if jsonschema is None:
+        logger.debug("No validation w/o jsonschema module")
+        return True
+
     old = os.getcwd()
     if args:
         os.chdir(args.rundir)
@@ -255,8 +263,10 @@ def load_kinds(args, search=None):
 
         kinds = {}
         for config in configs:
-            validator = jsonschema.validators.Draft202012Validator(get_schema())
-            validator.validate(instance=config)
+            # XXX need to fix the issue with `connections: ["net0"]` not validating
+            # if jsonschema is not None:
+            #     validator = jsonschema.validators.Draft202012Validator(get_schema())
+            #     validator.validate(instance=config)
 
             kinds_list = config.get("kinds", [])
             kinds_dict = list_to_dict_with_key(kinds_list, "name")
