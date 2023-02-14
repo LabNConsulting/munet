@@ -46,6 +46,12 @@ def _load_libc():
     libc = ctypes.CDLL(lcpath, use_errno=True)
 
 
+def pause():
+    if not libc:
+        _load_libc()
+    libc.pause()
+
+
 MS_RDONLY = 1
 MS_NOSUID = 1 << 1
 MS_NODEV = 1 << 2
@@ -73,7 +79,7 @@ MS_STRICTATIME = 1 << 24
 MS_LAZYTIME = 1 << 25
 
 
-def mount(source, target, fs, options):
+def mount(source, target, fs, flags=0, options=""):
     if not libc:
         _load_libc()
     libc.mount.argtypes = (
@@ -83,8 +89,9 @@ def mount(source, target, fs, options):
         ctypes.c_ulong,
         ctypes.c_char_p,
     )
-
-    ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
+    fsenc = fs.encode() if fs else None
+    optenc = options.encode() if options else None
+    ret = libc.mount(source.encode(), target.encode(), fsenc, flags, optenc)
     if ret < 0:
         err = ctypes.get_errno()
         raise OSError(
