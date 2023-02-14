@@ -24,7 +24,6 @@ To use in your project, in your conftest.py add:
 
   from munet.testing.fixtures import *
 """
-import asyncio
 import contextlib
 import logging
 import os
