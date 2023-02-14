@@ -1571,7 +1571,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         self.cwd = os.path.abspath(os.getcwd())
 
-        cmd = ["/usr/bin/unshare"]
         self.nsflags = []
         self.ifnetns = {}
         self.uflags = 0
@@ -1631,13 +1630,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
             nselm = "pid_for_children"
             nslist.append(nselm)
             nsflags.append(f"--pid={pp / nselm}")
-            # mutini now forks when created this way
-            cmd.append("--pid")
-            cmd.append("--fork")
-            # Unsupported by centos 7 :(
-            # versions >= 2.34[.x]
-            # cmd.append("--kill-child=SIGHUP")
-            cmd.append("--mount-proc")
+            flags += "p"
             uflags |= linux.CLONE_NEWPID
         if time:
             nselm = "time"
@@ -1651,7 +1644,6 @@ class LinuxNamespace(Commander, InterfaceMixin):
             nslist.append(nselm)
             nsflags.append(f"--{nselm}={pp / nselm}")
             flags += "U"
-            cmd.append("--keep-caps")
             uflags |= linux.CLONE_NEWUSER
         if uts:
             nselm = "uts"
@@ -1660,22 +1652,15 @@ class LinuxNamespace(Commander, InterfaceMixin):
             flags += "u"
             uflags |= linux.CLONE_NEWUTS
 
-        if flags:
-            cmd.extend(["-" + x for x in flags])
-            # cmd.append(f"-{flags}")
+        assert flags, "LinuxNamespace with no namespaces requested"
 
-        if pid:
-            # Should look this up using resources I guess
-            cmd.append(get_exec_path_host("mutini"))
-            cmd.append("-v")
-            fname = fsafe_name(self.name) + "-mutini.log"
-            fname = (unet or self).rundir.joinpath(fname)
-            stdout = open(fname, "w", encoding="utf-8")
-            stderr = subprocess.STDOUT
-        else:
-            cmd.append("/bin/cat")
-            stdout = subprocess.PIPE
-            stderr = subprocess.PIPE
+        # Should look path up using resources maybe...
+        mutini_path = get_our_script_path("mutini")
+        cmd = [mutini_path, f"--unshare-flags={flags}", "-v"]
+        fname = fsafe_name(self.name) + "-mutini.log"
+        fname = (unet or self).rundir.joinpath(fname)
+        stdout = open(fname, "w", encoding="utf-8")
+        stderr = subprocess.STDOUT
 
         #
         # Save the current namespace info to compare against later
@@ -1934,7 +1919,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 # restricted by the kernel. See EINVAL in clone(2).
                 #
                 p = commander.popen(
-                    [get_exec_path_host("mutini"), "-v"],
+                    [mutini_path, "-v"],
                     stdin=subprocess.PIPE,
                     stdout=stdout,
                     stderr=stderr,
@@ -2001,7 +1986,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         self.pids = [int(x) for x in m.group(1).strip().split("\t")]
         assert self.pids[0] == self.pid
 
-        self.logger.debug("%s: our scoped pids: %s", self, self.pids)
+        self.logger.debug("%s: namespace scoped pids: %s", self, self.pids)
 
         # -----------------------------------------------
         # Now let's wait until unshare completes it's job
@@ -2489,7 +2474,7 @@ class BaseMunet(LinuxNamespace):
         # complexity with nested new pid namespaces..
         self.proc_path = Path(tempfile.mkdtemp(suffix="-proc", prefix="mu-"))
         logging.debug("%s: mounting /proc on proc_path %s", name, self.proc_path)
-        linux.mount("proc", str(self.proc_path), "proc", "")
+        linux.mount("proc", str(self.proc_path), "proc")
 
         #
         # Now create a root level commander that works regardless of whether we inline
@@ -2994,6 +2979,11 @@ def get_exec_path(binary):
 
 def get_exec_path_host(binary):
     return commander.get_exec_path(binary)
+
+
+def get_our_script_path(script):
+    # would be nice to find this w/o using a path lookup
+    return get_exec_path(script)
 
 
 commander = Commander("munet")
