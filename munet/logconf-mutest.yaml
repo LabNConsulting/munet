@@ -2,6 +2,9 @@ version: 1
 formatters:
   brief:
     format: '%(levelname)5s: %(message)s'
+  operfmt:
+    class: munet.logging.ColorFormatter
+    format: ' ------| %(message)s'
   exec:
     format: '%(asctime)s %(levelname)5s: %(name)s: %(message)s'
   output:
@@ -20,6 +23,11 @@ handlers:
     level: INFO
     class: logging.StreamHandler
     formatter: brief
+    stream: ext://sys.stderr
+  oper_console:
+    level: DEBUG
+    class: logging.StreamHandler
+    formatter: operfmt
     stream: ext://sys.stderr
   exec:
     level: DEBUG
@@ -67,4 +75,10 @@ loggers:
     handlers: [ "info_console", "exec", "output", "results" ]
     # We don't propagate this b/c we want a lower level accept on the console
     # Instead we use info_console and exec to cover what root would log to.
+    propagate: false
+  # This is used to debug the operation of mutest
+  mutest.oper:
+    # Records are emitted at DEBUG so this will normally filter everything
+    level: INFO
+    handlers: [ "oper_console" ]
     propagate: false

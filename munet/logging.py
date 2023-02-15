@@ -107,3 +107,29 @@ class MultiFileHandler(logging.FileHandler):
                 logging.getLogger(record.name).addHandler(h)
                 h.emit(record)
         super().emit(record)
+
+
+class ColorFormatter(logging.Formatter):
+    """A formatter that adds color sequences based on level."""
+
+    def __init__(self, fmt=None, datefmt=None, style="%", **kwargs):
+        grey = "\x1b[90m"
+        yellow = "\x1b[33m"
+        red = "\x1b[31m"
+        bold_red = "\x1b[31;1m"
+        reset = "\x1b[0m"
+        # basefmt = " ------| %(message)s "
+
+        self.formatters = {
+            logging.DEBUG: logging.Formatter(grey + fmt + reset),
+            logging.INFO: logging.Formatter(grey + fmt + reset),
+            logging.WARNING: logging.Formatter(yellow + fmt + reset),
+            logging.ERROR: logging.Formatter(red + fmt + reset),
+            logging.CRITICAL: logging.Formatter(bold_red + fmt + reset),
+        }
+        # Why are we even bothering?
+        super().__init__(fmt, datefmt, style, **kwargs)
+
+    def format(self, record):
+        formatter = self.formatters.get(record.levelno)
+        return formatter.format(record)

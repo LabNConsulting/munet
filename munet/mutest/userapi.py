@@ -76,6 +76,7 @@ All of the functions are documented and defined below.
 import functools
 import json
 import logging
+import pprint
 import re
 import time
 
@@ -93,9 +94,6 @@ class TestCaseInfo:
 
     def __init__(self, tag: str, name: str, path: Path):
         self.path = path.absolute()
-        self.script_dir = self.path.parent
-        assert self.script_dir.is_dir()
-
         self.tag = tag
         self.name = name
         self.steps = 0
@@ -104,6 +102,12 @@ class TestCaseInfo:
         self.start_time = time.time()
         self.step_start_time = self.start_time
         self.run_time = None
+
+    def __repr__(self):
+        return (
+            f"TestCaseInfo({self.tag} {self.name} steps {self.steps} "
+            f"p {self.passed} f {self.failed} path {self.path})"
+        )
 
 
 class TestCase:
@@ -175,6 +179,10 @@ class TestCase:
         self.olog = output_logger
         self.logf = functools.partial(self.olog.log, logging.INFO)
 
+        oplog = logging.getLogger("mutest.oper")
+        self.oplogf = oplog.debug
+        self.oplogf("new TestCase: tag: %s name: %s path: %s", tag, name, path)
+
         # find the longerst target name and make target field that wide
         nmax = max(len(x) for x in targets)
         nmax = max(nmax, len("TARGET"))
@@ -210,6 +218,7 @@ class TestCase:
         :meta private:
         """
         assert TestCase.g_tc is None
+        self.oplogf("execute")
         try:
             TestCase.g_tc = self
             e = self.__exec_script(self.info.path, True, False)
@@ -224,19 +233,27 @@ class TestCase:
             TestCase.g_tc = None
 
     def __push_execinfo(self, path: Path):
+        self.oplogf(
+            "__push_execinfo: path: %s current top is %s",
+            path,
+            pprint.pformat(self.info),
+        )
         newname = self.name + path.stem
         self.info.steps += 1
         self.__saved_info.append(self.info)
         tag = f"{self.info.tag}.{self.info.steps}"
         self.info = TestCaseInfo(tag, newname, path)
+        self.oplogf("__push_execinfo: now on top: %s", pprint.pformat(self.info))
 
     def __pop_execinfo(self):
         # do something with tag?
-        finised_info = self.info
+        finished_info = self.info
         self.info = self.__saved_info.pop()
-        return finised_info
+        self.oplogf("  __pop_execinfo: poppped: %s", pprint.pformat(finished_info))
+        self.oplogf("  __pop_execinfo: now on top: %s", pprint.pformat(self.info))
+        return finished_info
 
-    def __print_header(self, tag, header, add_newline=True):
+    def __print_header(self, tag, header, add_newline=False):
         # self.olog.info(self.sum_fmt, tag, "", "", "", header)
         self.olog.info("== %s ==", f"TEST: {tag}. {header}")
         if add_newline:
@@ -266,6 +283,7 @@ class TestCase:
 
         _ok_result = "marker"
         try:
+            self.oplogf("__exec_script: path %s", path)
             script = open(path, "r", encoding="utf-8").read()
 
             # Load the script into a function.
@@ -304,9 +322,14 @@ class TestCase:
         else:
             if result is not _ok_result:
                 logging.info("%s returned early, result: %s", name, result)
+            else:
+                self.oplogf("__exec_script: name %s completed normally", name)
         return None
 
     def __post_result(self, target, success, rstr, logstr=None):
+        self.oplogf(
+            "__post_result: target: %s success %s rstr %s", target, success, rstr
+        )
         if success:
             self.info.passed += 1
             status = "PASS"
@@ -342,6 +365,7 @@ class TestCase:
         Returns:
             number of steps, number passed, number failed, run time.
         """
+        self.oplogf("__end_test: __in_section: %s", self.__in_section)
         if self.__in_section:
             self.__end_section()
 
@@ -512,45 +536,93 @@ class TestCase:
         :meta private:
         """
         path = Path(pathname)
-        path = self.info.script_dir.joinpath(path)
+        path = self.info.path.parent.joinpath(path)
+
+        self.oplogf(
+            "include: new path: %s create section: %s currently __in_section: %s",
+            path,
+            new_section,
+            self.__in_section,
+        )
 
         if new_section:
+            self.oplogf("include: starting new exec section")
+            self.__start_exec_section(path)
+            our_info = self.info
+            # Note we do *not* mark __in_section True
+        else:
+            # swap the current path inside the top info
+            old_path = self.info.path
+            self.info.path = path
+            self.oplogf("include: swapped info path: new %s old %s", path, old_path)
+
+        self.__exec_script(path, print_header=new_section, add_newline=new_section)
+
+        if new_section:
+            # Something within the section creating include has also created a section
+            # end it, sections do not cross section creating file boundaries
             if self.__in_section:
+                self.oplogf(
+                    "include done: path: %s __in_section calling __end_section", path
+                )
                 self.__end_section()
-            self.__push_execinfo(path)
 
-        self.__exec_script(path, new_section, True)
+            # We should now be back to the info we started with, b/c we don't actually
+            # start a new section (__in_section) that then could have been ended inside
+            # the included file.
+            assert our_info == self.info
 
-        if new_section:
-            info = self.__pop_execinfo()
-            passed, failed = info.passed, info.failed
-            self.info.passed += passed
-            self.info.failed += failed
-
-            # This is to add a space after an include completes
-            self.__space_before_result = True
+            self.oplogf(
+                "include done: path: %s new_section calling __end_section", path
+            )
+            self.__end_section()
+        else:
+            # The current top path could be anything due to multiple inline includes as
+            # well as section swap in and out. Forcibly return the top path to the file
+            # we are returning to
+            self.info.path = old_path
+            self.oplogf("include: restored info path: %s", old_path)
 
     def __end_section(self):
+        self.oplogf("__end_section: __in_section: %s", self.__in_section)
         info = self.__pop_execinfo()
         passed, failed = info.passed, info.failed
         self.info.passed += passed
         self.info.failed += failed
         self.__space_before_result = True
+        self.oplogf("__end_section setting __in_section to False")
         self.__in_section = False
+
+    def __start_exec_section(self, path):
+        self.oplogf("__start_exec_section: __in_section: %s", self.__in_section)
+        if self.__in_section:
+            self.__end_section()
+
+        self.__push_execinfo(path)
+        self.__space_before_result = False
+        self.oplogf("NOT setting __in_section to True")
+        assert not self.__in_section
 
     def section(self, desc: str):
         """See :py:func:`~munet.mutest.userapi.section`.
 
         :meta private:
         """
+        self.oplogf("section: __in_section: %s", self.__in_section)
+        # Grab path before we pop the current info off the top
+        path = self.info.path
+        old_steps = self.info.steps
+
         if self.__in_section:
             self.__end_section()
 
-        add_nl = True if self.info.steps > 0 else False
-        self.__push_execinfo(self.info.path)
-        self.__print_header(self.info.tag, desc, add_nl)
+        self.__push_execinfo(path)
+        add_nl = self.info.steps <= old_steps
+
         self.__space_before_result = False
         self.__in_section = True
+        self.oplogf("   section setting __in_section to True")
+        self.__print_header(self.info.tag, desc, add_nl)
 
     def step(self, target: str, cmd: str) -> str:
         """See :py:func:`~munet.mutest.userapi.step`.
@@ -784,10 +856,10 @@ def script_dir() -> Path:
     When an include() is called the script_dir is updated to be current with the
     includeded file, and is reverted to the previous value when the include completes.
     """
-    return TestCase.g_tc.info.script_dir
+    return TestCase.g_tc.info.path.parent
 
 
-def target(name: str) -> Commander:
+def get_target(name: str) -> Commander:
     """Get the target object with the given ``name``."""
     return TestCase.g_tc.targets[name]
 
