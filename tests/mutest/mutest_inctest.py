@@ -33,13 +33,13 @@ section("A section testing printf commands")
 match_step("host1", 'printf "%s\n" "Hello"', "Hello", "Test printf with Hello arg")
 match_step("host1", 'printf "%s\n" "World"', "World", "Test printf with World arg")
 
-include("inc_subtest.py", new_section=True)
-include("inc_withsection.py", new_section=True)
+include("include/inc_subtest.py", True)
+include("include/inc_withsection.py", True)
 
 test_step(True, "Test after an 2 non-inline includes")
 test_step(True, "A second test case with a target", "zoot")
 
 section("A section with an inline include")
-include("inc_subtest.py")
+include("include/inc_subtest.py")
 
 test_step(True, "A test after an inline include")

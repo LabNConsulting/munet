@@ -1,11 +1,11 @@
 """Test basic container functionality."""
-from munet.mutest.userapi import match_step, section, step, target, test_step
+from munet.mutest.userapi import match_step, section, step, get_target, test_step
 
 # from munet.base import BaseMunet
 # from munet.cli import async_cli
 # await async_cli(BaseMunet.g_unet)
 
-test_step(target("r2").cmd_p is not None, "Verify container is up and running")
+test_step(get_target("r2").cmd_p is not None, "Verify container is up and running")
 
 section("Test network connectivity")
 
