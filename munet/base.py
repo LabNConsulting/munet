@@ -403,36 +403,42 @@ class Commander:  # pylint: disable=R0904
         """Check if path exists."""
         return self.test("-e", path)
 
-    async def cleanup_pid(self, pid):
+    async def cleanup_pid(self, pid, kill_pid=None):
         """Signal a pid to exit with escalating forcefulness."""
-        for sn in (signal.SIGHUP, signal.SIGKILL):
+        if kill_pid is None:
+            kill_pid = pid
+
+        for sn in (signal.SIGTERM, signal.SIGKILL):
             self.logger.debug(
-                "%s: %s pid %s to exit", self, signal.Signals(sn).name, pid
+                "%s: %s %s (wait %s)", self, signal.Signals(sn).name, kill_pid, pid
             )
 
-            os.kill(pid, sn)
+            os.kill(kill_pid, sn)
 
             # No need to wait after this.
             if sn == signal.SIGKILL:
                 return
 
-            # try each signal, waiting 2.5 seconds for exit before advancing
-            self.logger.debug("%s: waiting 2.5s for pid to exit", self)
-            for _ in range(0, 25):
+            # try each signal, waiting 15 seconds for exit before advancing
+            wait_sec = 20
+            self.logger.debug("%s: waiting %ss for pid to exit", self, wait_sec)
+            for _ in Timeout(wait_sec):
                 try:
                     status = os.waitpid(pid, os.WNOHANG)
                     if status == (0, 0):
                         await asyncio.sleep(0.1)
                     else:
+                        self.logger.info("pid %s exited status %s", pid, status)
                         return
                 except OSError as error:
                     if error.errno == errno.ECHILD:
                         self.logger.debug("%s: pid %s was reaped", self, pid)
                     else:
                         self.logger.warning(
-                            "%s: error trying to signal %s: %s", self, pid, error
+                            "%s: error waiting on pid %s: %s", self, pid, error
                         )
                     return
+            self.logger.debug("%s: timeout waiting on pid %s to exit", self, pid)
 
     def _get_sub_args(self, cmd_list, defaults, use_pty=False, ns_only=False, **kwargs):
         """Returns pre-command, cmd, and default keyword args."""
@@ -814,11 +820,13 @@ class Commander:  # pylint: disable=R0904
         )
         return p
 
-    async def async_cleanup_proc(self, p):
+    async def async_cleanup_proc(self, p, pid=None):
         """Terminate a process started with a popen call.
 
         Args:
             p: return value from :py:`async_popen`, :py:`popen`, et al.
+            pid: pid to signal instead of p.pid, typically a child of
+                cmd_p == nsenter.
 
         Returns:
             None on success, the ``p`` if multiple timeouts occur even
@@ -829,19 +837,32 @@ class Commander:  # pylint: disable=R0904
 
         if p.returncode is not None:
             if isinstance(p, subprocess.Popen):
-                _, _ = p.communicate()
+                o, e = p.communicate()
             else:
-                _, _ = await p.communicate()
+                o, e = await p.communicate()
+            self.logger.debug(
+                "%s: cmd_p already exited status: %s", self, proc_error(p, o, e)
+            )
             return None
 
-        self.logger.debug("%s: terminate process: %s", self, proc_str(p))
+        if pid is None:
+            pid = p.pid
+
+        self.logger.debug("%s: terminate process: %s (pid %s)", self, proc_str(p), pid)
         try:
-            # this used to be os.kill(-p.pid)
-            await self.cleanup_pid(p.pid)
+            # This will SIGHUP and wait a while then SIGKILL and return immediately
+            await self.cleanup_pid(p.pid, pid)
+
+            # Wait another 2 seconds after the possible SIGKILL above for the
+            # parent nsenter to cleanup and exit
+            wait_secs = 2
             if isinstance(p, subprocess.Popen):
-                _, _ = p.communicate(timeout=1)
+                o, e = p.communicate(timeout=wait_secs)
             else:
-                _, _ = await asyncio.wait_for(p.communicate(), timeout=1)
+                o, e = await asyncio.wait_for(p.communicate(), timeout=wait_secs)
+            self.logger.debug(
+                "%s: cmd_p exited after kill, status: %s", self, proc_error(p, o, e)
+            )
         except (asyncio.TimeoutError, subprocess.TimeoutExpired):
             self.logger.warning("%s: SIGKILL timeout", self)
             return p
@@ -2260,9 +2281,15 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # Signal pid namespace proc to exit
         if (self.p is None or self.p.pid != self.pid) and self.pid:
+            self.logger.debug(
+                "cleanup pid on separate pid %s from proc pid %s",
+                self.pid,
+                self.p.pid if self.p else None,
+            )
             await self.cleanup_pid(self.pid)
 
         if self.p is not None:
+            self.logger.debug("cleanup proc pid %s", self.p.pid)
             await self.async_cleanup_proc(self.p)
 
         # return to the previous namespace, need to do this in case anothe munet

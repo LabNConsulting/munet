@@ -64,6 +64,9 @@ async def run_and_wait(args, unet):
     try:
         await task
     finally:
+        # Basically we are canceling tasks from unet.run() which are just async calls to
+        # node.cmd_p.wait() so we've stopped waiting for them to complete, but not
+        # actually canceld/killed the cmd_p process.
         for task in tasks:
             task.cancel()
 

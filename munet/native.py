@@ -326,6 +326,31 @@ class NodeMixin:
     def has_run_cmd(self) -> bool:
         return bool(self.config.get("cmd", "").strip())
 
+    async def get_proc_child_pid(self, p):
+        # commander is right for both unshare inline (our proc pidns)
+        # and non-inline (root pidns).
+        pgrep = commander.get_exec_path("pgrep")
+        spid = str(p.pid)
+        for _ in Timeout(4):
+            if p.returncode is not None:
+                self.logger.warning(
+                    "%s: exit before getting child of proc: %s", self, p
+                )
+                return None
+
+            rc, o, e = await commander.async_cmd_status(
+                [pgrep, "-o", "-P", spid], warn=False
+            )
+            if rc == 0:
+                return int(o.strip())
+
+            await asyncio.sleep(0.1)
+            self.logger.debug(
+                "%s: no child of proc %s: %s", self, p, cmd_error(rc, o, e)
+            )
+        self.logger.warning("%s: timeout getting child pid of proc %s", self, p)
+        return None
+
     async def run_cmd(self):
         """Run the configured commands for this node."""
         self.logger.debug(
@@ -338,6 +363,7 @@ class NodeMixin:
 
         stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
         stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
+        self.cmd_pid = None
         self.cmd_p = await self.async_popen(
             cmds,
             stdin=subprocess.DEVNULL,
@@ -346,11 +372,16 @@ class NodeMixin:
             start_new_session=True,  # allows us to signal all children to exit
         )
 
+        # If our process is actually the child of an nsenter fetch its pid.
+        if self.nsenter_fork:
+            self.cmd_pid = await self.get_proc_child_pid(self.cmd_p)
+
         self.logger.debug(
-            "%s: async_popen %s => %s",
+            "%s: async_popen %s => %s (cmd_pid %s)",
             self,
             cmds,
             self.cmd_p.pid,
+            self.cmd_pid,
         )
 
         self.pytest_hook_run_cmd(stdout, stderr)
@@ -381,13 +412,17 @@ class NodeMixin:
         return not await self._async_shebang_cmd("ready-cmd", warn=False)
 
     def cmd_completed(self, future):
-        self.logger.debug("%s: cmd completed called", self)
+        self.logger.debug("%s: cmd completed callback", self)
         try:
-            n = future.result()
-            self.logger.debug("%s: node cmd completed result: %s", self, n)
+            status = future.result()
+            self.logger.debug(
+                "%s: node cmd_p completed result: %s cmd: %s", self, status, self.cmd_p
+            )
+            self.cmd_pid = None
+            self.cmd_p = None
         except asyncio.CancelledError:
             # Should we stop the container if we have one?
-            self.logger.debug("%s: node cmd wait() canceled", future)
+            self.logger.debug("%s: node cmd_p.wait() canceled", future)
 
     def pytest_hook_run_cmd(self, stdout, stderr):
         """Handle pytest options related to running the node cmd.
@@ -505,7 +540,7 @@ class NodeMixin:
         self.logger.debug("%s: NodeMixin sub-class _async_delete", self)
 
         if self.cmd_p:
-            await self.async_cleanup_proc(self.cmd_p)
+            await self.async_cleanup_proc(self.cmd_p, self.cmd_pid)
             self.cmd_p = None
 
         # Next call users "cleanup_cmd:"
@@ -1479,7 +1514,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                 self.logger.debug("podman stop on container: %s", contid)
                 if (rc := self.cmd_p.returncode) is None:
                     rc, o, e = await self.async_cmd_status_nsonly(
-                        [get_exec_path_host("podman"), "stop", contid]
+                        [get_exec_path_host("podman"), "stop", "--time=2", contid]
                     )
                 if rc and rc < 128:
                     self.logger.warning(
@@ -2529,6 +2564,12 @@ ff02::2\tip6-allrouters
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
+        # we really need overlay, but overlay-layers (used by overlay-images)
+        # counts on things being present in overlay so this temp stuff doesn't work.
+        # if self.isolated:
+        #     # Let's hide podman details
+        #     self.tmpfs_mount("/var/lib/containers/storage/overlay-containers")
+
     def __del__(self):
         """Catch case of build object but not async_deleted."""
         if hasattr(self, "built"):
@@ -2784,6 +2825,12 @@ ff02::2\tip6-allrouters
             logging.debug("Running `cmd` on nodes")
             await asyncio.gather(*[x.run_cmd() for x in run_nodes])
 
+        # Watch for run_cmd processes to exit
+        for node in run_nodes:
+            task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
+            task.add_done_callback(node.cmd_completed)
+            tasks.append(task)
+
         # Wait for nodes to be ready
         if ready_nodes:
 
@@ -2803,12 +2850,6 @@ ff02::2\tip6-allrouters
                     nr.cancel()
                 raise asyncio.TimeoutError()
             logging.debug("All nodes ready")
-
-        # Watch for run_cmd processes to exit
-        for node in run_nodes:
-            task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
-            task.add_done_callback(node.cmd_completed)
-            tasks.append(task)
 
         return tasks
 
