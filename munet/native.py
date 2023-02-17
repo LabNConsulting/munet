@@ -333,9 +333,7 @@ class NodeMixin:
         spid = str(p.pid)
         for _ in Timeout(4):
             if p.returncode is not None:
-                self.logger.warning(
-                    "%s: exit before getting child of proc: %s", self, p
-                )
+                self.logger.debug("%s: proc %s exited before getting child", self, p)
                 return None
 
             rc, o, e = await commander.async_cmd_status(

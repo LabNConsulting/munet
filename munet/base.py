@@ -408,7 +408,7 @@ class Commander:  # pylint: disable=R0904
         if kill_pid is None:
             kill_pid = pid
 
-        for sn in (signal.SIGTERM, signal.SIGKILL):
+        for sn in (signal.SIGHUP, signal.SIGKILL):
             self.logger.debug(
                 "%s: %s %s (wait %s)", self, signal.Signals(sn).name, kill_pid, pid
             )
@@ -420,7 +420,7 @@ class Commander:  # pylint: disable=R0904
                 return
 
             # try each signal, waiting 15 seconds for exit before advancing
-            wait_sec = 20
+            wait_sec = 30
             self.logger.debug("%s: waiting %ss for pid to exit", self, wait_sec)
             for _ in Timeout(wait_sec):
                 try:
@@ -428,7 +428,7 @@ class Commander:  # pylint: disable=R0904
                     if status == (0, 0):
                         await asyncio.sleep(0.1)
                     else:
-                        self.logger.info("pid %s exited status %s", pid, status)
+                        self.logger.debug("pid %s exited status %s", pid, status)
                         return
                 except OSError as error:
                     if error.errno == errno.ECHILD:
