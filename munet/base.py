@@ -56,6 +56,7 @@ PEXPECT_PROMPT = "PEXPECT_PROMPT>"
 PEXPECT_CONTINUATION_PROMPT = "PEXPECT_PROMPT+"
 
 root_hostname = subprocess.check_output("hostname")
+our_pid = os.getpid()
 
 
 class MunetError(Exception):
@@ -1159,7 +1160,7 @@ class Commander:  # pylint: disable=R0904
         if isinstance(wait_for, str):
             channel = wait_for
         elif wait_for is True:
-            channel = "{}-wait-{}".format(os.getpid(), Commander.tmux_wait_gen)
+            channel = "{}-wait-{}".format(our_pid, Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
 
         if forcex or ("TMUX" not in os.environ and "STY" not in os.environ):
@@ -1993,6 +1994,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         self.p = p
 
+        # Let's always have a valid value.
+        if self.pid is None:
+            self.pid = our_pid
+
         #
         # Let's find all our pids in the nested PID namespaces
         #
@@ -2000,9 +2005,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
             proc_path = unet.proc_path
         else:
             proc_path = self.proc_path if hasattr(self, "proc_path") else "/proc"
-        pid_status = open(
-            f"{proc_path}/{self.pid}/status", "r", encoding="ascii"
-        ).read()
+        proc_path = f"{proc_path}/{self.pid}"
+
+        pid_status = open(f"{proc_path}/status", "r", encoding="ascii").read()
         m = re.search(r"\nNSpid:((?:\t[0-9]+)+)\n", pid_status)
         self.pids = [int(x) for x in m.group(1).strip().split("\t")]
         assert self.pids[0] == self.pid
@@ -2013,13 +2018,13 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # Now let's wait until unshare completes it's job
         # -----------------------------------------------
         timeout = Timeout(30)
-        if self.pid is not None:
+        if self.pid is not None and self.pid != our_pid:
             while (not p or not p.poll()) and not timeout.is_expired():
                 # check new namespace values against old (nsdict), unshare
                 # can actually take a bit to complete.
                 for fname in tuple(nslist):
                     # self.pid will be the global pid b/c we didn't unshare_inline
-                    nspath = f"{proc_path}/{self.pid}/ns/{fname}"
+                    nspath = f"{proc_path}/ns/{fname}"
                     try:
                         nsf = os.readlink(nspath)
                     except OSError as error:
@@ -2280,7 +2285,11 @@ class LinuxNamespace(Commander, InterfaceMixin):
             self.logger.debug("%s: LinuxNamespace sub-class deleting", self)
 
         # Signal pid namespace proc to exit
-        if (self.p is None or self.p.pid != self.pid) and self.pid:
+        if (
+            (self.p is None or self.p.pid != self.pid)
+            and self.pid
+            and self.pid != our_pid
+        ):
             self.logger.debug(
                 "cleanup pid on separate pid %s from proc pid %s",
                 self.pid,
@@ -2376,7 +2385,7 @@ class SharedNamespace(Commander):
         self.logger.debug("%s: Creating", self)
 
         self.cwd = os.path.abspath(os.getcwd())
-        self.pid = pid if pid is not None else os.getpid()
+        self.pid = pid if pid is not None else our_pid
 
         nsflags = (x.replace("%P%", str(self.pid)) for x in nsflags) if nsflags else []
         self.__base_pre_cmd = ["/usr/bin/nsenter", *nsflags] if nsflags else []
@@ -2419,7 +2428,9 @@ class Bridge(SharedNamespace, InterfaceMixin):
         if not name:
             name = "br{}".format(self.id)
 
-        super().__init__(name, pid=unet.pid, nsflags=unet.nsflags, unet=unet, **kwargs)
+        unet_pid = our_pid if unet.pid is None else unet.pid
+
+        super().__init__(name, pid=unet_pid, nsflags=unet.nsflags, unet=unet, **kwargs)
 
         self.set_intf_basename(self.name + "-e")
 
@@ -2499,9 +2510,13 @@ class BaseMunet(LinuxNamespace):
         #
         # Always having a global /proc is required to keep things from exploding
         # complexity with nested new pid namespaces..
-        self.proc_path = Path(tempfile.mkdtemp(suffix="-proc", prefix="mu-"))
-        logging.debug("%s: mounting /proc on proc_path %s", name, self.proc_path)
-        linux.mount("proc", str(self.proc_path), "proc")
+        #
+        if pid:
+            self.proc_path = Path(tempfile.mkdtemp(suffix="-proc", prefix="mu-"))
+            logging.debug("%s: mounting /proc on proc_path %s", name, self.proc_path)
+            linux.mount("proc", str(self.proc_path), "proc")
+        else:
+            self.proc_path = Path("/proc")
 
         #
         # Now create a root level commander that works regardless of whether we inline
@@ -2532,13 +2547,13 @@ class BaseMunet(LinuxNamespace):
 
         # This allows us to cleanup any leftover running munet's
         if "MUNET_PID" in os.environ:
-            if os.environ["MUNET_PID"] != str(os.getpid()):
+            if os.environ["MUNET_PID"] != str(our_pid):
                 logging.error(
                     "Found env MUNET_PID != our pid %s, instead its %s, changing",
-                    os.getpid(),
+                    our_pid,
                     os.environ["MUNET_PID"],
                 )
-        os.environ["MUNET_PID"] = str(os.getpid())
+        os.environ["MUNET_PID"] = str(our_pid)
 
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:
@@ -2794,7 +2809,7 @@ class BaseMunet(LinuxNamespace):
         os.chdir(cwd)
 
         try:
-            if self.proc_path:
+            if self.proc_path and str(self.proc_path) != "/proc":
                 logger.debug("%s: umount, remove proc_path %s", self, self.proc_path)
                 linux.umount(str(self.proc_path), 0)
                 os.rmdir(self.proc_path)

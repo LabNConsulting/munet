@@ -192,24 +192,31 @@ def rundir_module():
     return d
 
 
-async def _unet_impl(_rundir, _pytestconfig, unshare=None, param=None):
+async def _unet_impl(
+    _rundir, _pytestconfig, unshare=None, top_level_pidns=None, param=None
+):
     try:
         # Default is not to unshare inline if not specified otherwise
         unshare_default = False
+        pidns_default = True
         if isinstance(param, (tuple, list)):
-            unshare_default = param[1]
-            param = param[0]
+            pidns_default = bool(param[2]) if len(param) > 2 else True
+            unshare_default = bool(param[1]) if len(param) > 1 else False
+            param = str(param[0])
         elif isinstance(param, bool):
             unshare_default = param
             param = None
         if unshare is None:
             unshare = unshare_default
+        if top_level_pidns is None:
+            top_level_pidns = pidns_default
 
         logging.info("unet fixture: basename=%s unshare_inline=%s", param, unshare)
         _unet = await async_build_topology(
             config=get_config(basename=param) if param else None,
             rundir=_rundir,
             unshare_inline=unshare,
+            top_level_pidns=top_level_pidns,
             pytestconfig=_pytestconfig,
         )
     except Exception as error:
@@ -256,6 +263,12 @@ async def _unet_impl(_rundir, _pytestconfig, unshare=None, param=None):
 
 @pytest.fixture(scope="module")
 async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
+    """A unet creating fixutre.
+
+    The request param is either the basename of the config file or a tuple of the form:
+    (basename, unshare, top_level_pidns), with the second and third elements boolean and
+    optional, defaulting to False, True.
+    """
     param = request.param if hasattr(request, "param") else None
     sdir = os.path.dirname(os.path.realpath(request.fspath))
     async with achdir(sdir, "unet fixture"):
@@ -270,8 +283,13 @@ async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W
     This share variant keeps munet from unsharing the process to a new namespace so that
     root level commands and actions are execute on the host, normally they are executed
     in the munet namespace which allowing things like scapy inline in tests to work.
+
+    The request param is either the basename of the config file or a tuple of the form:
+    (basename, top_level_pidns), the second value is a boolean.
     """
     param = request.param if hasattr(request, "param") else None
+    if isinstance(param, (tuple, list)):
+        param = (param[0], False, param[1])
     sdir = os.path.dirname(os.path.realpath(request.fspath))
     async with achdir(sdir, "unet_share fixture"):
         async for x in _unet_impl(
@@ -282,8 +300,18 @@ async def unet_share(request, rundir_module, pytestconfig):  # pylint: disable=W
 
 @pytest.fixture(scope="module")
 async def unet_unshare(request, rundir_module, pytestconfig):  # pylint: disable=W0621
-    """A unet creating fixutre."""
+    """A unet creating fixutre.
+
+    This unshare variant has the top level munet unshare the process inline so that
+    root level commands and actions are execute in a new namespace. This allows things
+    like scapy inline in tests to work.
+
+    The request param is either the basename of the config file or a tuple of the form:
+    (basename, top_level_pidns), the second value is a boolean.
+    """
     param = request.param if hasattr(request, "param") else None
+    if isinstance(param, (tuple, list)):
+        param = (param[0], True, param[1])
     sdir = os.path.dirname(os.path.realpath(request.fspath))
     async with achdir(sdir, "unet_unshare fixture"):
         async for x in _unet_impl(

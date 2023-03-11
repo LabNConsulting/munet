@@ -305,6 +305,7 @@ async def async_build_topology(
     unshare_inline=False,
     pytestconfig=None,
     search_root=None,
+    top_level_pidns=True,
 ):
 
     if not rundir:
@@ -352,6 +353,7 @@ async def async_build_topology(
         config=config,
         pytestconfig=pytestconfig,
         isolated=isolated,
+        pid=top_level_pidns,
         unshare_inline=args.unshare_inline if args else unshare_inline,
         logger=logger,
     )
