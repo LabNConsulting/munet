@@ -2573,6 +2573,13 @@ ff02::2\tip6-allrouters
         #     # Let's hide podman details
         #     self.tmpfs_mount("/var/lib/containers/storage/overlay-containers")
 
+        shellopt = (
+            self.pytest_config.getoption("--shell") if self.pytest_config else None
+        )
+        shellopt = shellopt if shellopt is not None else ""
+        if shellopt == "all" or "." in shellopt.split(","):
+            self.run_in_window("bash")
+
     def __del__(self):
         """Catch case of build object but not async_deleted."""
         if hasattr(self, "built"):
