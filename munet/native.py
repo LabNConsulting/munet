@@ -329,14 +329,18 @@ class NodeMixin:
     async def get_proc_child_pid(self, p):
         # commander is right for both unshare inline (our proc pidns)
         # and non-inline (root pidns).
-        pgrep = commander.get_exec_path("pgrep")
+
+        # This doesn't work b/c we can't get back to the root pidns
+
+        rootcmd = self.unet.rootcmd
+        pgrep = rootcmd.get_exec_path("pgrep")
         spid = str(p.pid)
         for _ in Timeout(4):
             if p.returncode is not None:
                 self.logger.debug("%s: proc %s exited before getting child", self, p)
                 return None
 
-            rc, o, e = await commander.async_cmd_status(
+            rc, o, e = await rootcmd.async_cmd_status(
                 [pgrep, "-o", "-P", spid], warn=False
             )
             if rc == 0:
@@ -687,6 +691,9 @@ class L3NodeMixin(NodeMixin):
             # Disable IPv6
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+        else:
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=1")
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
 
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
         self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
@@ -1945,6 +1952,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         self.logger.info("Renumbering interfaces")
         con = self.conrepl
         con.cmd_raises("sysctl -w net.ipv4.ip_forward=1")
+        if self.unet.ipv6_enable:
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
         for ifname in sorted(self.intfs):
             conn = find_with_kv(self.config.get("connections"), "name", ifname)
             to = conn["to"]
@@ -2562,10 +2571,14 @@ ff02::2\tip6-allrouters
         self.topoconf = self.config["topology"]
         self.ipv6_enable = self.topoconf.get("ipv6-enable", False)
 
-        if self.isolated and not self.ipv6_enable:
-            # Disable IPv6
-            self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
-            self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+        if self.isolated:
+            if not self.ipv6_enable:
+                # Disable IPv6
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+            else:
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=1")
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
 
         # we really need overlay, but overlay-layers (used by overlay-images)
         # counts on things being present in overlay so this temp stuff doesn't work.
