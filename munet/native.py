@@ -636,7 +636,7 @@ class SSHRemote(NodeMixin, Commander):
             pre_cmd = pre_cmd + self.__base_cmd_pty
         else:
             pre_cmd = pre_cmd + self.__base_cmd
-        return shlex.join(pre_cmd) if use_str else pre_cmd
+        return shlex.join(pre_cmd) if use_str else list(pre_cmd)
 
     def _get_cmd_as_list(self, cmd):
         """Given a list or string return a list form for execution.
@@ -1661,12 +1661,18 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
             )
 
+        pre_cmd = self.unet._get_pre_cmd(use_str, use_pty, ns_only=True)
+
+        # This is going to run in the process namespaces.
+        # We really want it to run in the munet namespace which will
+        # be different unless unshare_inline was used.
+        #
         # XXX grab the env from kwargs and add to podman exec
         # env = kwargs.get("env", {})
         if use_pty:
-            pre_cmd = self.__base_cmd_pty
+            pre_cmd = pre_cmd + self.__base_cmd_pty
         else:
-            pre_cmd = self.__base_cmd
+            pre_cmd = pre_cmd + self.__base_cmd
         return shlex.join(pre_cmd) if use_str else pre_cmd
 
     async def moncmd(self):
@@ -1986,9 +1992,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         con.cmd_raises(rf"rm -rf {tmpdir}")
         self.logger.info("Saved coverage data in VM at %s", dest)
         if self.use_ssh:
-            self.cmd_raises("echo FooBar")
             ldest = os.path.join(self.rundir, "gcov-data.tgz")
-            self.cmd_raises(f"cat {dest}", stdout=open(ldest, "wb"))
+            self.cmd_raises(["/bin/cat", dest], stdout=open(ldest, "wb"))
             self.logger.info("Saved coverage data on host at %s", ldest)
 
     async def _opencons(

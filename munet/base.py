@@ -2186,7 +2186,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         del ns_only
         del use_pty
         pre_cmd = self.__root_pre_cmd if root_level else self.__pre_cmd
-        return shlex.join(pre_cmd) if use_str else pre_cmd
+        return shlex.join(pre_cmd) if use_str else list(pre_cmd)
 
     def tmpfs_mount(self, inner):
         self.logger.debug("Mounting tmpfs on %s", inner)
@@ -2402,7 +2402,7 @@ class SharedNamespace(Commander):
         del ns_only
         del use_pty
         assert not root_level
-        return shlex.join(self.__pre_cmd) if use_str else self.__pre_cmd
+        return shlex.join(self.__pre_cmd) if use_str else list(self.__pre_cmd)
 
     def set_ns_cwd(self, cwd: Union[str, Path]):
         """Common code for changing pre_cmd and pre_nscmd."""
