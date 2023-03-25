@@ -2130,10 +2130,29 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 self.cmd_status_nsonly(
                     f"mkdir {tmpmnt} && mount --rbind /sys/fs/cgroup {tmpmnt}"
                 )
-                self.cmd_status_nsonly("mount -t sysfs sysfs /sys")
+                rc = o = e = None
+                for i in range(0, 10):
+                    rc, o, e = self.cmd_status_nsonly("mount -t sysfs sysfs /sys")
+                    if not rc:
+                        break
+                    self.logger.debug(
+                        "got error mounting new sysfs will retry: %s",
+                        cmd_error(rc, o, e),
+                    )
+                    time_mod.sleep(1)
+                else:
+                    raise Exception(cmd_error(rc, o, e))
+
                 self.cmd_status_nsonly(
                     f"mount --move {tmpmnt} /sys/fs/cgroup && rmdir {tmpmnt}"
                 )
+
+            # Original micronet code
+            # self.cmd_raises_nsonly("mount -t sysfs sysfs /sys")
+            # self.cmd_raises_nsonly(
+            #     "mount -o rw,nosuid,nodev,noexec,relatime "
+            #     "-t cgroup2 cgroup /sys/fs/cgroup"
+            # )
 
         # Set the hostname to the namespace name
         if uts and set_hostname:
