@@ -1251,7 +1251,7 @@ class Commander:  # pylint: disable=R0904
                 "/run/screen/S-{}/{}".format(os.environ["USER"], os.environ["STY"])
             ):
                 # XXX not appropriate for ssh
-                cmd = ["sudo", "-u", os.environ["SUDO_USER"]] + cmd
+                cmd = ["sudo", "-Eu", os.environ["SUDO_USER"]] + cmd
 
             if not isinstance(nscmd, str):
                 nscmd = shlex.join(nscmd)
@@ -1262,7 +1262,7 @@ class Commander:  # pylint: disable=R0904
                 # Do this b/c making things work as root with xauth seems hard
                 cmd = [
                     get_exec_path_host("sudo"),
-                    "-u",
+                    "-Eu",
                     os.environ["SUDO_USER"],
                 ] + cmd
             if title:
@@ -1678,6 +1678,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # Should look path up using resources maybe...
         mutini_path = get_our_script_path("mutini")
+        if not mutini_path:
+            mutini_path = get_our_script_path("mutini.py")
+        assert mutini_path
         cmd = [mutini_path, f"--unshare-flags={flags}", "-v"]
         fname = fsafe_name(self.name) + "-mutini.log"
         fname = (unet or self).rundir.joinpath(fname)
@@ -2132,7 +2135,9 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 )
                 rc = o = e = None
                 for i in range(0, 10):
-                    rc, o, e = self.cmd_status_nsonly("mount -t sysfs sysfs /sys")
+                    rc, o, e = self.cmd_status_nsonly(
+                        "mount -t sysfs sysfs /sys", warn=False
+                    )
                     if not rc:
                         break
                     self.logger.debug(
@@ -3044,6 +3049,10 @@ def get_exec_path_host(binary):
 
 def get_our_script_path(script):
     # would be nice to find this w/o using a path lookup
+    sdir = os.path.dirname(os.path.abspath(__file__))
+    spath = os.path.join(sdir, script)
+    if os.path.exists(spath):
+        return spath
     return get_exec_path(script)
 
 
