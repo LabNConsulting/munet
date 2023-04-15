@@ -1,3 +1,4 @@
+.. SPDX-License-Identifier: GPL-2.0-or-later
 ..
 .. November 24 2022, Christian Hopps <chopps@labn.net>
 ..
