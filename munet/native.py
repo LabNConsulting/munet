@@ -2877,7 +2877,7 @@ ff02::2\tip6-allrouters
         return tasks
 
     async def _async_delete(self):
-        from munet.testing.util import async_pause_test  # pylint: disable=C0415
+        from .testing.util import async_pause_test  # pylint: disable=C0415
 
         self.logger.debug("%s: deleting.", self)
 

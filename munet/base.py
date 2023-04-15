@@ -39,7 +39,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Union
 
-from munet import linux
+from . import linux
 
 
 try:

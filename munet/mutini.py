@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 eval: (blacken-mode 1) -*-
 #
 # January 28 2023, Christian Hopps <chopps@labn.net>
@@ -20,6 +21,7 @@
 #
 """A tiny init for namespaces in python inspired by the C program tini."""
 
+
 # pylint: disable=global-statement
 import argparse
 import errno
@@ -33,7 +35,14 @@ import sys
 
 from signal import Signals as S
 
-from munet import linux
+
+try:
+    from munet import linux
+except ModuleNotFoundError:
+    # We cannot use relative imports and still run this module directly as a script, and
+    # there are some use cases where we want to run this file as a script.
+    sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+    import linux
 
 
 class g:

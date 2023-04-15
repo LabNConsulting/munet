@@ -26,8 +26,8 @@ import logging
 import sys
 import time
 
-from munet.base import BaseMunet
-from munet.cli import async_cli
+from ..base import BaseMunet
+from ..cli import async_cli
 
 
 # =================

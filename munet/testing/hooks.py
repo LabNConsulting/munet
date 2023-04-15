@@ -31,9 +31,9 @@ import traceback
 
 import pytest
 
-from munet.base import BaseMunet
-from munet.cli import cli
-from munet.testing.util import pause_test
+from ..base import BaseMunet  # pylint: disable=import-error
+from ..cli import cli  # pylint: disable=import-error
+from .util import pause_test
 
 
 # ===================

@@ -34,16 +34,16 @@ from typing import Union
 import pytest
 import pytest_asyncio
 
-from munet.base import BaseMunet
-from munet.base import Bridge
-from munet.base import get_event_loop
-from munet.cleanup import cleanup_current
-from munet.cleanup import cleanup_previous
-from munet.native import L3NodeMixin
-from munet.parser import async_build_topology
-from munet.parser import get_config
-from munet.testing.util import async_pause_test
-from munet.testing.util import pause_test
+from ..base import BaseMunet
+from ..base import Bridge
+from ..base import get_event_loop
+from ..cleanup import cleanup_current
+from ..cleanup import cleanup_previous
+from ..native import L3NodeMixin
+from ..parser import async_build_topology
+from ..parser import get_config
+from .util import async_pause_test
+from .util import pause_test
 
 
 @contextlib.asynccontextmanager

@@ -32,8 +32,8 @@ import time
 
 from signal import Signals as S
 
-from munet import linux
-from munet.base import commander
+from . import linux
+from .base import commander
 
 
 child_pid = -1

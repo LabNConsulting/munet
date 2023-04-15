@@ -3,7 +3,7 @@ formatters:
   brief:
     format: '%(levelname)5s: %(message)s'
   operfmt:
-    class: munet.logging.ColorFormatter
+    class: munet.mulog.ColorFormatter
     format: ' ------| %(message)s'
   exec:
     format: '%(asctime)s %(levelname)5s: %(name)s: %(message)s'
@@ -37,14 +37,14 @@ handlers:
     mode: w
   output:
     level: DEBUG
-    class: munet.logging.MultiFileHandler
+    class: munet.mulog.MultiFileHandler
     root_path: "mutest.output"
     formatter: output
     filename: mutest-output.log
     mode: w
   results:
     level: INFO
-    class: munet.logging.MultiFileHandler
+    class: munet.mulog.MultiFileHandler
     root_path: "mutest.results"
     new_handler_level: DEBUG
     formatter: results
