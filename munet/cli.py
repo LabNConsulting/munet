@@ -24,8 +24,15 @@ import tempfile
 import termios
 import tty
 
-from . import linux
-from .config import list_to_dict_with_key
+try:
+    from . import linux
+    from .config import list_to_dict_with_key
+except ImportError:
+    # We cannot use relative imports and still run this module directly as a script, and
+    # there are some use cases where we want to run this file as a script.
+    sys.path.append(os.path.dirname(os.path.realpath(__file__)))
+    import linux
+    from config import list_to_dict_with_key
 
 
 ENDMARKER = b"\x00END\x00"
@@ -354,7 +361,7 @@ def get_shcmd(unet, host, kinds, execfmt, ucmd):
 
 async def run_command(
     unet,
-    outf,
+    writef,
     line,
     execfmt,
     banner,
@@ -382,7 +389,7 @@ async def run_command(
       `unet` (the Munet object), and `user_input` (the additional command input)
       defined.
 
-    The output is sent to `outf`.  If `ns_only` is True then the `execfmt` is
+    The output is sent to `writef`.  If `ns_only` is True then the `execfmt` is
     run using `Commander.cmd_status_nsonly` otherwise it is run with
     `Commander.cmd_status`.
     """
@@ -397,7 +404,7 @@ async def run_command(
         hosts = [unet]
 
     # if unknowns := [x for x in hosts if x not in unet.hosts]:
-    #     outf.write("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
+    #     writef("%% Unknown host[s]: %s\n" % ", ".join(unknowns))
     #     return
 
     # if sys.stdin.isatty() and interactive:
@@ -407,11 +414,11 @@ async def run_command(
             if not shcmd:
                 continue
             if len(hosts) > 1 or banner:
-                outf.write(f"------ Host: {host} ------\n")
+                writef(f"------ Host: {host} ------\n")
             spawn(unet, host if not toplevel else unet, shcmd, outf, ns_only)
             if len(hosts) > 1 or banner:
-                outf.write(f"------- End: {host} ------\n")
-        outf.write("\n")
+                writef(f"------- End: {host} ------\n")
+        writef("\n")
         return
 
     aws = []
@@ -437,12 +444,12 @@ async def run_command(
         else:
             rc, o, _ = result
         if len(hosts) > 1 or banner:
-            outf.write(f"------ Host: {host} ------\n")
+            writef(f"------ Host: {host} ------\n")
         if rc:
-            outf.write(f"*** non-zero exit status: {rc}\n")
-        outf.write(o)
+            writef(f"*** non-zero exit status: {rc}\n")
+        writef(o)
         if len(hosts) > 1 or banner:
-            outf.write(f"------- End: {host} ------\n")
+            writef(f"------- End: {host} ------\n")
 
 
 cli_builtins = ["cli", "help", "hosts", "quit"]
@@ -505,7 +512,7 @@ class Completer:
 
 
 async def doline(
-    unet, line, outf, background=False, notty=False
+    unet, line, writef, background=False, notty=False
 ):  # pylint: disable=R0911
 
     line = line.strip()
@@ -520,10 +527,10 @@ async def doline(
         return False
 
     if cmd == "help":
-        outf.write(make_help_str(unet))
+        writef(make_help_str(unet))
         return True
     if cmd in ("h", "hosts"):
-        outf.write(f"% Hosts:\t{' '.join(sorted(unet.hosts.keys()))}\n")
+        writef(f"% Hosts:\t{' '.join(sorted(unet.hosts.keys()))}\n")
         return True
     if cmd == "cli":
         await remote_cli(
@@ -562,7 +569,7 @@ async def doline(
             # CLI command does not expect user command so treat as hosts of which some
             # must be unknown
             unknowns = [x for x in ucmd.split() if x not in unet.hosts]
-            outf.write(f"% Unknown host[s]: {' '.join(unknowns)}\n")
+            writef(f"% Unknown host[s]: {' '.join(unknowns)}\n")
             return True
 
         try:
@@ -576,7 +583,7 @@ async def doline(
                 else:
                     unet.hosts[host].run_in_window(shcmd, **kwargs)
         except Exception as error:
-            outf.write(f"% Error: {error}\n")
+            writef(f"% Error: {error}\n")
         return True
 
     #
@@ -600,16 +607,25 @@ async def doline(
         nline = f"{cmd} {nline}"
         cmd = ""
     else:
-        outf.write(f"% Unknown command: {cmd} {nline}\n")
+        writef(f"% Unknown command: {cmd} {nline}\n")
         return True
 
     execfmt, toplevel, kinds, ns_only, interactive = unet.cli_run_cmds[cmd][2:]
     if interactive and notty:
-        outf.write("% Error: interactive command must be run from primary CLI\n")
+        writef("% Error: interactive command must be run from primary CLI\n")
         return True
 
     await run_command(
-        unet, outf, nline, execfmt, banner, hosts, toplevel, kinds, ns_only, interactive
+        unet,
+        writef,
+        nline,
+        execfmt,
+        banner,
+        hosts,
+        toplevel,
+        kinds,
+        ns_only,
+        interactive,
     )
 
     return True
@@ -657,10 +673,10 @@ async def cli_client(sockpath, prompt="munet> "):
 
 async def local_cli(unet, outf, prompt, histfile, background):
     """Implement the user-side CLI for local munet."""
-    if unet:
-        completer = Completer(unet)
-        readline.parse_and_bind("tab: complete")
-        readline.set_completer(completer.complete)
+    assert unet is not None
+    completer = Completer(unet)
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer(completer.complete)
 
     print("\n--- Munet CLI Starting ---\n\n")
     while True:
@@ -669,9 +685,7 @@ async def local_cli(unet, outf, prompt, histfile, background):
             if line is None:
                 return
 
-            assert unet is not None
-
-            if not await doline(unet, line, outf, background):
+            if not await doline(unet, line, outf.write, background):
                 return
         except KeyboardInterrupt:
             outf.write("%% Caught KeyboardInterrupt\nUse ^D or 'quit' to exit")
@@ -706,10 +720,10 @@ async def cli_client_connected(unet, background, reader, writer):
             break
         line = line.decode("utf-8").strip()
 
-        # def writef(x):
-        #     writer.write(x.encode("utf-8"))
+        def writef(x):
+            writer.write(x.encode("utf-8"))
 
-        if not await doline(unet, line, writer, background, notty=True):
+        if not await doline(unet, line, writef, background, notty=True):
             logging.debug("server closing cli connection")
             return
 
