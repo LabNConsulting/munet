@@ -195,11 +195,10 @@ class ConfigOptionsProxy:
         if not self.config:
             return defval
 
-        value = self.config.getoption(opt)
-        if value is None:
+        try:
+            return self.config.getoption(opt, default=defval)
+        except ValueError:
             return defval
-
-        return value
 
     def get_option(self, opt, defval=None):
         return self.getoption(opt, defval)
