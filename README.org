@@ -5,6 +5,8 @@
 #+html: <a href="https://munet.readthedocs.io/en/latest/"><img src="https://readthedocs.org/projects/munet/badge?version=latest"></a>
 #+html: <p></p>
 
+For better documentation see: https://munet.readthedocs.io/en/latest/
+
 A package for creating network topologies and running programs and containers
 within them using linux namepsaces, podman containers and qemu virtual machines.
 
