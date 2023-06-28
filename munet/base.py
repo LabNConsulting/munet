@@ -1611,6 +1611,7 @@ class InterfaceMixin:
         # logging.warning("InterfaceMixin: args: %s kwargs: %s", args, kwargs)
 
         self._intf_addrs = defaultdict(lambda: [None, None])
+        self._peer_intf_addrs = defaultdict(lambda: [None, None])
         self.net_intfs = {}
         self.next_intf_index = 0
         self.basename = "eth"
@@ -1630,9 +1631,16 @@ class InterfaceMixin:
             return None
         return self._intf_addrs[ifname][bool(ipv6)]
 
-    def set_intf_addr(self, ifname, ifaddr):
+    def get_peer_intf_addr(self, ifname, ipv6=False):
+        if ifname not in self._peer_intf_addrs:
+            return None
+        return self._peer_intf_addrs[ifname][bool(ipv6)]
+
+    def set_intf_addr(self, ifname, ifaddr, peer_ifaddr=None):
         ifaddr = ipaddress.ip_interface(ifaddr)
         self._intf_addrs[ifname][ifaddr.version == 6] = ifaddr
+        if peer_ifaddr is not None:
+            self._peer_intf_addrs[ifname][peer_ifaddr.version == 6] = peer_ifaddr
 
     def net_addr(self, netname, ipv6=False):
         if netname not in self.net_intfs:
