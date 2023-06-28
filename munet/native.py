@@ -277,7 +277,7 @@ class NodeMixin:
                 # We want to avoid overwriting the shebang if it already exists
                 if lines and lines[0].startswith("#!"):
                     shell_cmd = lines.pop(0)[2:].strip()
-                cmd = ''.join(lines).strip()
+                cmd = "".join(lines).strip()
 
         if not cmd:
             return []
@@ -1039,20 +1039,40 @@ ff02::2\tip6-allrouters
                 return
 
         if ipaddr:
+            # Check if the two sides of this link are assigned
+            # different subnets.  If so, set the peer address.
+            set_peer = False
+            if oipaddr and ipaddr.network != oipaddr.network:
+                set_peer = True
             ifname = cconf["name"]
-            self.set_intf_addr(ifname, ipaddr)
+            self.set_intf_addr(ifname, ipaddr, oipaddr)
             self.logger.debug("%s: adding %s to p2p intf %s", self, ipaddr, ifname)
             if "physical" not in cconf and not self.is_vm:
-                self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
+                if set_peer:
+                    self.logger.debug("%s: setting peer address %s", self, oipaddr)
+                    self.intf_ip_cmd(
+                        ifname, f"ip addr add {ipaddr.ip} peer {oipaddr} dev {ifname}"
+                    )
+                else:
+                    self.intf_ip_cmd(ifname, f"ip addr add {ipaddr} dev {ifname}")
 
         if oipaddr:
+            set_peer = False
+            if ipaddr and ipaddr.network != oipaddr.network:
+                set_peer = True
             oifname = occonf["name"]
-            other.set_intf_addr(oifname, oipaddr)
+            other.set_intf_addr(oifname, oipaddr, ipaddr)
             self.logger.debug(
                 "%s: adding %s to other p2p intf %s", other, oipaddr, oifname
             )
             if "physical" not in occonf and not other.is_vm:
-                other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
+                if set_peer:
+                    other.logger.debug("%s: setting peer address %s", other, ipaddr)
+                    other.intf_ip_cmd(
+                        oifname, f"ip addr add {oipaddr.ip} peer {ipaddr} dev {oifname}"
+                    )
+                else:
+                    other.intf_ip_cmd(oifname, f"ip addr add {oipaddr} dev {oifname}")
 
     def set_p2p_addr(self, other, cconf, occonf):
         self._set_p2p_addr(other, cconf, occonf, ipv6=False)
@@ -1945,7 +1965,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 # We want to avoid overwriting the shebang if it already exists
                 if lines and lines[0].startswith("#!"):
                     shell_cmd = lines.pop(0)[2:].strip()
-                cmd = ''.join(lines).strip()
+                cmd = "".join(lines).strip()
 
         if not cmd:
             self.logger.debug("%s: no `%s` to run", self, cmd_node)
@@ -2143,16 +2163,14 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             devs = []
             blks = rv.split("\n")
             for blk in blks:
-                name = ' '.join(blk.split())  # Strip excess whitespace
-                name = re.sub(r'[^a-zA-Z0-9_ ]', '', name)  # Strip unexpected chars
-                name = name.split(' ')[0]  # Finally, extract the name (e.g. sdb1)
+                name = " ".join(blk.split())  # Strip excess whitespace
+                name = re.sub(r"[^a-zA-Z0-9_ ]", "", name)  # Strip unexpected chars
+                name = name.split(" ")[0]  # Finally, extract the name (e.g. sdb1)
                 devs += [name]
-            tmp_mnt = '/tmp/munet-mnt'
+            tmp_mnt = "/tmp/munet-mnt"
             for dev in devs:
                 # Investigatory mount
-                self.logger.info(
-                    "Temp. mounting USB dev %s to %s", dev, tmp_mnt
-                )
+                self.logger.info("Temp. mounting USB dev %s to %s", dev, tmp_mnt)
                 con.cmd_raises(f"mkdir -p {tmp_mnt}")
                 con.cmd_raises(f"mount /dev/{dev} {tmp_mnt}")
                 dest = con.cmd_raises(f"cat {tmp_mnt}/.munet")
@@ -2210,13 +2228,33 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             con.cmd_raises(f"ip -4 addr flush dev {ifname}")
             sw_is_nat = switch and hasattr(switch, "is_nat") and switch.is_nat
             if ifaddr := self.get_intf_addr(ifname, ipv6=False):
-                con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
+                oifaddr = self.get_peer_intf_addr(ifname, ipv6=False)
+                if (
+                    not switch
+                    and oifaddr is not None
+                    and ifaddr.network != oifaddr.network
+                ):
+                    con.cmd_raises(
+                        f"ip addr add {ifaddr} peer {oifaddr.ip} dev {ifname}"
+                    )
+                else:
+                    con.cmd_raises(f"ip addr add {ifaddr} dev {ifname}")
                 if sw_is_nat:
                     # In case there was some preconfig e.g., cloud-init
                     con.cmd_raises("ip route flush exact default")
                     con.cmd_raises(f"ip route add default via {switch.ip_address}")
             if ifaddr := self.get_intf_addr(ifname, ipv6=True):
-                con.cmd_raises(f"ip -6 addr add {ifaddr} dev {ifname}")
+                oifaddr = self.get_peer_intf_addr(ifname, ipv6=True)
+                if (
+                    not switch
+                    and oifaddr is not None
+                    and ifaddr.network != oifaddr.network
+                ):
+                    con.cmd_raises(
+                        f"ip addr add {ifaddr} peer {oifaddr.ip} dev {ifname}"
+                    )
+                else:
+                    con.cmd_raises(f"ip -6 addr add {ifaddr} dev {ifname}")
                 if sw_is_nat:
                     # In case there was some preconfig e.g., cloud-init
                     con.cmd_raises("ip -6 route flush exact default")
@@ -3406,8 +3444,8 @@ done"""
 
         pcapopt = self.cfgopt.getoption("--pcap")
         pcapopt = set(pcapopt.split(",")) if pcapopt else set()
-        if 'all' in pcapopt:
-            pcapopt.remove('all')
+        if "all" in pcapopt:
+            pcapopt.remove("all")
             pcapopt.update(self.switches.keys())
         if pcapopt:
             for pcap in pcapopt:
