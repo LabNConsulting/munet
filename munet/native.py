@@ -980,6 +980,31 @@ ff02::2\tip6-allrouters
                 return c["name"]
         return None
 
+    def set_dummy_addr(self, cconf):
+        if ip := cconf.get("ip"):
+            ipaddr = ipaddress.ip_interface(ip)
+            assert ipaddr.version == 4
+        else:
+            ipaddr = None
+
+        if ip := cconf.get("ipv6"):
+            ip6addr = ipaddress.ip_interface(ip)
+            assert ip6addr.version == 6
+        else:
+            ip6addr = None
+
+        if "physical" in cconf or self.is_vm:
+            return
+
+        ifname = cconf["name"]
+        for ip in (ipaddr, ip6addr):
+            if ip is None:
+                continue
+            self.set_intf_addr(ifname, ip)
+            ipcmd = "ip " if ip.version == 4 else "ip -6 "
+            self.logger.debug("%s: adding %s to unconnected intf %s", self, ip, ifname)
+            self.intf_ip_cmd(ifname, ipcmd + f"addr add {ip} dev {ifname}")
+
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
@@ -3246,8 +3271,9 @@ ff02::2\tip6-allrouters
             if "connections" not in nconf:
                 continue
             for cconf in nconf["connections"]:
-                # Eventually can add support for unconnected intf here.
                 if "to" not in cconf:
+                    # unconnected intf
+                    await self.add_dummy_link(node, cconf)
                     continue
                 to = cconf["to"]
                 if to in self.switches:
@@ -3277,6 +3303,25 @@ ff02::2\tip6-allrouters
     @autonumber.setter
     def autonumber(self, value):
         self.topoconf["networks-autonumber"] = bool(value)
+
+    async def add_dummy_link(self, node1, c1=None):
+        c1 = {} if c1 is None else c1
+
+        if "name" not in c1:
+            c1["name"] = node1.get_next_intf_name()
+        if1 = c1["name"]
+
+        do_add_dummy = True
+        if "hostintf" in c1:
+            await node1.add_host_intf(c1["hostintf"], c1["name"], mtu=c1.get("mtu"))
+            do_add_dummy = False
+        elif "physical" in c1:
+            await node1.add_phy_intf(c1["physical"], c1["name"])
+            do_add_dummy = False
+
+        if do_add_dummy:
+            super().add_dummy(node1, if1, **c1)
+            node1.set_dummy_addr(c1)
 
     async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
