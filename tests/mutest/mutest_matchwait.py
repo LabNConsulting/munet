@@ -45,6 +45,16 @@ wait_step(
     0.25,
     expect_fail=False,
 )
+wait_step(
+    "r1",
+    'sleep .5 && echo -e "exact\nmatch"',
+    "exact\nmatch",
+    "Look for exact match",
+    1,
+    0.25,
+    expect_fail=False,
+    exact_match=True,
+)
 
 section("Test negative (expect_fail) match_step calls")
 
@@ -72,4 +82,14 @@ wait_step(
     timeout=1,
     interval=0.25,
     expect_fail=True,
+)
+wait_step(
+    "host1",
+    'sleep .5 && echo -e "exact\nmatch"',
+    "not exact",
+    "Look for no exact match",
+    1,
+    0.25,
+    expect_fail=True,
+    exact_match=True,
 )
