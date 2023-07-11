@@ -71,7 +71,8 @@ from pathlib import Path
 from typing import Any
 from typing import Union
 
-from deepdiff import DeepDiff as json_cmp
+from deepdiff import DeepDiff as json_exact_cmp
+from .jsoncompare import json_expected_cmp
 
 from munet.base import Commander
 
@@ -420,6 +421,7 @@ class TestCase:
         match: str,
         expect_fail: bool,
         flags: int,
+        exact_match: bool,
     ) -> (bool, Union[str, list]):
         """Execute a ``cmd`` and check result.
 
@@ -429,6 +431,7 @@ class TestCase:
             match: regex to ``re.search()`` for in output.
             expect_fail: if True then succeed when the regexp doesn't match.
             flags: python regex flags to modify matching behavior
+            exact_match: if True then entire output must be exactly matched.
 
         Returns:
             (success, matches): if the match fails then "matches" will be None,
@@ -436,6 +439,17 @@ class TestCase:
             ``matches`` otherwise group(0) (i.e., the matching text).
         """
         out = self._command(target, cmd)
+        if exact_match:
+            str_equal = match == out
+            success = str_equal != expect_fail
+            if str_equal:
+                ret = match
+                level = logging.DEBUG if success else logging.WARNING
+                self.olog.log(level, "exactly matched:%s:", ret)
+            else:
+                ret = None
+            return success, ret
+
         search = re.search(match, out, flags)
         self.last_m = search
         if search is None:
@@ -457,6 +471,7 @@ class TestCase:
         cmd: str,
         match: Union[str, dict],
         expect_fail: bool,
+        exact_match: bool,
     ) -> Union[str, dict]:
         """Execute a json ``cmd`` and check result.
 
@@ -466,6 +481,8 @@ class TestCase:
             match: A json ``str`` or object (``dict``) to compare against the json
                 output from ``cmd``.
             expect_fail: if True then succeed when the json doesn't match.
+            exact_match: if False then the json matches when all the fields in `match`
+                are both present and equal in the output of `cmd`.
         """
         js = self._command_json(target, cmd)
         try:
@@ -476,7 +493,12 @@ class TestCase:
                 "JSON load failed. Check match value is in JSON format: %s", error
             )
 
-        if json_diff := json_cmp(expect, js):
+        if exact_match:
+            json_diff = json_exact_cmp(expect, js)
+        else:
+            json_diff = json_expected_cmp(expect, js)
+
+        if json_diff:
             success = expect_fail
             if not success:
                 self.logf("JSON DIFF:%s:" % json_diff)
@@ -495,6 +517,7 @@ class TestCase:
         interval: float,
         expect_fail: bool,
         flags: int,
+        exact_match: bool,
     ) -> Union[str, dict]:
         """Execute a command repeatedly waiting for result until timeout."""
         startt = time.time()
@@ -504,10 +527,12 @@ class TestCase:
         ret = None
         while not success and time.time() < endt:
             if is_json:
-                success, ret = self._match_command_json(target, cmd, match, expect_fail)
+                success, ret = self._match_command_json(
+                    target, cmd, match, expect_fail, exact_match
+                )
             else:
                 success, ret = self._match_command(
-                    target, cmd, match, expect_fail, flags
+                    target, cmd, match, expect_fail, flags, exact_match
                 )
             if not success:
                 time.sleep(interval)
@@ -649,13 +674,14 @@ class TestCase:
         desc: str = "",
         expect_fail: bool = False,
         flags: int = re.DOTALL,
+        exact_match: bool = False,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.match_step`.
 
         :meta private:
         """
         self.logf(
-            "#%s.%s:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s",
+            "#%s.%s:%s:MATCH_STEP:%s:%s:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
             self.info.path,
@@ -665,8 +691,11 @@ class TestCase:
             desc,
             expect_fail,
             flags,
+            exact_match,
         )
-        success, ret = self._match_command(target, cmd, match, expect_fail, flags)
+        success, ret = self._match_command(
+            target, cmd, match, expect_fail, flags, exact_match
+        )
         if desc:
             self.__post_result(target, success, desc)
         return success, ret
@@ -687,13 +716,14 @@ class TestCase:
         match: Union[str, dict],
         desc: str = "",
         expect_fail: bool = False,
+        exact_match: bool = True,
     ) -> (bool, Union[str, dict]):
         """See :py:func:`~munet.mutest.userapi.match_step_json`.
 
         :meta private:
         """
         self.logf(
-            "#%s.%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s",
+            "#%s.%s:%s:MATCH_STEP_JSON:%s:%s:%s:%s:%s:%s",
             self.tag,
             self.steps + 1,
             self.info.path,
@@ -702,8 +732,11 @@ class TestCase:
             match,
             desc,
             expect_fail,
+            exact_match,
         )
-        success, ret = self._match_command_json(target, cmd, match, expect_fail)
+        success, ret = self._match_command_json(
+            target, cmd, match, expect_fail, exact_match
+        )
         if desc:
             self.__post_result(target, success, desc)
         return success, ret
@@ -718,8 +751,48 @@ class TestCase:
         interval=0.5,
         expect_fail: bool = False,
         flags: int = re.DOTALL,
+        exact_match: bool = False,
     ) -> (bool, Union[str, list]):
         """See :py:func:`~munet.mutest.userapi.wait_step`.
+
+        :meta private:
+        """
+        if interval is None:
+            interval = min(timeout / 20, 0.25)
+        self.logf(
+            "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s:%s:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            target,
+            cmd,
+            match,
+            timeout,
+            interval,
+            desc,
+            expect_fail,
+            flags,
+            exact_match,
+        )
+        success, ret = self._wait(
+            target, cmd, match, False, timeout, interval, expect_fail, flags, exact_match
+        )
+        if desc:
+            self.__post_result(target, success, desc)
+        return success, ret
+
+    def wait_step_json(
+        self,
+        target: str,
+        cmd: str,
+        match: Union[str, dict],
+        desc: str = "",
+        timeout=10,
+        interval=None,
+        expect_fail: bool = False,
+        exact_match: bool = True,
+    ) -> (bool, Union[str, dict]):
+        """See :py:func:`~munet.mutest.userapi.wait_step_json`.
 
         :meta private:
         """
@@ -737,46 +810,10 @@ class TestCase:
             interval,
             desc,
             expect_fail,
-            flags,
+            exact_match,
         )
         success, ret = self._wait(
-            target, cmd, match, False, timeout, interval, expect_fail, flags
-        )
-        if desc:
-            self.__post_result(target, success, desc)
-        return success, ret
-
-    def wait_step_json(
-        self,
-        target: str,
-        cmd: str,
-        match: Union[str, dict],
-        desc: str = "",
-        timeout=10,
-        interval=None,
-        expect_fail: bool = False,
-    ) -> (bool, Union[str, dict]):
-        """See :py:func:`~munet.mutest.userapi.wait_step_json`.
-
-        :meta private:
-        """
-        if interval is None:
-            interval = min(timeout / 20, 0.25)
-        self.logf(
-            "#%s.%s:%s:WAIT_STEP:%s:%s:%s:%s:%s:%s:%s",
-            self.tag,
-            self.steps + 1,
-            self.info.path,
-            target,
-            cmd,
-            match,
-            timeout,
-            interval,
-            desc,
-            expect_fail,
-        )
-        success, ret = self._wait(
-            target, cmd, match, True, timeout, interval, expect_fail, 0
+            target, cmd, match, True, timeout, interval, expect_fail, 0, exact_match
         )
         if desc:
             self.__post_result(target, success, desc)
@@ -904,6 +941,7 @@ def match_step(
     desc: str = "",
     expect_fail: bool = False,
     flags: int = re.DOTALL,
+    exact_match: bool = False,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` check result.
 
@@ -922,13 +960,16 @@ def match_step(
         desc: description of test, if no description then no result is logged.
         expect_fail: if True then succeed when the regexp doesn't match.
         flags: python regex flags to modify matching behavior
+        exact_match: if True then entire output must be exactly matched.
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
         The second value will be a list from ``re.Match.groups()`` if non-empty,
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
-    return TestCase.g_tc.match_step(target, cmd, match, desc, expect_fail, flags)
+    return TestCase.g_tc.match_step(
+        target, cmd, match, desc, expect_fail, flags, exact_match
+    )
 
 
 def match_step_json(
@@ -937,6 +978,7 @@ def match_step_json(
     match: Union[str, dict],
     desc: str = "",
     expect_fail: bool = False,
+    exact_match: bool = True,
 ) -> (bool, Union[str, dict]):
     """Execute a ``cmd`` on a ``target`` check result.
 
@@ -951,6 +993,8 @@ def match_step_json(
             output from ``cmd``.
         desc: description of test, if no description then no result is logged.
         expect_fail: if True then succeed if the a json doesn't match.
+        exact_match: if False then the json matches when all the fields in `match`
+                are both present and equal in the output of `cmd`.
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``. The
@@ -959,7 +1003,9 @@ def match_step_json(
 
         If json parse fails, a warning is logged and an empty ``dict`` is used.
     """
-    return TestCase.g_tc.match_step_json(target, cmd, match, desc, expect_fail)
+    return TestCase.g_tc.match_step_json(
+        target, cmd, match, desc, expect_fail, exact_match
+    )
 
 
 def wait_step(
@@ -971,6 +1017,7 @@ def wait_step(
     interval: float = 0.5,
     expect_fail: bool = False,
     flags: int = re.DOTALL,
+    exact_match: bool = False,
 ) -> (bool, Union[str, list]):
     """Execute a ``cmd`` on a ``target`` repeatedly, looking for a result.
 
@@ -991,6 +1038,7 @@ def wait_step(
         desc: description of test, if no description then no result is logged.
         expect_fail: if True then succeed when the regexp *doesn't* match.
         flags: python regex flags to modify matching behavior
+        exact_match: if True then entire output must be exactly matched.
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
@@ -998,7 +1046,7 @@ def wait_step(
         otherwise ``re.Match.group(0)`` if there was a match otherwise None.
     """
     return TestCase.g_tc.wait_step(
-        target, cmd, match, desc, timeout, interval, expect_fail, flags
+        target, cmd, match, desc, timeout, interval, expect_fail, flags, exact_match
     )
 
 
@@ -1010,6 +1058,7 @@ def wait_step_json(
     timeout=10,
     interval=None,
     expect_fail: bool = False,
+    exact_match: bool = True,
 ) -> (bool, Union[str, dict]):
     """Execute a cmd repeatedly and wait for matching result.
 
@@ -1037,6 +1086,8 @@ def wait_step_json(
             average the cmd will execute 10 times. The minimum calculated interval
             is .25s, shorter values can be passed explicitly.
         expect_fail: if True then succeed if the a json doesn't match.
+        exact_match: if False then the json matches when all the fields in `match`
+                are both present and equal in the output of `cmd`.
 
     Returns:
         Returns a 2-tuple. The first value is a bool indicating ``success``.
@@ -1047,7 +1098,7 @@ def wait_step_json(
         If json parse fails, a warning is logged and an empty ``dict`` is used.
     """
     return TestCase.g_tc.wait_step_json(
-        target, cmd, match, desc, timeout, interval, expect_fail
+        target, cmd, match, desc, timeout, interval, expect_fail, exact_match
     )
 
 
