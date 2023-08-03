@@ -455,13 +455,14 @@ class NodeMixin:
 
             bps = self.unet.cfgopt.getoption("--gdb-breakpoints", "").split(",")
             for bp in bps:
-                gdbcmd += f" '-ex=b {bp}'"
+                if bp:
+                    gdbcmd += f" '-ex=b {bp}'"
 
             cmds = self.config.get("gdb-run-cmd", [])
             for cmd in cmds:
                 gdbcmd += f" '-ex={cmd}'"
 
-            self.run_in_window(gdbcmd)
+            self.run_in_window(gdbcmd, ns_only=True)
         elif should_gdb and use_emacs:
             gdbcmd = gdbcmd.replace("gdb ", "gdb -i=mi ")
             ecbin = self.get_exec_path("emacsclient")

@@ -1206,7 +1206,7 @@ class Commander:  # pylint: disable=R0904
         # XXX need to test ssh in Xterm
         sudo_path = get_exec_path_host(["sudo"])
         # This first test case seems same as last but using list instead of string?
-        if self.is_vm and self.use_ssh:  # pylint: disable=E1101
+        if self.is_vm and self.use_ssh and not ns_only:  # pylint: disable=E1101
             if isinstance(cmd, str):
                 cmd = shlex.split(cmd)
             cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
