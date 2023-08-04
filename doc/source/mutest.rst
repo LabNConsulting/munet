@@ -119,5 +119,98 @@ used to check that the state of the interface actually changes.
   step("r1", 'vtysh -c "conf t\n interface eth0\n shut"')
   match_step("r1", 'vtysh -c "show interface eth0", "DOWN", "Check for interface DOWN")
 
+Additionally, json variants of various functions are also available, namely
+:py:func:`match_step_json`, :py:func:`wait_step_json`, and :py:func:`step_json`.
+These json variants compare a json value ``match`` with the json result from ``cmd``.
+
+By default, a comparison succeeds if ``match`` is a subset of the ``cmd`` result.
+(i.e., all data within ``match`` is present in the ``cmd`` result). By example,
+the comparison succeeds when the following rules hold true:
+
+1. All data within any object present in ``match`` must also exist and be of
+   equal value within a similarly located object present in the json result of
+   ``cmd``. For example, if:
+
+.. code-block:: python
+
+   json1 = '{"foo":"foo"}'
+   json2 = '{"foo":"foo", "bar":"bar"}'
+
+   # Then, the following results are observed:
+
+   match_step_json("r1", f"echo '{json2}'", json1)
+   # Test step passes
+
+   match_step_json("r1", f"echo '{json1}'", json2)
+   # Test step fails
+
+2. All objects within any array present in ``match`` must also exist and contain
+   equivalent data (as per rule #1) within a similarly located array present in
+   the json result of ``cmd``. Array order is desregarded. For example, if:
+
+.. code-block:: python
+
+   json1 = '[{"foo":"foo"}]'
+   json2 = '[{"foo":"foo"}, {"bar":"bar"}]'
+   json3 = '[{"bar":"bar"}, {"foo":"foo"}]'
+
+   # Then, the following results are observed:
+
+   match_step_json("r1", f"echo '{json2}'", json1)
+   # Test step passes
+
+   match_step_json("r1", f"echo '{json1}'", json2)
+   # Test step fails
+
+   match_step_json("r1", f"echo '{json2}'", json3)
+   # Test step passes
+
+3. All other data within an array present in either ``match`` or the json
+   result of ``cmd`` must also exist in the other json and be of equal value.
+   Array order is disregarded. For example, if:
+
+.. code-block:: python
+
+   json1 = '["foo"]'
+   json2 = '["foo", "bar"]'
+   json3 = '["bar", "foo"]'
+
+   # Then, the following results are observed:
+
+   match_step_json("r1", f"echo '{json2}'", json1)
+   # Test step fails
+
+   match_step_json("r1", f"echo '{json1}'", json2)
+   # Test step fails
+
+   match_step_json("r1", f"echo '{json2}'", json3)
+   # Test step passes
+
+These rules apply no matter what ``level`` of the array (``list``) or object
+(``dict``). For example, if:
+
+.. code-block:: python
+
+   json1 = '{"level1": ["level2", {"level3": ["level4"]}]}'
+   json2 = '{"level1": ["level2", {"level3": ["level4"], "l3": "l4"}]}'
+   json3 = '{"level1": ["level2", {"level3": ["level4", {"level5": "l6"}]}]}'
+   json4 = '{"level1": ["level2", {"level3": ["level4", "l4"]}]}'
+
+   # Then, the following results are observed:
+
+   match_step_json("r1", f"echo '{json2}'", json1)
+   # Test step passes
+
+   match_step_json("r1", f"echo '{json3}'", json1)
+   # Test step passes
+
+   match_step_json("r1", f"echo '{json4}'", json1)
+   # Test step fails
+
+If an exact match is desired, then ``exact_match`` should be set to ``True``.
+When ``exact_match`` is ``True``, the comparison will only succeed when all data
+in ``match`` is present in the ``cmd`` result *and* all data present in the
+``cmd`` result is present in ``match``. In other words they exactly match.
+
 To see all the available functions and their specifications see
 :ref:`mutest-api`.
