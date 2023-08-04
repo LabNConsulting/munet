@@ -9,4 +9,5 @@ err.out
 *.yang
 bzImage
 rootfs.cpio.gz
-.coverage
+.coverage*
+.dir-locals.el
