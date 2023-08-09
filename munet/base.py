@@ -513,9 +513,8 @@ class Commander:  # pylint: disable=R0904
                 self.logger.debug('%s("%s") [no precmd]', method, shlex.join(cmd_list))
         else:
             self.logger.debug(
-                '%s: %s %s("%s", pre_cmd: "%s" use_pty: %s kwargs: %.120s)',
+                '%s: %s("%s", pre_cmd: "%s" use_pty: %s kwargs: %.120s)',
                 self,
-                "XXX" if method == "_spawn" else "",
                 method,
                 cmd_list,
                 pre_cmd_list if not skip_pre_cmd else "",
@@ -566,7 +565,7 @@ class Commander:  # pylint: disable=R0904
 
     def _spawn(self, cmd, skip_pre_cmd=False, use_pty=False, echo=False, **kwargs):
         logging.debug(
-            '%s: XXX _spawn: cmd "%s" skip_pre_cmd %s use_pty %s echo %s kwargs %s',
+            '%s: _spawn: cmd "%s" skip_pre_cmd %s use_pty %s echo %s kwargs %s',
             self,
             cmd,
             skip_pre_cmd,
@@ -579,7 +578,7 @@ class Commander:  # pylint: disable=R0904
         )
 
         self.logger.debug(
-            '%s: XXX %s("%s", use_pty %s echo %s defaults: %s)',
+            '%s: %s("%s", use_pty %s echo %s defaults: %s)',
             self,
             "PopenSpawn" if not use_pty else "pexpect.spawn",
             actual_cmd,
@@ -2948,7 +2947,7 @@ if True:  # pylint: disable=using-constant-test
             )
 
             logging.debug(
-                'ShellWraper: XXX prompt "%s" will_echo %s child.echo %s',
+                'ShellWraper: prompt "%s" will_echo %s child.echo %s',
                 prompt,
                 will_echo,
                 spawn.echo,

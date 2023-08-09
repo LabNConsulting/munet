@@ -1020,6 +1020,7 @@ ff02::2\tip6-allrouters
                     "Physical PCI device %s already bound to vfio-pci", devaddr
                 )
                 return
+
             self.logger.info(
                 "Unbinding physical PCI device %s from driver %s", devaddr, driver
             )
