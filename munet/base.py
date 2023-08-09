@@ -865,14 +865,18 @@ class Commander:  # pylint: disable=R0904
             else:
                 o, e = await p.communicate()
             self.logger.debug(
-                "%s: cmd_p already exited status: %s", self, proc_error(p, o, e)
+                "%s: [cleanup_proc] proc already exited status: %s",
+                self,
+                proc_error(p, o, e),
             )
             return None
 
         if pid is None:
             pid = p.pid
 
-        self.logger.debug("%s: terminate process: %s (pid %s)", self, proc_str(p), pid)
+        self.logger.debug(
+            "%s: [cleanup_proc] terminate process: %s (pid %s)", self, proc_str(p), pid
+        )
         try:
             # This will SIGHUP and wait a while then SIGKILL and return immediately
             await self.cleanup_pid(p.pid, pid)
@@ -885,14 +889,19 @@ class Commander:  # pylint: disable=R0904
             else:
                 o, e = await asyncio.wait_for(p.communicate(), timeout=wait_secs)
             self.logger.debug(
-                "%s: cmd_p exited after kill, status: %s", self, proc_error(p, o, e)
+                "%s: [cleanup_proc] exited after kill, status: %s",
+                self,
+                proc_error(p, o, e),
             )
         except (asyncio.TimeoutError, subprocess.TimeoutExpired):
-            self.logger.warning("%s: SIGKILL timeout", self)
+            self.logger.warning("%s: [cleanup_proc] SIGKILL timeout", self)
             return p
         except Exception as error:
             self.logger.warning(
-                "%s: kill unexpected exception: %s", self, error, exc_info=True
+                "%s: [cleanup_proc] kill unexpected exception: %s",
+                self,
+                error,
+                exc_info=True,
             )
             return p
         return None
@@ -2005,8 +2014,10 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 stdout=stdout,
                 stderr=stderr,
                 text=True,
-                start_new_session=not unet,
                 shell=False,
+                # start_new_session=not unet
+                # preexec_fn=os.setsid if not unet else None,
+                preexec_fn=os.setsid,
             )
 
             # The pid number returned is in the global pid namespace. For unshare_inline
@@ -2345,14 +2356,14 @@ class LinuxNamespace(Commander, InterfaceMixin):
             and self.pid != our_pid
         ):
             self.logger.debug(
-                "cleanup pid on separate pid %s from proc pid %s",
+                "cleanup separate pid %s from namespace proc pid %s",
                 self.pid,
                 self.p.pid if self.p else None,
             )
             await self.cleanup_pid(self.pid)
 
         if self.p is not None:
-            self.logger.debug("cleanup proc pid %s", self.p.pid)
+            self.logger.debug("cleanup namespace proc pid %s", self.p.pid)
             await self.async_cleanup_proc(self.p)
 
         # return to the previous namespace, need to do this in case anothe munet

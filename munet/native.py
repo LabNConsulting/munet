@@ -1025,7 +1025,7 @@ ff02::2\tip6-allrouters
             )
             self.phy_odrivers[devaddr] = driver
             self.unet.rootcmd.cmd_raises(
-                f"echo {devaddr} > /sys/bus/pci/drivers/{driver}/unbind"
+                f"echo {devaddr} | timeout 10 tee /sys/bus/pci/drivers/{driver}/unbind"
             )
 
         # Add the device vendor and device id to vfio-pci in case it's the first time
@@ -1067,7 +1067,7 @@ ff02::2\tip6-allrouters
             "Unbinding physical PCI device %s from driver vfio-pci", devaddr
         )
         self.unet.rootcmd.cmd_status(
-            f"echo {devaddr} > /sys/bus/pci/drivers/vfio-pci/unbind"
+            f"echo {devaddr} | timeout 10 tee /sys/bus/pci/drivers/vfio-pci/unbind"
         )
 
         self.logger.info("Binding physical PCI device %s to driver %s", devaddr, driver)
@@ -1086,12 +1086,12 @@ ff02::2\tip6-allrouters
         for hname in list(self.host_intfs):
             await self.rem_host_intf(hname)
 
-        # remove any hostintf interfaces
-        for devaddr in list(self.phy_intfs):
-            await self.rem_phy_intf(devaddr)
-
         # delete the LinuxNamespace/InterfaceMixin
         await super()._async_delete()
+
+        # remove any hostintf interfaces, needs to come after normal exits
+        for devaddr in list(self.phy_intfs):
+            await self.rem_phy_intf(devaddr)
 
 
 class L3NamespaceNode(L3NodeMixin, LinuxNamespace):
@@ -1124,6 +1124,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         assert self.container_image
 
         self.cmd_p = None
+        self.cmd_pid = None
         self.__base_cmd = []
         self.__base_cmd_pty = []
 
@@ -1394,7 +1395,13 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             start_new_session=True,  # keeps main tty signals away from podman
         )
 
-        self.logger.debug("%s: async_popen => %s", self, self.cmd_p.pid)
+        # If our process is actually the child of an nsenter fetch its pid.
+        if self.nsenter_fork:
+            self.cmd_pid = await self.get_proc_child_pid(self.cmd_p)
+
+        self.logger.debug(
+            "%s: async_popen => %s (%s)", self, self.cmd_p.pid, self.cmd_pid
+        )
 
         self.pytest_hook_run_cmd(stdout, stderr)
 
@@ -1543,6 +1550,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         """Create a Container Node."""
         self.cont_exec_paths = {}
         self.launch_p = None
+        self.launch_pid = None
         self.qemu_config = config["qemu"]
         self.extra_mounts = []
         assert self.qemu_config
@@ -2262,17 +2270,19 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
         stdout = open(os.path.join(self.rundir, "qemu.out"), "wb")
         stderr = open(os.path.join(self.rundir, "qemu.err"), "wb")
-        self.launch_p = await self.async_popen(
+        self.launch_p = await self.async_popen_nsonly(
             args,
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
             pass_fds=pass_fds,
-            # We don't need this here b/c we are only ever running qemu and that's all
-            # we need to kill for cleanup
-            # XXX reconcile this
-            start_new_session=True,  # allows us to signal all children to exit
+            # Don't want Keybaord interrupt etc to pass to child.
+            # start_new_session=True,
+            preexec_fn=os.setsid,
         )
+
+        if self.nsenter_fork:
+            self.launch_pid = await self.get_proc_child_pid(self.launch_p)
 
         self.pytest_hook_run_cmd(stdout, stderr)
 
@@ -2280,7 +2290,9 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         for fd in pass_fds:
             os.close(fd)
 
-        self.logger.debug("%s: async_popen => %s", self, self.launch_p.pid)
+        self.logger.debug(
+            "%s: popen => %s (%s)", self, self.launch_p.pid, self.launch_pid
+        )
 
         confiles = ["_console"]
         if use_cmdcon:
@@ -2349,11 +2361,6 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 "%s: node launch (qemu) cmd wait() canceled: %s", future, error
             )
 
-    async def cleanup_qemu(self):
-        """Launch qemu."""
-        if self.launch_p:
-            await self.async_cleanup_proc(self.launch_p)
-
     async def async_cleanup_cmd(self):
         """Run the configured cleanup commands for this node."""
         self.cleanup_called = True
@@ -2373,7 +2380,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
         # Need to cleanup early b/c it is running on the VM
         if self.cmd_p:
-            await self.async_cleanup_proc(self.cmd_p)
+            await self.async_cleanup_proc(self.cmd_p, self.cmd_pid)
             self.cmd_p = None
 
         try:
@@ -2389,9 +2396,9 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             if not self.launch_p:
                 self.logger.warning("async_delete: qemu is not running")
             else:
-                await self.cleanup_qemu()
+                await self.async_cleanup_proc(self.launch_p, self.launch_pid)
         except Exception as error:
-            self.logger.warning("%s: failued to cleanup qemu process: %s", self, error)
+            self.logger.warning("%s: failed to cleanup qemu process: %s", self, error)
 
         await super()._async_delete()
 
