@@ -2321,10 +2321,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         # the monitor output has super annoying ANSI escapes in it
 
         output = self.monrepl.cmd_nostatus("info status")
-        self.logger.info("VM status: %s", output)
+        self.logger.debug("VM status: %s", output)
 
         output = self.monrepl.cmd_nostatus("info kvm")
-        self.logger.info("KVM status: %s", output)
+        self.logger.debug("KVM status: %s", output)
 
         #
         # Set thread affinity
@@ -2823,6 +2823,8 @@ ff02::2\tip6-allrouters
             logging.debug("Launching nodes")
             await asyncio.gather(*[x.launch() for x in launch_nodes])
 
+        logging.debug("Launched nodes -- Queueing Waits")
+
         # Watch for launched processes to exit
         for node in launch_nodes:
             task = asyncio.create_task(
@@ -2831,16 +2833,22 @@ ff02::2\tip6-allrouters
             task.add_done_callback(node.launch_completed)
             tasks.append(task)
 
+        logging.debug("Wait complete queued, running cmd")
+
         if run_nodes:
             # would like a info when verbose here.
             logging.debug("Running `cmd` on nodes")
             await asyncio.gather(*[x.run_cmd() for x in run_nodes])
+
+        logging.debug("Ran cmds -- Queueing Waits")
 
         # Watch for run_cmd processes to exit
         for node in run_nodes:
             task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
             task.add_done_callback(node.cmd_completed)
             tasks.append(task)
+
+        logging.debug("Wait complete queued, waiting for ready")
 
         # Wait for nodes to be ready
         if ready_nodes:
@@ -2861,6 +2869,8 @@ ff02::2\tip6-allrouters
                     nr.cancel()
                 raise asyncio.TimeoutError()
             logging.debug("All nodes ready")
+
+        logging.debug("All done returning tasks: %s", tasks)
 
         return tasks
 
