@@ -1345,6 +1345,14 @@ class Commander:  # pylint: disable=R0904
                 "select-layout",
                 "-t",
                 pane_info if not tmux_target else tmux_target,
+                "even-horizontal",
+            ]
+            commander.cmd_status(cmd)
+            cmd = [
+                get_exec_path_host("tmux"),
+                "select-layout",
+                "-t",
+                pane_info if not tmux_target else tmux_target,
                 "tiled",
             ]
             commander.cmd_status(cmd)
