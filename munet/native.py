@@ -962,8 +962,32 @@ ff02::2\tip6-allrouters
         if hname in self.host_intfs:
             return
         self.host_intfs[hname] = lname
-        self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
-        self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
+
+        # See if this interace is missing and needs to be fixed
+        rc, o, e = self.unet.rootcmd.cmd_status(f"ip -o link show")
+        m = re.search(rf"\d+:\s+(\S+):.*altname {re.escape(hname)}\W", o)
+        if m:
+            # need to rename
+            dname = m.group(1)
+            self.logger.info("Fixing misnamed %s to %s", dname, hname)
+            self.unet.rootcmd.cmd_status(
+                f"ip link property del dev {dname} altname {hname}"
+            )
+            self.unet.rootcmd.cmd_status(f"ip link set {dname} name {hname}")
+
+        rc, o, e = self.unet.rootcmd.cmd_status(f"ip -o link show")
+        m = re.search(rf"\d+:\s+{re.escape(hname)}:.*", o)
+        if m:
+            self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
+            self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
+        # Wait for interface to show up in namespace
+        for retry in range(0, 10):
+            rc, o, _ = self.cmd_status(f"ip -o link show {hname}")
+            if not rc:
+                if re.search(rf"\d+: {re.escape(hname)}:.*", o):
+                    break
+            if retry > 0:
+                await asyncio.sleep(1)
         self.cmd_raises(f"ip link set {hname} name {lname}")
         if mtu:
             self.cmd_raises(f"ip link set {lname} mtu {mtu}")
@@ -1060,7 +1084,14 @@ ff02::2\tip6-allrouters
             f"echo {vendor} {devid} > /sys/bus/pci/drivers/vfio-pci/new_id", warn=False
         )
 
-        if not self.unet.rootcmd.path_exists(f"/sys/bus/pci/driver/vfio-pci/{devaddr}"):
+        for retry in range(0, 10):
+            if self.unet.rootcmd.path_exists(
+                f"/sys/bus/pci/drivers/vfio-pci/{devaddr}"
+            ):
+                break
+            if retry > 0:
+                await asyncio.sleep(1)
+
             # Bind to vfio-pci if wasn't added with new_id
             self.logger.info("Binding physical PCI device %s to vfio-pci", devaddr)
             ec, _, _ = self.unet.rootcmd.cmd_status(
