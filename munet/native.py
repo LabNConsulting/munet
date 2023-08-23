@@ -20,6 +20,8 @@ import socket
 import subprocess
 import time
 
+from pathlib import Path
+
 from . import cli
 from .base import BaseMunet
 from .base import Bridge
@@ -38,6 +40,7 @@ from .config import config_to_dict_with_key
 from .config import find_matching_net_config
 from .config import find_with_kv
 from .config import merge_kind_config
+from .watchlog import WatchLog
 
 
 class L3ContainerNotRunningError(MunetError):
@@ -665,6 +668,7 @@ class L3NodeMixin(NodeMixin):
         self.phycount = 0
         self.phy_odrivers = {}
         self.tapmacs = {}
+        self.watched_logs = {}
 
         self.intf_tc_count = 0
 
@@ -723,6 +727,25 @@ ff02::2\tip6-allrouters
             )
         if hasattr(self, "bind_mount"):
             self.bind_mount(hosts_file, "/etc/hosts")
+
+    def add_watch_log(self, path, watchfor_re=None):
+        """Add a WatchLog to this nodes watched logs.
+
+        Args:
+            path: If relative is relative to the nodes ``rundir``
+            watchfor_re: Regular expression to watch the log for and raise an exception
+                         if found.
+        Return:
+            The watching task if request or None otherwise.
+        """
+        path = Path(path)
+        if not path.is_absolute():
+            path = self.rundir.joinpath(path)
+
+        wl = WatchLog(path)
+        self.watched_logs[wl.path] = wl
+        task = wl.raise_if_match_task(watchfor_re) if watchfor_re else None
+        return task
 
     async def console(
         self,
