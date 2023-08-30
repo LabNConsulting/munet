@@ -997,7 +997,12 @@ ff02::2\tip6-allrouters
         lname = self.host_intfs[hname]
         self.cmd_raises(f"ip link set {lname} down")
         self.cmd_raises(f"ip link set {lname} name {hname}")
-        self.cmd_raises(f"ip link set {hname} netns 1")
+        self.cmd_status(f"ip link set netns 1 dev {hname}")
+        # The above is failing sometimes and not sure why
+        # logging.error(
+        #     "XXX after setns %s",
+        #     self.unet.rootcmd.cmd_nostatus(f"ip link show {hname}"),
+        # )
         del self.host_intfs[hname]
 
     async def add_phy_intf(self, devaddr, lname):
@@ -2032,8 +2037,9 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                     con.cmd_raises(f"ip -6 route add default via {switch.ip6_address}")
         con.cmd_raises("ip link set lo up")
 
-        if self.unet.cfgopt.getoption("--coverage"):
-            con.cmd_raises("mount -t debugfs none /sys/kernel/debug")
+        # This is already mounted now
+        # if self.unet.cfgopt.getoption("--coverage"):
+        #     con.cmd_raises("mount -t debugfs none /sys/kernel/debug")
 
     async def gather_coverage_data(self):
         con = self.conrepl
