@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 class MatchFoundError(Exception):
+    """An error raised when a match is not found."""
     def __init__(self, watchlog, match):
         self.watchlog = watchlog
         self.match = match
@@ -28,6 +29,7 @@ class WatchLog:
 
         Args:
             path: that path of the logfile to watch
+            encoding: the encoding of the logfile
         """
         # Immutable
         self.path = Path(path)
@@ -160,7 +162,6 @@ class WatchLog:
         Return:
             Newly added text.
         """
-
         # Update the content which may reset marks
         self.update_content()
 

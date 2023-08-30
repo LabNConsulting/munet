@@ -735,6 +735,7 @@ ff02::2\tip6-allrouters
             path: If relative is relative to the nodes ``rundir``
             watchfor_re: Regular expression to watch the log for and raise an exception
                          if found.
+
         Return:
             The watching task if request or None otherwise.
         """
@@ -964,7 +965,7 @@ ff02::2\tip6-allrouters
         self.host_intfs[hname] = lname
 
         # See if this interace is missing and needs to be fixed
-        rc, o, e = self.unet.rootcmd.cmd_status(f"ip -o link show")
+        rc, o, _ = self.unet.rootcmd.cmd_status("ip -o link show")
         m = re.search(rf"\d+:\s+(\S+):.*altname {re.escape(hname)}\W", o)
         if m:
             # need to rename
@@ -975,7 +976,7 @@ ff02::2\tip6-allrouters
             )
             self.unet.rootcmd.cmd_status(f"ip link set {dname} name {hname}")
 
-        rc, o, e = self.unet.rootcmd.cmd_status(f"ip -o link show")
+        rc, o, _ = self.unet.rootcmd.cmd_status("ip -o link show")
         m = re.search(rf"\d+:\s+{re.escape(hname)}:.*", o)
         if m:
             self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
