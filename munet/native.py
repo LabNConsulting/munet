@@ -461,7 +461,7 @@ class NodeMixin:
                 if bp:
                     gdbcmd += f" '-ex=b {bp}'"
 
-            cmds = self.config.get("gdb-run-cmd", [])
+            cmds = self.config.get("gdb-run-cmds", [])
             for cmd in cmds:
                 gdbcmd += f" '-ex={cmd}'"
 

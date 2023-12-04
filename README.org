@@ -92,7 +92,7 @@ module: labn-munet-config
   |  |  +--rw name     string
   |  |  +--rw value?   string
   |  +--rw gdb-cmd?       string
-  |  +--rw gdb-run-cmd*   string
+  |  +--rw gdb-run-cmds*  string
   |  +--rw init?          union
   |  +--rw mounts* [destination]
   |  |  +--rw destination    string
@@ -160,7 +160,7 @@ module: labn-munet-config
   |     |  +--rw name     string
   |     |  +--rw value?   string
   |     +--rw gdb-cmd?       string
-  |     +--rw gdb-run-cmd*   string
+  |     +--rw gdb-run-cmds*  string
   |     +--rw init?          union
   |     +--rw mounts* [destination]
   |     |  +--rw destination    string
