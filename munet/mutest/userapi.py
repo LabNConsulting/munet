@@ -144,7 +144,6 @@ class TestCase:
         result_logger: logging.Logger = None,
         full_summary: bool = False,
     ):
-
         self.info = TestCaseInfo(tag, name, path)
         self.__saved_info = []
         self.__short_doc_header = not full_summary
@@ -248,7 +247,6 @@ class TestCase:
         self.rlog.info("%s. %s", tag, header)
 
     def __exec_script(self, path, print_header, add_newline):
-
         # Below was the original method to avoid the global TestCase
         # variable; however, we need global functions so we can import them
         # into test scripts. Without imports pylint will complain about undefined
@@ -501,16 +499,16 @@ class TestCase:
             # Convert DeepDiff completely into dicts or lists at all levels
             json_diff = json.loads(deep_diff.to_json())
             # Remove new fields in json object from diff
-            if json_diff.get('dictionary_item_added') is not None:
-                del json_diff['dictionary_item_added']
+            if json_diff.get("dictionary_item_added") is not None:
+                del json_diff["dictionary_item_added"]
             # Remove new json objects in json array from diff
-            if (new_items := json_diff.get('iterable_item_added')) is not None:
+            if (new_items := json_diff.get("iterable_item_added")) is not None:
                 new_item_paths = list(new_items.keys())
                 for path in new_item_paths:
                     if type(new_items[path]) is dict:
                         del new_items[path]
                 if len(new_items) == 0:
-                    del json_diff['iterable_item_added']
+                    del json_diff["iterable_item_added"]
 
         if json_diff:
             success = expect_fail
@@ -798,7 +796,15 @@ class TestCase:
             exact_match,
         )
         success, ret = self._wait(
-            target, cmd, match, False, timeout, interval, expect_fail, flags, exact_match
+            target,
+            cmd,
+            match,
+            False,
+            timeout,
+            interval,
+            expect_fail,
+            flags,
+            exact_match,
         )
         if desc:
             self.__post_result(target, success, desc)
