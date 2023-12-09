@@ -1,0 +1,93 @@
+version: 1
+kinds:
+  - name: frr
+    cmd: |
+      chown frr:frr -R /var/run/frr
+      chown frr:frr -R /var/log/frr
+      /usr/lib/frr/frrinit.sh start
+      tail -F /var/log/frr/frr.log
+    cleanup-cmd: |
+      /usr/lib/frr/frrinit.sh stop
+    volumes:
+      - "./%NAME%/etc.frr:/etc/frr"
+      - "%RUNDIR%/var.log.frr:/var/log/frr"
+      - "%RUNDIR%/var.run.frr:/var/run/frr"
+    cap-add:
+      - SYS_ADMIN
+      - AUDIT_WRITE
+    merge: ["volumes"]
+
+topology:
+  networks:
+    - name: net1
+      ip: 10.0.1.254/24
+    - name: net2
+      ip: 10.0.2.254/24
+    - name: net3
+      ip: 10.0.3.254/24
+    - name: net4
+      ip: 10.0.4.254/24
+    - name: net5
+      ip: 10.0.5.254/24
+    - name: net6
+      ip: 10.0.6.254/24
+    - name: local-rtr5
+      ip: 11.0.5.254/24
+    - name: local-rtr1
+      ip: 11.0.1.254/24
+  nodes:
+    - name: rtr1
+      kind: frr
+      connections:
+        - to: "net1"
+        - to: "net6"
+        - to: "local-rtr1"
+    - name: src-rtr1
+      connections:
+        - to: "local-rtr1"
+      cmd: |
+        ip address add 11.0.1.10/24 dev eth0
+        ip route add default via 11.0.1.1
+        ping 224.1.1.1 -t 128
+    - name: rtr2
+      kind: frr
+      connections:
+        - to: "net1"
+        - to: "net2"
+    - name: rtr3
+      kind: frr
+      connections:
+        - to: "net2"
+        - to: "net3"
+    - name: rtr4
+      kind: frr
+      connections:
+        - to: "net3"
+        - to: "net4"
+    - name: rtr5
+      kind: frr
+      connections:
+        - to: "net4"
+        - to: "net5"
+        - to: "local-rtr5"
+    - name: rec-rtr5
+      kind: frr
+      connections:
+        - to: "local-rtr5"
+    - name: rtr6
+      kind: frr
+      connections:
+        - to: "net5"
+        - to: "net6"
+cli:
+  commands:
+    - name: ""
+      exec: "vtysh -c '{}'"
+      format: "[ROUTER ...] COMMAND"
+      help: "execute vtysh COMMAND on the router[s]"
+      kinds: ["frr"]
+    - name: "vtysh"
+      exec: "/usr/bin/vtysh"
+      format: "vtysh ROUTER [ROUTER ...]"
+      new-window: true
+      kinds: ["frr"]
