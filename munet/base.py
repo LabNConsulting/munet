@@ -1234,8 +1234,14 @@ class Commander:  # pylint: disable=R0904
         else:
             # This is the command to execute to be inside the namespace.
             # We are getting into trouble with quoting.
-            # Why aren't we passing in MUNET_RUNDIR?
-            cmd = f"/usr/bin/env MUNET_NODENAME={self.name} {cmd}"
+            envvars = f"MUNET_NODENAME={self.name} NODENAME={self.name}"
+            if hasattr(self, "rundir"):
+                envvars += f" RUNDIR={self.rundir}"
+            if self.unet.config_dirname:
+                envvars += f" CONFIGDIR={self.unet.config_dirname}"
+            elif "CONFIGDIR" in os.environ:
+                envvars += f" CONFIGDIR={os.environ['CONFIGDIR']}"
+            cmd = f"/usr/bin/env {envvars} {cmd}"
             # We need sudo b/c we are executing as the user inside the window system.
             sudo_path = get_exec_path_host(["sudo"])
             nscmd = (
