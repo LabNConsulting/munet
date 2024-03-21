@@ -403,7 +403,7 @@ class TestCase:
         try:
             js = json.loads(out)
         except Exception as error:
-            js = {}
+            js = None
             self.olog.warning(
                 "JSON load failed. Check command output is in JSON format: %s",
                 error,
@@ -482,6 +482,9 @@ class TestCase:
             exact_match: if True then the json must exactly match.
         """
         js = self._command_json(target, cmd)
+        if js is None:
+            return expect_fail, {}
+
         try:
             expect = json.loads(match)
         except Exception as error:
@@ -489,6 +492,7 @@ class TestCase:
             self.olog.warning(
                 "JSON load failed. Check match value is in JSON format: %s", error
             )
+            return expect_fail, {}
 
         if exact_match:
             deep_diff = json_cmp(expect, js)

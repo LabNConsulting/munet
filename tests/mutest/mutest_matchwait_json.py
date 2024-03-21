@@ -3,6 +3,7 @@ from munet.mutest.userapi import log
 from munet.mutest.userapi import match_step_json
 from munet.mutest.userapi import section
 from munet.mutest.userapi import step_json
+from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step_json
 
 
@@ -314,4 +315,64 @@ match_step_json(
     "empty json output doesn't match",
     expect_fail=True,
     exact_match=False,
+)
+
+section("Test json errors")
+
+jsonblank = '{}'
+jsongood = '{"foo":"bar"}'
+jsonbad = '{"bad":"trailing-comma",}'
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsongood}'",
+    jsongood,
+    "Output json is good, match json is good, expect pass",
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsonbad}'",
+    jsongood,
+    "Output json is bad, match json is good, fail is pass",
+    expect_fail=True,
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsongood}'",
+    jsonblank,
+    "Output json is good, match json is blank, expect pass",
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsonbad}'",
+    jsonblank,
+    "Output json is bad, match json is blank, fail is pass",
+    expect_fail=True,
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsongood}'",
+    jsonbad,
+    "Output json is good, match json is bad, fail is pass",
+    expect_fail=True,
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsonblank}'",
+    jsonbad,
+    "Output json is blank, match json is bad, fail is pass",
+    expect_fail=True,
+)
+
+_, ret = match_step_json(
+    "r1",
+    f"echo '{jsonbad}'",
+    jsonbad,
+    "Output json and match json are bad, fail is pass",
+    expect_fail=True,
 )
