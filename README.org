@@ -251,7 +251,8 @@ cisco VM using a nexos file system image.
         end
       qemu:
         unix-os: false
-        disk: "%CONFIGDIR%/nexus9300v64.10.2.3.F.qcow2"
+        disk-template: "%CONFIGDIR%/nexus9300v64.10.2.3.F.qcow2"
+        disk-driver: "sata"
         bios: "open-firmware"
         memory: "8192M"
         smp: 2
@@ -550,6 +551,24 @@ munet>
         description
           "SSH port to connect to server on";
       }
+      leaf ssh-identity-file {
+        type string;
+        description
+          "Path to an SSH private key file for logging into either a remote ssh
+           `server` or a qemu node with a running ssh server.";
+      }
+      leaf ssh-user {
+        type string;
+        description
+          "The user to use when logging into either a remote ssh `server` or a
+           qemu node with a running ssh server.";
+      }
+      leaf ssh-password {
+        type string;
+        description
+          "The password to use when creating a 'console' to a remote ssh
+           `server` node.";
+      }
       container qemu {
         must "not(../image) and not(../server)" {
           error-message "Can only have one of image, server or qemu";
@@ -563,7 +582,30 @@ munet>
         }
         leaf disk {
           type string;
-          description "path to disk image possibly to boot from";
+          description "Path to disk image possibly to boot from";
+        }
+        leaf disk-driver {
+          type string;
+          default "virtio";
+          description
+            "Disk driver to use, either 'sata' or 'virtio'. Some router images
+             only work with 'sata', normally this should not be specified so that
+             the default 'virtio' is used";
+        }
+        leaf disk-template {
+          type string;
+          description
+            "Path to disk image template. If a ../disk image is not specified, or
+             does not yet exist. Then this template is used to create a new disk
+             image. If ../disk is not specified then the disk image path will be
+             %RUNDIR%/%NAME%-<disk-template-basename>";
+        }
+        leaf initial-cmd {
+          type string;
+          description
+            "Shell command[s] to execute when creating the node from a disk
+             template. These commands are run prior to the standard ../../cmd
+             when a disk is first created from a disk template";
         }
         leaf kerenel {
           type string;
@@ -611,6 +653,14 @@ munet>
             type string;
             description "Password to login to console with";
           }
+          leaf initial-password {
+            type string;
+            description
+              "The initial password. If the VM disk is newly created from a
+               template, this value can be used to specify an initial password
+               for the user. Often part of the bring-up process will set a new
+               password and that should then be stored in the ../password leaf.";
+          }
           leaf-list expects {
             type string;
             description "Strings to expect for logging into the console";
@@ -653,11 +703,22 @@ munet>
         }
         leaf hostintf {
           type string;
-          description "Host interface name for wired connections";
+          description
+            "Host interface for wired connections. This will move the given host
+             interface into the namespace. The value is the name of the
+             interface on the host (e.g., 'enp216s0f0v0') it will be renamed
+             inside the namespace accordingly (either using automatic naming
+             (e.g., 'eth1') or the name specified in ../name leaf.";
         }
         leaf physical {
           type string;
-          description "Physical interface name for wired connections";
+          description
+            "Physical PCI interface address for wired connections. This is the
+             PCI address of the form xxxx:xx:xx.x (e.g., 0000:1b:02.0) this will
+             detach the given PCI device from it's native driver and reattach it
+             to the vfio-dev PCI driver. This is used primarily by Qemu nodes;
+             however, it can also be used by user processes that directly
+             control physical devices such as DPDK, TREX, or VPP";
         }
         leaf remote-name {
           type string;
