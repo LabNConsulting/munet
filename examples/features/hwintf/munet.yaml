@@ -1,0 +1,49 @@
+topology:
+  networks-autonumber: false
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 10.0.1.254/24
+      nat: true
+  nodes:
+    - name: host1
+      connections:
+        - to: mgmt0
+          ip: 10.0.1.1/24
+        - to: sshsrv
+          name: eth1
+          ip: 11.0.0.1/24
+          # physical: "0000:1b:02.0"
+          hostintf: "enp27s0f0v0"
+    - name: remote1
+      kind: remotessh
+      server: sshsrv
+    - name: sshsrv
+      kind: sshserver
+      connections:
+        - to: "mgmt0"
+          ip: 10.0.1.4/24
+        - to: host1
+          name: eth1
+          ip: 11.0.0.4/24
+          # physical: "0000:d8:02.0"
+          hostintf: enp216s0f0v0
+
+kinds:
+  - name: sshserver
+    cmd: |
+      chmod 755 -R /ssh
+      ssh-keygen -b 2048 -t rsa -f ../id_rsa -q -N ""
+      ssh-keygen -b 2048 -t rsa -f ssh_host_rsa_key -q -N ""
+      printf '#!/bin/bash\ncat %RUNDIR%/../id_rsa.pub' > /ssh/akeycmd.sh
+      chmod 755 /ssh/akeycmd.sh
+      sed "s,\$PWD,$PWD,;s,\$USER,$USER,;s,\$HOME,$HOME," %CONFIGDIR%/../../../tests/common/sshd_config.tpl > %RUNDIR%/sshd_config
+      echo -n > %RUNDIR%/sshd.log
+      /usr/sbin/sshd -f %RUNDIR%/sshd_config -E %RUNDIR%/sshd.log
+      touch %RUNDIR%/started
+    volumes:
+      - /ssh
+  - name: remotessh
+    server-port: 5222
+    ssh-user: root
+    ssh-identity-file: "%RUNDIR%/../id_rsa"

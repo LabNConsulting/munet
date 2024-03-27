@@ -18,10 +18,11 @@ pytestmark = pytest.mark.asyncio
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio
-if "GITHUB_ACTION" in os.environ:
-    pytestmark = pytest.mark.parametrize(
-        "unet_share", ["munet-ci"], indirect=["unet_share"]
-    )
+
+# if "GITHUB_ACTION" in os.environ:
+#     pytestmark = pytest.mark.parametrize(
+#         "unet_share", ["munet-ci"], indirect=["unet_share"]
+#     )
 
 
 async def _test_repl(unet, hostname, cmd, use_pty, will_echo=False):

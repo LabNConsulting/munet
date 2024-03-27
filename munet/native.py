@@ -1639,7 +1639,15 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             rundir=os.path.join(self.rundir, self.name),
             configdir=self.unet.config_dirname,
         )
-        self.ssh_keyfile = self.qemu_config.get("sshkey")
+        self.ssh_keyfile = self.config.get("ssh-identity-file")
+        if not self.ssh_keyfile:
+            self.ssh_keyfile = self.qemu_config.get("sshkey")
+
+        self.ssh_user = self.config.get("ssh-user")
+        if not self.ssh_user:
+            self.ssh_user = self.qemu_config.get("sshuser", "root")
+
+        self.disk_created = False
 
     @property
     def is_vm(self):
@@ -1680,10 +1688,9 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         self.__base_cmd_pty = list(self.__base_cmd)
         self.__base_cmd_pty.append("-t")
 
-        user = self.qemu_config.get("sshuser", "root")
-        self.__base_cmd.append(f"{user}@{mgmt_ip}")
+        self.__base_cmd.append(f"{self.ssh_user}@{mgmt_ip}")
         self.__base_cmd.append("--")
-        self.__base_cmd_pty.append(f"{user}@{mgmt_ip}")
+        self.__base_cmd_pty.append(f"{self.ssh_user}@{mgmt_ip}")
         # self.__base_cmd_pty.append("--")
         return True
 
@@ -1810,15 +1817,15 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if args:
             self.extra_mounts += args
 
-    async def run_cmd(self):
+    async def _run_cmd(self, cmd_node):
         """Run the configured commands for this node inside VM."""
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
-        cmd = self.config.get("cmd", "").strip()
+        cmd = self.config.get(cmd_node, "").strip()
         if not cmd:
-            self.logger.debug("%s: no `cmd` to run", self)
+            self.logger.debug("%s: no `%s` to run", self, cmd_node)
             return None
 
         shell_cmd = self.config.get("shell", "/bin/bash")
@@ -1837,15 +1844,17 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             cmd += "\n"
 
             # Write a copy to the rundir
-            cmdpath = os.path.join(self.rundir, "cmd.shebang")
+            cmdpath = os.path.join(self.rundir, f"{cmd_node}.shebang")
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(cmd)
             commander.cmd_raises(f"chmod 755 {cmdpath}")
 
             # Now write a copy inside the VM
-            self.conrepl.cmd_status("cat > /tmp/cmd.shebang << EOF\n" + cmd + "\nEOF")
-            self.conrepl.cmd_status("chmod 755 /tmp/cmd.shebang")
-            cmds = "/tmp/cmd.shebang"
+            self.conrepl.cmd_status(
+                f"cat > /tmp/{cmd_node}.shebang << EOF\n" + cmd + "\nEOF"
+            )
+            self.conrepl.cmd_status(f"chmod 755 /tmp/{cmd_node}.shebang")
+            cmds = f"/tmp/{cmd_node}.shebang"
         else:
             cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
             cmd = cmd.replace("%RUNDIR%", str(self.rundir))
@@ -1892,6 +1901,11 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
 
         return self.cmd_p
+
+    async def run_cmd(self):
+        if self.disk_created:
+            await self._run_cmd("initial-cmd")
+        await self._run_cmd("cmd")
 
     # InterfaceMixin override
     # We need a name unique in the shared namespace.
@@ -2119,6 +2133,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                         expects=expects,
                         sends=sends,
                         timeout=timeout,
+                        init_newline=True,
                         trace=True,
                     )
                 )
@@ -2247,30 +2262,45 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if not nnics:
             args += ["-nic", "none"]
 
-        dtpl = qc.get("disk-template")
+        dtplpath = dtpl = qc.get("disk-template")
         diskpath = disk = qc.get("disk")
-        if dtpl and not disk:
-            disk = qc["disk"] = f"{self.name}-{os.path.basename(dtpl)}"
-            diskpath = os.path.join(self.rundir, disk)
+        if diskpath:
+            if diskpath[0] != "/":
+                diskpath = os.path.join(self.unet.config_dirname, diskpath)
+
+        if dtpl and (not disk or not os.path.exists(diskpath)):
+            if not disk:
+                disk = qc["disk"] = f"{self.name}-{os.path.basename(dtpl)}"
+                diskpath = os.path.join(self.rundir, disk)
             if self.path_exists(diskpath):
                 logging.debug("Disk '%s' file exists, using.", diskpath)
             else:
-                dtplpath = os.path.abspath(
-                    os.path.join(
-                        os.path.dirname(self.unet.config["config_pathname"]), dtpl
-                    )
-                )
+                if dtplpath[0] != "/":
+                    dtplpath = os.path.join(self.unet.config_dirname, dtpl)
                 logging.info("Create disk '%s' from template '%s'", diskpath, dtplpath)
                 self.cmd_raises(
                     f"qemu-img create -f qcow2 -F qcow2 -b {dtplpath} {diskpath}"
                 )
+                self.disk_created = True
 
+        disk_driver = qc.get("disk-driver", "virtio")
         if diskpath:
-            args.extend(
-                ["-drive", f"file={diskpath},if=none,id=sata-disk0,format=qcow2"]
-            )
-            args.extend(["-device", "ahci,id=ahci"])
-            args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
+            if disk_driver == "virtio":
+                args.extend(["-drive", f"file={diskpath},if=virtio,format=qcow2"])
+            else:
+                args.extend(
+                    ["-drive", f"file={diskpath},if=none,id=sata-disk0,format=qcow2"]
+                )
+                args.extend(["-device", "ahci,id=ahci"])
+                args.extend(["-device", "ide-hd,bus=ahci.0,drive=sata-disk0"])
+
+        cidiskpath = qc.get("cloud-init-disk")
+        if cidiskpath:
+            if cidiskpath[0] != "/":
+                cidiskpath = os.path.join(self.unet.config_dirname, cidiskpath)
+            args.extend(["-drive", f"file={cidiskpath},if=virtio,format=qcow2"])
+
+        # args.extend(["-display", "vnc=0.0.0.0:40"])
 
         use_stdio = cc.get("stdio", True)
         has_cmd = self.config.get("cmd")
@@ -2360,6 +2390,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if use_cmdcon:
             confiles.append("_cmdcon")
 
+        password = cc.get("password", "")
+        if self.disk_created:
+            password = cc.get("initial-password", password)
+
         #
         # Connect to the console socket, retrying
         #
@@ -2369,7 +2403,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             prompt=prompt,
             is_bourne=not bool(prompt),
             user=cc.get("user", "root"),
-            password=cc.get("password", ""),
+            password=password,
             expects=cc.get("expects"),
             sends=cc.get("sends"),
             timeout=int(cc.get("timeout", 60)),

@@ -1,0 +1,76 @@
+topology:
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+    - name: net0
+  nodes:
+    - name: r1
+      kind: cisco
+      connections:
+        - to: "mgmt0"
+          name: "eth1"
+          driver: "e1000"
+        - to: "net0"
+          name: "eth2"
+          driver: "e1000"
+
+kinds:
+  - name: cisco
+    shell: false
+    initial-cmd: |
+      terminal terminal-type dumb
+      terminal length 0
+      terminal width 511
+      terminal session 0
+      conf t
+      username admin password 0 admin role network-admin
+      line console
+      exec-timeout 0
+      line vty
+      exec-timeout 0
+      int mgmt0
+        ip address 192.168.0.2/24
+      exit
+      feature ssh
+      feature telnet
+      end
+      copy running-config startup-config
+    cmd: |
+      terminal terminal-type dumb
+      terminal length 0
+      terminal width 511
+      terminal session 0
+    qemu:
+      unix-os: false
+      disk-template: "%CONFIGDIR%/nexus9300v64.10.2.3.F.qcow2"
+      disk: "%RUNDIR%/../%NAME%-disk.qcow2"
+      disk-driver: "sata"
+      bios: "open-firmware"
+      memory: "8192M"
+      smp: 2
+      kvm: true
+      console:
+        stdio: false
+        user: "admin"
+        password: "admin"
+        initial-password: ""
+        prompt: "(^|\r?\n\r?)switch(\\([^\\)]+\\))?#"
+        expects:
+          - "skip - bypass.*yes/skip/no\\)\\[no\\]:"
+          - "loader > "
+        sends:
+          - "skip\n"
+          - "boot nxos64-cs.10.2.3.F.bin\n"
+        timeout: 900
+
+cli:
+  commands:
+    - name: ssh
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@%IPADDR%"
+      kinds: ["cisco"]
+      format: "ssh NODE [NODE ...]"
+      top-level: true
+      new-window: true

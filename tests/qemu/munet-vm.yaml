@@ -1,25 +1,36 @@
 topology:
-  ipv6-enable: true
+  ipv6-enable: false
   networks-autonumber: true
   dns-network: "mgmt0"
   networks:
     - name: mgmt0
       ip: 192.168.0.254/24
-      ipv6: "fd00::ff/64"
       nat: true
   nodes:
     - name: h1
-      connections: ["mgmt0", "r1"]
+      connections:
+        - to: "mgmt0"
+        - to: "r1"
+          ip: 10.0.1.1/24
     - name: r1
-      kind: linux
-      connections: ["mgmt0", "h1"]
+      kind: disk-linux
+      connections:
+        - to: "mgmt0"
+        - to: "h1"
+          ip: 10.0.1.2/24
 
 kinds:
-  - name: linux
+  - name: disk-linux
+    ssh-identity-file: "%RUNDIR%/../root-key"
+    ssh-user: "root"
     qemu:
-      kernel: "%CONFIGDIR%/bzImage"
-      initrd: "%CONFIGDIR%/rootfs.cpio.gz"
-      cmdline-extra: "nokaslr"
+      disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
+      cloud-init-disk: "%RUNDIR%/../r1-seed.img"
+      # cmdline-extra: "nokaslr"
+      console:
+        user: "root"
+        password: "foobar"
+        timeout: 3600
       memory: "1G"
       kvm: true
       ncpu: 2

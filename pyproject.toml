@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "munet"
-version = "0.13.14"
+version = "0.13.15"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
 readme = "README.org"
 repository = "https://github.com/LabNConsulting/munet"
 
-include = ["logconf.yaml", "munet-schema.json"]
+include = ["logconf.yaml", "logconf-mutest.yaml", "munet-schema.json"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
@@ -131,7 +131,6 @@ max-returns = 8
 [tool.pytest.ini_options]
 
 asyncio_mode = "auto"
-# norecursedirs = "tests/qemu"
 
 testpaths = [
         "tests",

@@ -146,6 +146,18 @@ def pytest_configure(config):
         elif b and not is_xdist and not have_windows:
             pytest.exit(f"{winopt} use requires byobu/TMUX/SCREEN/XTerm")
 
+    cli_pause = (
+        config.getoption("--cli-on-error")
+        or config.getoption("--pause")
+        or config.getoption("--pause-at-end")
+        or config.getoption("--pause-on-error")
+    )
+    if config.getoption("--capture") == "fd" and cli_pause:
+        pytest.exit(
+            "CLI is not compatible with `--capture=fd`, "
+            "please run again with `-s` or other `--capture` value"
+        )
+
 
 def pytest_runtest_makereport(item, call):
     """Pause or invoke CLI as directed by config."""

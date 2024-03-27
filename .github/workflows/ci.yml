@@ -30,7 +30,7 @@ jobs:
         run: |
           uname -a
           sudo apt-get update -y
-          sudo apt-get install -y qemu-system-x86
+          sudo apt-get install -y cloud-utils qemu-system-x86
 
       - name: Install munet project
         run: poetry install --all-extras --no-interaction
