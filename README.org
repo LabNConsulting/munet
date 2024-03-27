@@ -46,17 +46,24 @@ module: labn-munet-config
   |     +--rw new-window?    boolean
   |     +--rw top-level?     boolean
   +--rw kinds* [name]
-  |  +--rw merge*         string
-  |  +--rw cap-add*       string
-  |  +--rw cap-remove*    string
-  |  +--rw cmd?           string
-  |  +--rw cleanup-cmd?   string
-  |  +--rw image?         string
-  |  +--rw server?        string
-  |  +--rw server-port?   uint16
+  |  +--rw merge*               string
+  |  +--rw cap-add*             string
+  |  +--rw cap-remove*          string
+  |  +--rw cmd?                 string
+  |  +--rw cleanup-cmd?         string
+  |  +--rw ready-cmd?           string
+  |  +--rw image?               string
+  |  +--rw server?              string
+  |  +--rw server-port?         uint16
+  |  +--rw ssh-identity-file?   string
+  |  +--rw ssh-user?            string
+  |  +--rw ssh-password?        string
   |  +--rw qemu
   |  |  +--rw bios?            string
   |  |  +--rw disk?            string
+  |  |  +--rw disk-driver?     string
+  |  |  +--rw disk-template?   string
+  |  |  +--rw initial-cmd?     string
   |  |  +--rw kerenel?         string
   |  |  +--rw initrd?          string
   |  |  +--rw kvm?             boolean
@@ -66,14 +73,16 @@ module: labn-munet-config
   |  |  +--rw cmdline-extra?   string
   |  |  +--rw extra-args?      string
   |  |  +--rw console
-  |  |     +--rw user?       string
-  |  |     +--rw password?   string
-  |  |     +--rw expects*    string
-  |  |     +--rw sends*      string
-  |  |     +--rw timeout?    uint32
+  |  |     +--rw user?               string
+  |  |     +--rw password?           string
+  |  |     +--rw initial-password?   string
+  |  |     +--rw expects*            string
+  |  |     +--rw sends*              string
+  |  |     +--rw timeout?            uint32
   |  +--rw connections* [to]
   |  |  +--rw to                    string
   |  |  +--rw ip?                   string
+  |  |  +--rw ipv6?                 string
   |  |  +--rw name?                 string
   |  |  +--rw hostintf?             string
   |  |  +--rw physical?             string
@@ -91,20 +100,21 @@ module: labn-munet-config
   |  +--rw env* [name]
   |  |  +--rw name     string
   |  |  +--rw value?   string
-  |  +--rw gdb-cmd?       string
-  |  +--rw gdb-run-cmds*  string
-  |  +--rw init?          union
+  |  +--rw gdb-cmd?             string
+  |  +--rw gdb-target-cmds*     string
+  |  +--rw gdb-run-cmds*        string
+  |  +--rw init?                union
   |  +--rw mounts* [destination]
   |  |  +--rw destination    string
   |  |  +--rw source?        string
   |  |  +--rw tmpfs-size?    string
   |  |  +--rw type?          string
-  |  +--rw name           string
+  |  +--rw name                 string
   |  +--rw podman
   |  |  +--rw extra-args*   string
-  |  +--rw privileged?    boolean
-  |  +--rw shell?         union
-  |  +--rw volumes*       string
+  |  +--rw privileged?          boolean
+  |  +--rw shell?               union
+  |  +--rw volumes*             string
   +--rw topology
   |  +--rw dns-network?           -> ../networks/name
   |  +--rw ipv6-enable?           boolean
@@ -112,19 +122,27 @@ module: labn-munet-config
   |  +--rw networks* [name]
   |  |  +--rw name    string
   |  |  +--rw ip?     string
+  |  |  +--rw ipv6?   string
   |  +--rw nodes* [name]
-  |     +--rw id?            uint32
-  |     +--rw kind?          -> ../../../kinds/name
-  |     +--rw cap-add*       string
-  |     +--rw cap-remove*    string
-  |     +--rw cmd?           string
-  |     +--rw cleanup-cmd?   string
-  |     +--rw image?         string
-  |     +--rw server?        string
-  |     +--rw server-port?   uint16
+  |     +--rw id?                  uint32
+  |     +--rw kind?                -> ../../../kinds/name
+  |     +--rw cap-add*             string
+  |     +--rw cap-remove*          string
+  |     +--rw cmd?                 string
+  |     +--rw cleanup-cmd?         string
+  |     +--rw ready-cmd?           string
+  |     +--rw image?               string
+  |     +--rw server?              string
+  |     +--rw server-port?         uint16
+  |     +--rw ssh-identity-file?   string
+  |     +--rw ssh-user?            string
+  |     +--rw ssh-password?        string
   |     +--rw qemu
   |     |  +--rw bios?            string
   |     |  +--rw disk?            string
+  |     |  +--rw disk-driver?     string
+  |     |  +--rw disk-template?   string
+  |     |  +--rw initial-cmd?     string
   |     |  +--rw kerenel?         string
   |     |  +--rw initrd?          string
   |     |  +--rw kvm?             boolean
@@ -134,14 +152,16 @@ module: labn-munet-config
   |     |  +--rw cmdline-extra?   string
   |     |  +--rw extra-args?      string
   |     |  +--rw console
-  |     |     +--rw user?       string
-  |     |     +--rw password?   string
-  |     |     +--rw expects*    string
-  |     |     +--rw sends*      string
-  |     |     +--rw timeout?    uint32
+  |     |     +--rw user?               string
+  |     |     +--rw password?           string
+  |     |     +--rw initial-password?   string
+  |     |     +--rw expects*            string
+  |     |     +--rw sends*              string
+  |     |     +--rw timeout?            uint32
   |     +--rw connections* [to]
   |     |  +--rw to                    string
   |     |  +--rw ip?                   string
+  |     |  +--rw ipv6?                 string
   |     |  +--rw name?                 string
   |     |  +--rw hostintf?             string
   |     |  +--rw physical?             string
@@ -159,20 +179,21 @@ module: labn-munet-config
   |     +--rw env* [name]
   |     |  +--rw name     string
   |     |  +--rw value?   string
-  |     +--rw gdb-cmd?       string
-  |     +--rw gdb-run-cmds*  string
-  |     +--rw init?          union
+  |     +--rw gdb-cmd?             string
+  |     +--rw gdb-target-cmds*     string
+  |     +--rw gdb-run-cmds*        string
+  |     +--rw init?                union
   |     +--rw mounts* [destination]
   |     |  +--rw destination    string
   |     |  +--rw source?        string
   |     |  +--rw tmpfs-size?    string
   |     |  +--rw type?          string
-  |     +--rw name           string
+  |     +--rw name                 string
   |     +--rw podman
   |     |  +--rw extra-args*   string
-  |     +--rw privileged?    boolean
-  |     +--rw shell?         union
-  |     +--rw volumes*       string
+  |     +--rw privileged?          boolean
+  |     +--rw shell?               union
+  |     +--rw volumes*             string
   +--rw version?    uint32
 #+end_example
 
