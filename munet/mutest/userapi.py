@@ -486,6 +486,9 @@ class TestCase:
             return expect_fail, {}
 
         try:
+            # Convert to string to validate the input is valid JSON
+            if not isinstance(match, str):
+                match = json.dumps(match)
             expect = json.loads(match)
         except Exception as error:
             expect = {}

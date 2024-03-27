@@ -7,7 +7,7 @@ from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step_json
 
 
-js = step_json("r1", 'echo { "name": "chopps" }')
+js = step_json("r1", """printf '{ "name": "chopps" }'""")
 log("SIMPLE JSON: %s", js)
 
 # expect passing tests
@@ -201,7 +201,7 @@ test_step(
 
 json1 = '[{"foo":"foo"}]'
 json2 = '[{"foo":"foo"}, {"bar":"bar"}]'
-json3 = '[{"bar":"bar"}, {"foo":"foo"}]'
+json3 = [{"bar": "bar"}, {"foo": "foo"}]
 
 _, ret = match_step_json(
     "r1",
