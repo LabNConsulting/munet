@@ -317,6 +317,22 @@ match_step_json(
     exact_match=False,
 )
 
+# This case only passes when json_cmp (DeepDiff) is given
+# the arg `cutoff_intersection_for_pairs` at 0.8 or higher
+# the default value is 0.7. Interestingly, if we do not provide
+# `ignore_order=True` it also passes.
+full = '[{"1one": 1, "1two": 2}, {"2one": 1, "2two": 2}]'
+subset = '[{"1one": 1}, {"2one": 1}]'
+
+match_step_json(
+    "r1",
+    f"echo '{full}'",
+    subset,
+    "Verify subset matches full",
+    expect_fail=False,
+    exact_match=False,
+)
+
 section("Test json errors")
 
 jsonblank = '{}'
@@ -376,3 +392,4 @@ _, ret = match_step_json(
     "Output json and match json are bad, fail is pass",
     expect_fail=True,
 )
+
