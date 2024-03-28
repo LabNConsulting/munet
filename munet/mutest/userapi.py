@@ -76,6 +76,12 @@ from deepdiff import DeepDiff as json_cmp
 from munet.base import Commander
 
 
+class ScriptError(Exception):
+    """An unrecoverable script failure."""
+
+    pass
+
+
 class TestCaseInfo:
     """Object to hold nestable TestCase Results."""
 
@@ -285,7 +291,10 @@ class TestCase:
 
             # Extract any docstring as a title.
             if print_header:
-                title = locals()[f"_{name}"].__doc__.lstrip()
+                title = locals()[f"_{name}"].__doc__
+                if title is None:
+                    title = ""
+                title = title.lstrip()
                 if self.__short_doc_header and (title := title.lstrip()):
                     if (idx := title.find("\n")) != -1:
                         title = title[:idx].strip()
@@ -299,6 +308,8 @@ class TestCase:
 
             # Here's where we can do async in the future if we want.
             # result = await locals()[f"_{name}"](_ok_result)
+        except ScriptError as error:
+            return error
         except Exception as error:
             logging.error(
                 "Unexpected exception executing %s: %s", name, error, exc_info=True
@@ -598,7 +609,7 @@ class TestCase:
             self.info.path = path
             self.oplogf("include: swapped info path: new %s old %s", path, old_path)
 
-        self.__exec_script(path, print_header=new_section, add_newline=new_section)
+        e = self.__exec_script(path, print_header=new_section, add_newline=new_section)
 
         if new_section:
             # Something within the section creating include has also created a section
@@ -624,6 +635,8 @@ class TestCase:
             # we are returning to
             self.info.path = old_path
             self.oplogf("include: restored info path: %s", old_path)
+        if e:
+            raise ScriptError(e)
 
     def __end_section(self):
         self.oplogf("__end_section: __in_section: %s", self.__in_section)
