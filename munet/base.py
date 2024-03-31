@@ -276,6 +276,9 @@ def get_event_loop():
     """
     policy = asyncio.get_event_loop_policy()
     loop = policy.get_event_loop()
+    if not hasattr(os, "pidfd_open"):
+        return loop
+
     owatcher = policy.get_child_watcher()
     logging.debug(
         "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
