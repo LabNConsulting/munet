@@ -65,6 +65,7 @@ import json
 import logging
 import pprint
 import re
+import subprocess
 import time
 
 from pathlib import Path
@@ -392,7 +393,9 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execut on the target.
         """
-        out = self.targets[target].cmd_nostatus(cmd, warn=False)
+        out = self.targets[target].cmd_nostatus(
+            cmd, stdin=subprocess.DEVNULL, warn=False
+        )
         self.last = out = out.rstrip()
         report = out if out else "<no output>"
         self.logf("COMMAND OUTPUT:\n%s", report)
@@ -409,7 +412,9 @@ class TestCase:
             target: the target to execute the command on.
             cmd: string to execute on the target.
         """
-        out = self.targets[target].cmd_nostatus(cmd, warn=False)
+        out = self.targets[target].cmd_nostatus(
+            cmd, stdin=subprocess.DEVNULL, warn=False
+        )
         self.last = out = out.rstrip()
         try:
             js = json.loads(out)
