@@ -433,14 +433,14 @@ class NodeMixin:
         outopt = outopt if outopt is not None else ""
         if outopt == "all" or self.name in outopt.split(","):
             outname = stdout.name if hasattr(stdout, "name") else stdout
-            self.run_in_window(f"tail -F {outname}", title=f"O:{self.name}")
+            self.run_in_window(f"tail -n+1 -F {outname}", title=f"O:{self.name}")
 
         if stderr:
             erropt = self.unet.cfgopt.getoption("--stderr")
             erropt = erropt if erropt is not None else ""
             if erropt == "all" or self.name in erropt.split(","):
                 errname = stderr.name if hasattr(stderr, "name") else stderr
-                self.run_in_window(f"tail -F {errname}", title=f"E:{self.name}")
+                self.run_in_window(f"tail -n+1 -F {errname}", title=f"E:{self.name}")
 
     def pytest_hook_open_shell(self):
         if not self.unet:
@@ -1892,10 +1892,6 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
             # When run_command supports async_ arg we can use the above...
             self.cmd_p = now_proc(self.cmdrepl.run_command(cmds, timeout=120))
-
-            # stdout and err both combined into logfile from the spawned repl
-            stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
-            self.pytest_hook_run_cmd(stdout, None)
         else:
             # If we only have a console we can't run in parallel, so run to completion
             self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
@@ -1906,6 +1902,11 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if self.disk_created:
             await self._run_cmd("initial-cmd")
         await self._run_cmd("cmd")
+
+        # stdout and err both combined into logfile from the spawned repl
+        if self.cmdrepl:
+            stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
+            self.pytest_hook_run_cmd(stdout, None)
 
     # InterfaceMixin override
     # We need a name unique in the shared namespace.
