@@ -2161,11 +2161,21 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         bootd = "d" if "iso" in qc else "c"
         # args = [get_exec_path_host("qemu-system-x86_64"),
         #         "-nodefaults", "-boot", bootd]
-        args = [get_exec_path_host("qemu-system-x86_64"), "-boot", bootd]
+        rc, output, _ = commander.cmd_status("uname -m")
+        arm = False
+        if not rc and output.strip() == "aarch64":
+            qemu_path = get_exec_path_host("qemu-system-aarch64")
+            args = [qemu_path, "-boot", bootd, "-machine", "virt"]
+            arm = True
+        elif not rc and output.strip().startswith("arm"):
+            qemu_path = get_exec_path_host("qemu-system-arm")
+            args = [qemu_path, "-boot", bootd, "-machine", "virt"]
+            arm = True
+        else:
+            qemu_path = get_exec_path_host("qemu-system-x86_64")
+            args = [qemu_path, "-boot", bootd, "-machine", "q35"]
 
-        args += ["-machine", "q35"]
-
-        if qc.get("kvm"):
+        if qc.get("kvm") and not arm:
             rc, _, e = await self.async_cmd_status_nsonly("ls -l /dev/kvm")
             if rc:
                 self.logger.warning("Can't enable KVM no /dev/kvm: %s", e)
