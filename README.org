@@ -967,6 +967,16 @@ munet>
            not explicitly configured.";
       }
 
+      leaf setup-cmd {
+        type string;
+        description "Shell command[s] to execute when creating the topology.";
+      }
+      leaf cleanup-cmd {
+        type string;
+        description
+          "Shell command[s] to execute when deleting the topology.";
+      }
+
       list networks {
         key name;
         description "List of networks to create.";

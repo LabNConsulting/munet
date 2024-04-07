@@ -208,46 +208,27 @@ class L3Bridge(Bridge):
         await super()._async_delete()
 
 
-class NodeMixin:
-    """Node attributes and functionality."""
-
-    next_ord = 1
-
-    @classmethod
-    def _get_next_ord(cls):
-        # Do not use `cls` here b/c that makes the variable class specific
-        n = L3NodeMixin.next_ord
-        L3NodeMixin.next_ord = n + 1
-        return n
+class ShebangMixin:
+    """A mixing class supporting running scripts defined in the config."""
 
     def __init__(self, *args, config=None, **kwargs):
         """Create a Node."""
+        self.shebang_config = config if config else {}
+
         super().__init__(*args, **kwargs)
 
-        self.config = config if config else {}
-        config = self.config
-
-        self.id = int(config["id"]) if "id" in config else self._get_next_ord()
-
-        self.cmd_p = None
         self.container_id = None
         self.cleanup_called = False
 
-        # Clear and create rundir early
-        assert self.unet is not None
-        self.rundir = self.unet.rundir.joinpath(self.name)
-        commander.cmd_raises(f"rm -rf {self.rundir}")
-        commander.cmd_raises(f"mkdir -p {self.rundir}")
-
     def _shebang_prep(self, config_key):
-        cmd = self.config.get(config_key, "").strip()
+        cmd = self.shebang_config.get(config_key, "").strip()
         if not cmd:
             return []
 
         script_name = fsafe_name(config_key)
 
         # shell_cmd is a union and can be boolean or string
-        shell_cmd = self.config.get("shell", "/bin/bash")
+        shell_cmd = self.shebang_config.get("shell", "/bin/bash")
         if not isinstance(shell_cmd, str):
             if shell_cmd:
                 # i.e., "shell: true"
@@ -292,17 +273,13 @@ class NodeMixin:
 
         return cmds
 
-    async def _async_shebang_cmd(self, config_key, warn=True):
+    async def _async_shebang_cmd(self, config_key, warn, **kwargs):
         cmds = self._shebang_prep(config_key)
         if not cmds:
             return 0
 
-        rc, o, e = await self.async_cmd_status(cmds, warn=warn)
-        if not rc and warn and (o or e):
-            self.logger.info(
-                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
-            )
-        elif rc and warn:
+        rc, o, e = await self._async_cmd_status(cmds, warn=warn, **kwargs)
+        if warn and (rc or e.strip()):
             self.logger.warning(
                 f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
             )
@@ -311,10 +288,89 @@ class NodeMixin:
                 f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
             )
 
-        return rc
+    async def async_shebang_cmd(self, config_key, warn, **kwargs):
+        """Execute a script from YANG config.
 
-    def has_run_cmd(self) -> bool:
-        return bool(self.config.get("cmd", "").strip())
+        Args:
+            config_key: The config key to look up the command script.
+            warn: If True then warn log a warning if there is any stderr output.
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec.
+        """
+        await self._async_shebang_cmd(config_key, warn, raises=False, **kwargs)
+
+    async def async_shebang_raises(self, config_key, warn, **kwargs):
+        """Execute a script from YANG config. Raise an exception on errors.
+
+        Args:
+            config_key: The config key to look up the command script.
+            warn: If True then warn log a warning if there is any stderr output.
+            **kwargs: kwargs is eventually passed on to create_subprocess_exec.
+
+        Raises:
+            CalledProcessError: on non-zero exit status
+        """
+        await self._async_shebang_cmd(config_key, warn, raises=True, **kwargs)
+
+    def has_cleanup_cmd(self) -> bool:
+        return bool(self.shebang_config.get("cleanup-cmd", "").strip())
+
+    def has_ready_cmd(self) -> bool:
+        return bool(self.shebang_config.get("ready-cmd", "").strip())
+
+    async def async_cleanup_cmd(self):
+        """Run the configured cleanup commands for this node."""
+        self.cleanup_called = True
+
+        return await self.async_shebang_cmd("cleanup-cmd", warn=True)
+
+    async def async_ready_cmd(self):
+        """Run the configured ready commands for this node."""
+        return not await self.async_shebang_cmd("ready-cmd", warn=False)
+
+    async def _async_delete(self):
+        self.logger.debug("%s: ShebangMixin sub-class _async_delete", self)
+
+        # Next call "cleanup-cmd:"
+        try:
+            if not self.cleanup_called:
+                await self.async_cleanup_cmd()
+        except Exception as error:
+            self.logger.warning(
+                "Got an error during delete from async_cleanup_cmd: %s", error
+            )
+
+        # delete the LinuxNamespace/InterfaceMixin
+        await super()._async_delete()
+
+
+class NodeMixin(ShebangMixin):
+    """Node attributes and functionality."""
+
+    next_ord = 1
+
+    @classmethod
+    def _get_next_ord(cls):
+        # Do not use `cls` here b/c that makes the variable class specific
+        n = NodeMixin.next_ord
+        NodeMixin.next_ord = n + 1
+        return n
+
+    def __init__(self, *args, config=None, **kwargs):
+        """Create a Node."""
+        self.config = config if config else {}
+        config = self.config
+
+        super().__init__(*args, config=config, **kwargs)
+
+        self.id = int(config["id"]) if "id" in config else self._get_next_ord()
+
+        self.cmd_p = None
+
+        # Clear and create rundir early
+        assert self.unet is not None
+        self.rundir = self.unet.rundir.joinpath(self.name)
+        commander.cmd_raises(f"rm -rf {self.rundir}")
+        commander.cmd_raises(f"mkdir -p {self.rundir}")
 
     async def get_proc_child_pid(self, p):
         # commander is right for both unshare inline (our proc pidns)
@@ -342,6 +398,9 @@ class NodeMixin:
             )
         self.logger.warning("%s: timeout getting child pid of proc %s", self, p)
         return None
+
+    def has_run_cmd(self) -> bool:
+        return bool(self.config.get("cmd", "").strip())
 
     async def run_cmd(self):
         """Run the configured commands for this node."""
@@ -379,29 +438,6 @@ class NodeMixin:
         self.pytest_hook_run_cmd(stdout, stderr)
 
         return self.cmd_p
-
-    async def _async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node.
-
-        This function is called by subclass' async_cleanup_cmd
-        """
-        self.cleanup_called = True
-
-        return await self._async_shebang_cmd("cleanup-cmd")
-
-    def has_cleanup_cmd(self) -> bool:
-        return bool(self.config.get("cleanup-cmd", "").strip())
-
-    async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node."""
-        return await self._async_cleanup_cmd()
-
-    def has_ready_cmd(self) -> bool:
-        return bool(self.config.get("ready-cmd", "").strip())
-
-    async def async_ready_cmd(self):
-        """Run the configured ready commands for this node."""
-        return not await self._async_shebang_cmd("ready-cmd", warn=False)
 
     def cmd_completed(self, future):
         self.logger.debug("%s: cmd completed callback", self)
@@ -536,16 +572,6 @@ class NodeMixin:
             await self.async_cleanup_proc(self.cmd_p, self.cmd_pid)
             self.cmd_p = None
 
-        # Next call users "cleanup_cmd:"
-        try:
-            if not self.cleanup_called:
-                await self.async_cleanup_cmd()
-        except Exception as error:
-            self.logger.warning(
-                "Got an error during delete from async_cleanup_cmd: %s", error
-            )
-
-        # delete the LinuxNamespace/InterfaceMixin
         await super()._async_delete()
 
 
@@ -1531,7 +1557,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             self.logger.warning("async_cleanup_cmd: container no longer running")
             return
 
-        return await self._async_cleanup_cmd()
+        return await self.async_shebang_cmd("cleanup-cmd", warn=True)
 
     def cmd_completed(self, future):
         try:
@@ -2500,7 +2526,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         await super()._async_delete()
 
 
-class Munet(BaseMunet):
+class Munet(BaseMunet, ShebangMixin):
     """Munet."""
 
     def __init__(
@@ -2519,14 +2545,6 @@ class Munet(BaseMunet):
         if logger is None:
             logger = logging.getLogger("munet.unet")
 
-        super().__init__("munet", pid=pid, rundir=rundir, logger=logger, **kwargs)
-
-        self.built = False
-        self.tapcount = 0
-
-        self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
-        self.set_ns_cwd(self.rundir)
-
         if not config:
             config = {}
         self.config = config
@@ -2536,6 +2554,25 @@ class Munet(BaseMunet):
         else:
             self.config_pathname = ""
             self.config_dirname = ""
+
+        if "topology" not in self.config:
+            self.config["topology"] = {}
+        self.topoconf = self.config["topology"]
+
+        super().__init__(
+            "munet",
+            pid=pid,
+            rundir=rundir,
+            logger=logger,
+            config=self.topoconf,
+            **kwargs,
+        )
+
+        self.built = False
+        self.tapcount = 0
+
+        self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
+        self.set_ns_cwd(self.rundir)
 
         # Done in BaseMunet now
         # # We need some way to actually get back to the root namespace
@@ -2654,10 +2691,6 @@ ff02::2\tip6-allrouters
         if "cli" in config:
             cli.add_cli_config(self, config["cli"])
 
-        if "topology" not in self.config:
-            self.config["topology"] = {}
-
-        self.topoconf = self.config["topology"]
         self.ipv6_enable = self.topoconf.get("ipv6-enable", False)
 
         if self.isolated:
@@ -2887,6 +2920,16 @@ ff02::2\tip6-allrouters
     async def run(self):
         tasks = []
 
+        #
+        # First setup the topology
+        #
+        if self.topoconf.get("setup-cmd"):
+            logging.info("Running setup-cmd for topology")
+            await self.async_shebang_raises("setup-cmd", warn=True)
+
+        #
+        # Now launch/run/await the nodes
+        #
         hosts = self.hosts.values()
         launch_nodes = [x for x in hosts if hasattr(x, "launch")]
         launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]

@@ -31,11 +31,13 @@ async def setup_images(rundir_module):
         limage = "ubuntu-tpl.qcow2"
         if not os.path.exists(limage):
             commander.cmd_raises(f"curl -fLo {limage} {image}")
+
         if not os.path.exists(f"{rdir}/root-key"):
             commander.cmd_raises(
                 f'ssh-keygen -b 2048 -t rsa -f {rdir}/root-key -q -N ""'
             )
         pubkey = commander.cmd_raises(f"cat {rdir}/root-key.pub").strip()
+
         user_data = f"""#cloud-config
 disable_root: 0
 ssh_pwauth: 1
