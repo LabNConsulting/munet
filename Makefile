@@ -40,7 +40,7 @@ ci-lint:
 	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
 
 test: test-validate ci-lint
-	sudo -E $(POETRYRUN) mutest
+	sudo -E $(POETRYRUN) mutest tests
 	sudo -E $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
 
 clean:
