@@ -24,6 +24,7 @@ from munet import parser
 from munet.args import add_testing_args
 from munet.base import Bridge
 from munet.base import get_event_loop
+from munet.cli import async_cli
 from munet.compat import PytestConfig
 from munet.mutest import userapi as uapi
 from munet.native import L3NodeMixin
@@ -232,7 +233,11 @@ async def execute_test(
     tc = uapi.TestCase(
         str(test_num), test_name, test, targets, args, logger, reslog, args.full_summary
     )
-    passed, failed, e = tc.execute()
+    try:
+        passed, failed, e = tc.execute()
+    except uapi.CLIOnErrorError as error:
+        await async_cli(unet)
+        passed, failed, e = 0, 0, error
 
     run_time = time.time() - tc.info.start_time
 
