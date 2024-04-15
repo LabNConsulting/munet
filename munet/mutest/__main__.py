@@ -287,6 +287,10 @@ async def run_tests(args):
     start_time = time.time()
     try:
         for dirpath in tests:
+            if args.validate_only:
+                parser.validate_config(configs[dirpath], reslog, args)
+                continue
+
             test_files = tests[dirpath]
             for test in test_files:
                 tnum += 1
@@ -331,6 +335,9 @@ async def run_tests(args):
 
     except KeyboardInterrupt:
         pass
+
+    if args.validate_only:
+        return False
 
     run_time = time.time() - start_time
     tnum = 0

@@ -9,13 +9,19 @@ topology:
   nodes:
     - name: r1
       kind: frr
-      connections: ["net1", "net2"]
+      connections:
+        - to: "net1"
+        - to: "net2"
     - name: r2
       kind: frr
-      connections: ["net1", "net3"]
+      connections:
+        - to: "net1"
+        - to: "net3"
     - name: r3
       kind: frr
-      connections: ["net2", "net3"]
+      connections:
+        - to: "net2"
+        - to: "net3"
 
 kinds:
   - name: frr
