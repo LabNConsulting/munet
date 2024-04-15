@@ -428,6 +428,12 @@ def main():
 
     args = ap.parse_args()
 
+    if args.version:
+        from importlib import metadata  # pylint: disable=C0415
+
+        print(metadata.version("munet"))
+        sys.exit(0)
+
     rundir = args.rundir if args.rundir else "/tmp/mutest"
     args.rundir = Path(rundir)
     os.environ["MUNET_RUNDIR"] = rundir
