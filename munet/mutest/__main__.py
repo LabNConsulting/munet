@@ -21,8 +21,10 @@ from pathlib import Path
 from typing import Union
 
 from munet import parser
+from munet.args import add_testing_args
 from munet.base import Bridge
 from munet.base import get_event_loop
+from munet.compat import PytestConfig
 from munet.mutest import userapi as uapi
 from munet.native import L3NodeMixin
 from munet.native import Munet
@@ -36,7 +38,9 @@ root_logger = logging.getLogger("")
 exec_formatter = logging.Formatter("%(asctime)s %(levelname)5s: %(name)s: %(message)s")
 
 
-async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = False):
+async def get_unet(
+    config: dict, croot: Path, rundir: Path, args: Namespace, unshare: bool = False
+):
     """Create and run a new Munet topology.
 
     The topology is built from the given ``config`` to run inside the path indicated
@@ -48,6 +52,7 @@ async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = Fals
           value will be modified and stored in the built ``Munet`` object.
         croot: common root of all tests, used to search for ``kinds.yaml`` files.
         rundir: the path to the run directory for this topology.
+        args: argparse args
         unshare: True to unshare the process into it's own private namespace.
 
     Yields:
@@ -58,7 +63,11 @@ async def get_unet(config: dict, croot: Path, rundir: Path, unshare: bool = Fals
     try:
         try:
             unet = await async_build_topology(
-                config, rundir=str(rundir), unshare_inline=unshare
+                config,
+                rundir=str(rundir),
+                args=args,
+                pytestconfig=PytestConfig(args),
+                unshare_inline=unshare,
             )
         except Exception as error:
             logging.debug("unet build failed: %s", error, exc_info=True)
@@ -221,7 +230,7 @@ async def execute_test(
     targets["."] = unet
 
     tc = uapi.TestCase(
-        str(test_num), test_name, test, targets, logger, reslog, args.full_summary
+        str(test_num), test_name, test, targets, args, logger, reslog, args.full_summary
     )
     passed, failed, e = tc.execute()
 
@@ -294,10 +303,12 @@ async def run_tests(args):
                 root_logger.addHandler(exec_handler)
 
                 try:
-                    async for unet in get_unet(config, common, rundir):
+                    async for unet in get_unet(config, common, rundir, args):
+
                         if not printed_header:
                             print_header(reslog, unet)
                             printed_header = True
+
                         passed, failed, e = await execute_test(
                             unet, test, args, tnum, exec_handler
                         )
@@ -386,30 +397,35 @@ async def async_main(args):
 def main():
     ap = ArgumentParser()
     ap.add_argument(
-        "--dist",
-        type=int,
-        nargs="?",
-        const=-1,
-        default=0,
-        action="store",
-        metavar="NUM-THREADS",
-        help="Run in parallel, value is num. of threads or no value for auto",
+        "-v", dest="verbose", action="count", default=0, help="More -v's, more verbose"
     )
-    ap.add_argument("-d", "--rundir", help="runtime directory for tempfiles, logs, etc")
     ap.add_argument(
+        "-V", "--version", action="store_true", help="print the verison number and exit"
+    )
+    ap.add_argument("paths", nargs="*", help="Paths to collect tests from")
+
+    rap = ap.add_argument_group(title="Runtime", description="runtime related options")
+    rap.add_argument(
+        "-d", "--rundir", help="runtime directory for tempfiles, logs, etc"
+    )
+    add_testing_args(rap.add_argument)
+
+    eap = ap.add_argument_group(title="Uncommon", description="uncommonly used options")
+    eap.add_argument(
         "--file-select", default="mutest_*.py", help="shell glob for finding tests"
     )
-    ap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
-    ap.add_argument(
-        "-V",
+    eap.add_argument(
         "--full-summary",
         action="store_true",
         help="print full summary headers from docstrings",
     )
-    ap.add_argument(
-        "-v", dest="verbose", action="count", default=0, help="More -v's, more verbose"
+    eap.add_argument("--log-config", help="logging config file (yaml, toml, json, ...)")
+    eap.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Validate the munet configs against the schema definition",
     )
-    ap.add_argument("paths", nargs="*", help="Paths to collect tests from")
+
     args = ap.parse_args()
 
     rundir = args.rundir if args.rundir else "/tmp/mutest"

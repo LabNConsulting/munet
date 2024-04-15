@@ -68,6 +68,7 @@ import re
 import subprocess
 import time
 
+from argparse import Namespace
 from pathlib import Path
 from typing import Any
 from typing import Union
@@ -147,6 +148,7 @@ class TestCase:
         name: str,
         path: Path,
         targets: dict,
+        args: Namespace,
         output_logger: logging.Logger = None,
         result_logger: logging.Logger = None,
         full_summary: bool = False,
@@ -164,6 +166,7 @@ class TestCase:
         self.__in_section = False
 
         self.targets = targets
+        self.args = args
 
         self.last = ""
         self.last_m = None
