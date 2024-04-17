@@ -8,6 +8,7 @@
 # pylint: disable=protected-access
 """A module that defines objects for standalone use."""
 import asyncio
+import base64
 import errno
 import getpass
 import ipaddress
@@ -2059,23 +2060,43 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
     async def gather_coverage_data(self):
         con = self.conrepl
+        gcda_root = "/sys/kernel/debug/gcov"
+        dest = "/tmp/gcov-data.tgz"
 
-        gcda = "/sys/kernel/debug/gcov"
-        tmpdir = con.cmd_raises("mktemp -d").strip()
-        dest = "/gcov-data.tgz"
-        con.cmd_raises(rf"find {gcda} -type d -exec mkdir -p {tmpdir}/{{}} \;")
-        con.cmd_raises(
-            rf"find {gcda} -name '*.gcda' -exec sh -c 'cat < $0 > {tmpdir}/$0' {{}} \;"
-        )
-        con.cmd_raises(
-            rf"find {gcda} -name '*.gcno' -exec sh -c 'cp -d $0 {tmpdir}/$0' {{}} \;"
-        )
-        con.cmd_raises(rf"tar cf - -C {tmpdir} sys | gzip -c > {dest}")
-        con.cmd_raises(rf"rm -rf {tmpdir}")
+        if gcda_root != "/sys/kernel/debug/gcov":
+            con.cmd_raises(
+                rf"cd {gcda_root} && find * -name '*.gc??' "
+                "| tar -cf - -T - | gzip -c > {dest}"
+            )
+        else:
+            # Some tars dont try and read 0 length files so we need to copy them.
+            tmpdir = con.cmd_raises("mktemp -d").strip()
+            con.cmd_raises(
+                rf"cd {gcda_root} && find -type d -exec mkdir -p {tmpdir}/{{}} \;"
+            )
+            con.cmd_raises(
+                rf"cd {gcda_root} && "
+                rf"find -name '*.gcda' -exec sh -c 'cat < $0 > {tmpdir}/$0' {{}} \;"
+            )
+            con.cmd_raises(
+                rf"cd {gcda_root} && "
+                rf"find -name '*.gcno' -exec sh -c 'cp -d $0 {tmpdir}/$0' {{}} \;"
+            )
+            con.cmd_raises(
+                rf"cd {tmpdir} && "
+                rf"find * -name '*.gc??' | tar -cf - -T - | gzip -c > {dest}"
+            )
+            con.cmd_raises(rf"rm -rf {tmpdir}")
+
         self.logger.info("Saved coverage data in VM at %s", dest)
+        ldest = os.path.join(self.rundir, "gcov-data.tgz")
         if self.use_ssh:
-            ldest = os.path.join(self.rundir, "gcov-data.tgz")
             self.cmd_raises(["/bin/cat", dest], stdout=open(ldest, "wb"))
+            self.logger.info("Saved coverage data on host at %s", ldest)
+        else:
+            output = con.cmd_raises(rf"base64 {dest}")
+            with open(ldest, "wb") as f:
+                f.write(base64.b64decode(output))
             self.logger.info("Saved coverage data on host at %s", ldest)
 
     async def _opencons(
