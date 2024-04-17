@@ -6,11 +6,10 @@
 #
 """Common CLI execute argument."""
 
+
 def add_launch_args(add_func):
 
-    add_func(
-        "--gdb", metavar="NODE-LIST", help="comma-sep list of hosts to run gdb on"
-    )
+    add_func("--gdb", metavar="NODE-LIST", help="comma-sep list of hosts to run gdb on")
     add_func(
         "--gdb-breakpoints",
         metavar="BREAKPOINT-LIST",
@@ -46,6 +45,7 @@ def add_launch_args(add_func):
         help="comma-sep list of nodes to open windows viewing stdout",
     )
 
+
 def add_testing_args(add_func):
     add_func(
         "--cli-on-error",
@@ -57,6 +57,11 @@ def add_testing_args(add_func):
         "--coverage",
         action="store_true",
         help="Enable coverage gathering if supported",
+    )
+
+    add_func(
+        "--cov-build-dir",
+        help="Specify the build dir for locating coverage data files",
     )
 
     add_launch_args(add_func)

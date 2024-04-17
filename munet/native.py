@@ -11,6 +11,7 @@ import asyncio
 import base64
 import errno
 import getpass
+import glob
 import ipaddress
 import logging
 import os
@@ -2911,6 +2912,71 @@ ff02::2\tip6-allrouters
         mtu = kwargs.get("mtu", config.get("mtu"))
         return super().add_switch(name, cls=cls, config=config, mtu=mtu, **kwargs)
 
+    def coverage_setup(self):
+        bdir = self.cfgopt.getoption("--cov-build-dir")
+        if not bdir:
+            # Try and find the build dir using common prefix of gcno files
+            common = None
+            cwd = os.getcwd()
+            for f in glob.iglob(rf"{cwd}/**/*.gcno", recursive=True):
+                if not common:
+                    common = os.path.dirname(f)
+                else:
+                    common = os.path.commonprefix([common, f])
+                    if not common:
+                        break
+        assert (
+            bdir
+        ), "Can't locate build directory for coverage data, use --cov-build-dir"
+
+        bdir = Path(bdir).resolve()
+        rundir = Path(self.rundir).resolve()
+        gcdadir = rundir / "gcda"
+        os.environ["GCOV_BUILD_DIR"] = str(bdir)
+        os.environ["GCOV_PREFIX_STRIP"] = str(len(bdir.parts) - 1)
+        os.environ["GCOV_PREFIX"] = str(gcdadir)
+
+        # commander.cmd_raises(f"find {bdir} -name '*.gc??' -exec chmod o+rw {{}} +")
+        group_id = bdir.stat().st_gid
+        commander.cmd_raises(f"mkdir -p {gcdadir}")
+        commander.cmd_raises(f"chown -R root:{group_id} {gcdadir}")
+        commander.cmd_raises(f"chmod 2775 {gcdadir}")
+
+    async def coverage_finish(self):
+        rundir = Path(self.rundir).resolve()
+        bdir = Path(os.environ["GCOV_BUILD_DIR"])
+        gcdadir = Path(os.environ["GCOV_PREFIX"])
+
+        # Create GCNO symlinks
+        self.logger.info("Creating .gcno symlinks from '%s' to '%s'", gcdadir, bdir)
+        commander.cmd_raises(
+            f'cd "{gcdadir}"; bdir="{bdir}"'
+            + """
+for f in $(find . -name '*.gcda'); do
+    f=${f#./};
+    f=${f%.gcda}.gcno;
+    ln -fs $bdir/$f $f;
+    touch -h -r $bdir/$f $f;
+    echo $f;
+done"""
+        )
+
+        # Get the results into a summary file
+        data_file = rundir / "coverage.info"
+        self.logger.info("Gathering coverage data into: %s", data_file)
+        commander.cmd_raises(
+            f"lcov --directory {gcdadir} --capture --output-file {data_file}"
+        )
+
+        # Get coverage info filtered to a specific set of files
+        report_file = rundir / "coverage.info"
+        self.logger.debug("Generating coverage summary: %s", report_file)
+        output = commander.cmd_raises(f"lcov --summary {data_file}")
+        self.logger.info("\nCOVERAGE-SUMMARY-START\n%s\nCOVERAGE-SUMMARY-END", output)
+        # terminalreporter.write(
+        #     f"\nCOVERAGE-SUMMARY-START\n{output}\nCOVERAGE-SUMMARY-END\n"
+        # )
+
     async def run(self):
         tasks = []
 
@@ -2919,6 +2985,9 @@ ff02::2\tip6-allrouters
         launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
         run_nodes = [x for x in hosts if x.has_run_cmd()]
         ready_nodes = [x for x in hosts if x.has_ready_cmd()]
+
+        if self.cfgopt.getoption("--coverage"):
+            self.coverage_setup()
 
         pcapopt = self.cfgopt.getoption("--pcap")
         pcapopt = pcapopt if pcapopt else ""
@@ -3026,6 +3095,8 @@ ff02::2\tip6-allrouters
                 await asyncio.gather(*(x.gather_coverage_data() for x in nodes))
             except Exception as error:
                 logging.warning("Error gathering coverage data: %s", error)
+
+            await self.coverage_finish()
 
         # XXX should we cancel launch and run tasks?
 
