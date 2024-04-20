@@ -11,6 +11,7 @@ import asyncio
 import base64
 import errno
 import getpass
+import glob
 import ipaddress
 import logging
 import os
@@ -395,6 +396,10 @@ class NodeMixin:
 
     async def async_cleanup_cmd(self):
         """Run the configured cleanup commands for this node."""
+        if self.cleanup_called:
+            return
+        self.cleanup_called = True
+
         return await self._async_cleanup_cmd()
 
     def has_ready_cmd(self) -> bool:
@@ -615,9 +620,6 @@ class SSHRemote(NodeMixin, Commander):
         # self.set_pre_cmd(pre_cmd, pre_cmd_tty)
 
         self.logger.info("%s: created", self)
-
-    def has_ready_cmd(self) -> bool:
-        return bool(self.config.get("ready-cmd", "").strip())
 
     def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
         pre_cmd = []
@@ -1523,11 +1525,14 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
 
     async def async_cleanup_cmd(self):
         """Run the configured cleanup commands for this node."""
+        if self.cleanup_called:
+            return
         self.cleanup_called = True
 
         if "cleanup-cmd" not in self.config:
             return
 
+        # The opposite of other types, the container needs cmd_p running
         if not self.cmd_p:
             self.logger.warning("async_cleanup_cmd: container no longer running")
             return
@@ -2481,6 +2486,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
     async def async_cleanup_cmd(self):
         """Run the configured cleanup commands for this node."""
+        if self.cleanup_called:
+            return
         self.cleanup_called = True
 
         if "cleanup-cmd" not in self.config:
@@ -2905,16 +2912,82 @@ ff02::2\tip6-allrouters
         mtu = kwargs.get("mtu", config.get("mtu"))
         return super().add_switch(name, cls=cls, config=config, mtu=mtu, **kwargs)
 
+    def coverage_setup(self):
+        bdir = self.cfgopt.getoption("--cov-build-dir")
+        if not bdir:
+            # Try and find the build dir using common prefix of gcno files
+            common = None
+            cwd = os.getcwd()
+            for f in glob.iglob(rf"{cwd}/**/*.gcno", recursive=True):
+                if not common:
+                    common = os.path.dirname(f)
+                else:
+                    common = os.path.commonprefix([common, f])
+                    if not common:
+                        break
+        assert (
+            bdir
+        ), "Can't locate build directory for coverage data, use --cov-build-dir"
+
+        bdir = Path(bdir).resolve()
+        rundir = Path(self.rundir).resolve()
+        gcdadir = rundir / "gcda"
+        os.environ["GCOV_BUILD_DIR"] = str(bdir)
+        os.environ["GCOV_PREFIX_STRIP"] = str(len(bdir.parts) - 1)
+        os.environ["GCOV_PREFIX"] = str(gcdadir)
+
+        # commander.cmd_raises(f"find {bdir} -name '*.gc??' -exec chmod o+rw {{}} +")
+        group_id = bdir.stat().st_gid
+        commander.cmd_raises(f"mkdir -p {gcdadir}")
+        commander.cmd_raises(f"chown -R root:{group_id} {gcdadir}")
+        commander.cmd_raises(f"chmod 2775 {gcdadir}")
+
+    async def coverage_finish(self):
+        rundir = Path(self.rundir).resolve()
+        bdir = Path(os.environ["GCOV_BUILD_DIR"])
+        gcdadir = Path(os.environ["GCOV_PREFIX"])
+
+        # Create GCNO symlinks
+        self.logger.info("Creating .gcno symlinks from '%s' to '%s'", gcdadir, bdir)
+        commander.cmd_raises(
+            f'cd "{gcdadir}"; bdir="{bdir}"'
+            + """
+for f in $(find . -name '*.gcda'); do
+    f=${f#./};
+    f=${f%.gcda}.gcno;
+    ln -fs $bdir/$f $f;
+    touch -h -r $bdir/$f $f;
+    echo $f;
+done"""
+        )
+
+        # Get the results into a summary file
+        data_file = rundir / "coverage.info"
+        self.logger.info("Gathering coverage data into: %s", data_file)
+        commander.cmd_raises(
+            f"lcov --directory {gcdadir} --capture --output-file {data_file}"
+        )
+
+        # Get coverage info filtered to a specific set of files
+        report_file = rundir / "coverage.info"
+        self.logger.debug("Generating coverage summary: %s", report_file)
+        output = commander.cmd_raises(f"lcov --summary {data_file}")
+        self.logger.info("\nCOVERAGE-SUMMARY-START\n%s\nCOVERAGE-SUMMARY-END", output)
+        # terminalreporter.write(
+        #     f"\nCOVERAGE-SUMMARY-START\n{output}\nCOVERAGE-SUMMARY-END\n"
+        # )
+
     async def run(self):
         tasks = []
 
         hosts = self.hosts.values()
         launch_nodes = [x for x in hosts if hasattr(x, "launch")]
         launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
-        run_nodes = [x for x in hosts if hasattr(x, "has_run_cmd") and x.has_run_cmd()]
-        ready_nodes = [
-            x for x in hosts if hasattr(x, "has_ready_cmd") and x.has_ready_cmd()
-        ]
+        run_nodes = [x for x in hosts if x.has_run_cmd()]
+        ready_nodes = [x for x in hosts if x.has_ready_cmd()]
+
+        if self.cfgopt.getoption("--coverage"):
+            self.coverage_setup()
 
         pcapopt = self.cfgopt.getoption("--pcap")
         pcapopt = pcapopt if pcapopt else ""
@@ -2996,15 +3069,6 @@ ff02::2\tip6-allrouters
 
         self.logger.debug("%s: deleting.", self)
 
-        if self.cfgopt.getoption("--coverage"):
-            nodes = (
-                x for x in self.hosts.values() if hasattr(x, "gather_coverage_data")
-            )
-            try:
-                await asyncio.gather(*(x.gather_coverage_data() for x in nodes))
-            except Exception as error:
-                logging.warning("Error gathering coverage data: %s", error)
-
         pause = bool(self.cfgopt.getoption("--pause-at-end"))
         pause = pause or bool(self.cfgopt.getoption("--pause"))
         if pause:
@@ -3014,6 +3078,25 @@ ff02::2\tip6-allrouters
                 print("^C...continuing")
             except Exception as error:
                 self.logger.error("\n...continuing after error: %s", error)
+
+        # Run cleanup-cmd's.
+        nodes = (x for x in self.hosts.values() if x.has_cleanup_cmd())
+        try:
+            await asyncio.gather(*(x.async_cleanup_cmd() for x in nodes))
+        except Exception as error:
+            logging.warning("Error running cleanup cmds: %s", error)
+
+        # Gather any coverage data
+        if self.cfgopt.getoption("--coverage"):
+            nodes = (
+                x for x in self.hosts.values() if hasattr(x, "gather_coverage_data")
+            )
+            try:
+                await asyncio.gather(*(x.gather_coverage_data() for x in nodes))
+            except Exception as error:
+                logging.warning("Error gathering coverage data: %s", error)
+
+            await self.coverage_finish()
 
         # XXX should we cancel launch and run tasks?
 

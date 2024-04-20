@@ -161,7 +161,7 @@ def module_autouse(request):
             raise Exception("Base Munet was not cleaned up/deleted")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the session."""
     loop = get_event_loop()

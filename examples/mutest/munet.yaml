@@ -5,6 +5,8 @@ topology:
     - name: net1
   nodes:
     - name: h1
-      connections: ["net1"]
+      connections:
+        - to: "net1"
     - name: h2
-      connections: ["net1"]
+      connections:
+        - to: "net1"

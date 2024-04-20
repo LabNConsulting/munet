@@ -66,8 +66,10 @@ import logging
 import pprint
 import re
 import subprocess
+import sys
 import time
 
+from argparse import Namespace
 from pathlib import Path
 from typing import Any
 from typing import Union
@@ -80,7 +82,46 @@ from munet.base import Commander
 class ScriptError(Exception):
     """An unrecoverable script failure."""
 
-    pass
+
+class CLIOnErrorError(Exception):
+    """Enter CLI after error."""
+
+
+def pause_test(desc=""):
+    isatty = sys.stdout.isatty()
+    if not isatty:
+        desc = f" for {desc}" if desc else ""
+        logging.info("NO PAUSE on non-tty terminal%s", desc)
+        return
+
+    while True:
+        if desc:
+            print(f"\n== PAUSING: {desc} ==")
+        try:
+            user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
+        except EOFError:
+            print("^D...continuing")
+            break
+        user = user.strip()
+        if user == "cli":
+            raise CLIOnErrorError()
+        if user == "pdb":
+            breakpoint()  # pylint: disable=W1515
+        elif user:
+            print(f'Unrecognized input: "{user}"')
+        else:
+            break
+
+
+def act_on_result(success, args, desc=""):
+    if args.pause:
+        pause_test(desc)
+    elif success:
+        return
+    if args.cli_on_error:
+        raise CLIOnErrorError()
+    if args.pause_on_error:
+        pause_test(desc)
 
 
 class TestCaseInfo:
@@ -147,6 +188,7 @@ class TestCase:
         name: str,
         path: Path,
         targets: dict,
+        args: Namespace,
         output_logger: logging.Logger = None,
         result_logger: logging.Logger = None,
         full_summary: bool = False,
@@ -164,6 +206,7 @@ class TestCase:
         self.__in_section = False
 
         self.targets = targets
+        self.args = args
 
         self.last = ""
         self.last_m = None
@@ -311,6 +354,8 @@ class TestCase:
             # result = await locals()[f"_{name}"](_ok_result)
         except ScriptError as error:
             return error
+        except CLIOnErrorError:
+            raise
         except Exception as error:
             logging.error(
                 "Unexpected exception executing %s: %s", name, error, exc_info=True
@@ -595,6 +640,7 @@ class TestCase:
         """
         path = Path(pathname)
         path = self.info.path.parent.joinpath(path)
+        do_cli = False
 
         self.oplogf(
             "include: new path: %s create section: %s currently __in_section: %s",
@@ -614,7 +660,12 @@ class TestCase:
             self.info.path = path
             self.oplogf("include: swapped info path: new %s old %s", path, old_path)
 
-        e = self.__exec_script(path, print_header=new_section, add_newline=new_section)
+        try:
+            e = self.__exec_script(
+                path, print_header=new_section, add_newline=new_section
+            )
+        except CLIOnErrorError:
+            do_cli = True
 
         if new_section:
             # Something within the section creating include has also created a section
@@ -640,6 +691,9 @@ class TestCase:
             # we are returning to
             self.info.path = old_path
             self.oplogf("include: restored info path: %s", old_path)
+
+        if do_cli:
+            raise CLIOnErrorError()
         if e:
             raise ScriptError(e)
 
@@ -746,6 +800,7 @@ class TestCase:
         )
         if desc:
             self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
         return success, ret
 
     def test_step(self, expr_or_value: Any, desc: str, target: str = "") -> bool:
@@ -755,6 +810,7 @@ class TestCase:
         """
         success = bool(expr_or_value)
         self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
         return success
 
     def match_step_json(
@@ -787,6 +843,7 @@ class TestCase:
         )
         if desc:
             self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
         return success, ret
 
     def wait_step(
@@ -835,6 +892,7 @@ class TestCase:
         )
         if desc:
             self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
         return success, ret
 
     def wait_step_json(
@@ -873,6 +931,7 @@ class TestCase:
         )
         if desc:
             self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
         return success, ret
 
 
