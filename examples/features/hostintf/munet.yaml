@@ -1,0 +1,25 @@
+topology:
+  networks-autonumber: false
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 10.0.1.254/24
+      nat: true
+    - name: hostnet
+      external: true
+  nodes:
+    - name: host1
+      connections:
+        - to: mgmt0
+          ip: 10.0.1.1/24
+        - to: hostnet
+          ip: 192.168.111.1/24
+          hostintf: "vlan.111"
+    # - name: lake
+    #   server: 192.168.111.90
+
+kinds:
+  - name: remotessh
+    ssh-user: root
+    server-port: 22
+    ssh-identity-file: "/home/chopps/.ssh/id_rsa"

@@ -383,6 +383,9 @@
               },
               "ipv6": {
                 "type": "string"
+              },
+              "external": {
+                "type": "boolean"
               }
             }
           }

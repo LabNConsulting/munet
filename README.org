@@ -980,15 +980,25 @@ munet>
         }
         leaf ip {
           type string;
+          must "not (../external)";
           description
             "IPv4 prefix for the network. If host bit's are set then the linux
              bridge will be assigned that IP.";
         }
         leaf ipv6 {
           type string;
+          must "not (../external)";
           description
             "IPv6 prefix for the network. If host bit's are set then the linux
              bridge will be assigned that IP.";
+        }
+        leaf external {
+          type boolean;
+          default false;
+          description
+            "This is a placeholder network for an externally defined network.
+             This is most useful when adding host interfaces to nodes as the
+             connection point.";
         }
       }
 

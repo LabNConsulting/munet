@@ -28,8 +28,10 @@ from . import cli
 from .base import BaseMunet
 from .base import Bridge
 from .base import Commander
+from .base import InterfaceMixin
 from .base import LinuxNamespace
 from .base import MunetError
+from .base import SharedNamespace
 from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
@@ -130,6 +132,22 @@ def convert_ranges_to_bitmask(ranges):
             for b in range(x, y + 1):
                 bitmask |= 1 << b
     return bitmask
+
+
+class ExternalNetwork(SharedNamespace, InterfaceMixin):
+    """A network external to munet."""
+
+    def __init__(self, name=None, unet=None, logger=None, mtu=None, config=None):
+        """Create an external network."""
+        del logger  # avoid linter
+        del mtu  # avoid linter
+        # Do we want to use os.getpid() rather than unet.pid?
+        super().__init__(name, pid=unet.pid, nsflags=unet.nsflags, unet=unet)
+        self.config = config if config else {}
+
+    async def _async_delete(self):
+        self.logger.debug("%s: deleting", self)
+        await super()._async_delete()
 
 
 class L2Bridge(Bridge):
@@ -979,17 +997,16 @@ ff02::2\tip6-allrouters
             )
             self.unet.rootcmd.cmd_status(f"ip link set {dname} name {hname}")
 
-        rc, o, _ = self.unet.rootcmd.cmd_status("ip -o link show")
-        m = re.search(rf"\d+:\s+{re.escape(hname)}:.*", o)
-        if m:
-            self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
-            self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
+        # Make sure the interface is there.
+        self.unet.rootcmd.cmd_raises(f"ip -o link show {hname}")
+        self.unet.rootcmd.cmd_nostatus(f"ip link set {hname} down ")
+        self.unet.rootcmd.cmd_raises(f"ip link set {hname} netns {self.pid}")
+
         # Wait for interface to show up in namespace
         for retry in range(0, 10):
             rc, o, _ = self.cmd_status(f"ip -o link show {hname}")
             if not rc:
-                if re.search(rf"\d+: {re.escape(hname)}:.*", o):
-                    break
+                break
             if retry > 0:
                 await asyncio.sleep(1)
         self.cmd_raises(f"ip link set {hname} name {lname}")
@@ -1001,12 +1018,11 @@ ff02::2\tip6-allrouters
         lname = self.host_intfs[hname]
         self.cmd_raises(f"ip link set {lname} down")
         self.cmd_raises(f"ip link set {lname} name {hname}")
-        self.cmd_status(f"ip link set netns 1 dev {hname}")
-        # The above is failing sometimes and not sure why
-        # logging.error(
-        #     "XXX after setns %s",
-        #     self.unet.rootcmd.cmd_nostatus(f"ip link show {hname}"),
-        # )
+        # We need to NOT run this command in the new pid namespace so that pid 1 is the
+        # root init process and so the interface gets returned to the root namespace
+        self.unet.rootcmd.cmd_raises(
+            f"nsenter -t {self.pid} -n ip link set netns 1 dev {hname}"
+        )
         del self.host_intfs[hname]
 
     async def add_phy_intf(self, devaddr, lname):
@@ -2878,7 +2894,9 @@ ff02::2\tip6-allrouters
         else:
             node2.set_lan_addr(node1, c2)
 
-        if "physical" not in c1 and not node1.is_vm:
+        if isinstance(node1, ExternalNetwork):
+            pass
+        elif "physical" not in c1 and not node1.is_vm:
             node1.set_intf_constraints(if1, **c1)
         if "physical" not in c2 and not node2.is_vm:
             node2.set_intf_constraints(if2, **c2)
@@ -2908,7 +2926,12 @@ ff02::2\tip6-allrouters
         if config is None:
             config = {}
 
-        cls = L3Bridge if config.get("ip") else L2Bridge
+        if config.get("external"):
+            cls = ExternalNetwork
+        elif config.get("ip"):
+            cls = L3Bridge
+        else:
+            cls = L2Bridge
         mtu = kwargs.get("mtu", config.get("mtu"))
         return super().add_switch(name, cls=cls, config=config, mtu=mtu, **kwargs)
 
