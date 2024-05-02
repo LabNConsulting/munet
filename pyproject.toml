@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.14.0"
+version = "0.14.1"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -11,6 +11,7 @@ include = ["logconf.yaml", "logconf-mutest.yaml", "munet-schema.json"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
+deepdiff = "^6.2.1"
 pexpect = "^4.8.0"
 pyyaml = "^6.0"
 jsonschema = "^4.17.1"
@@ -26,9 +27,6 @@ mutest = "munet.mutest.__main__:main"
 [tool.poetry.group.schemadev.dependencies]
 pyang = "^2.5.3"
 pyang-json-schema-plugin = {git = "https://github.com/LabNConsulting/pyang-json-schema-plugin.git", rev = "labn-master"}
-
-[tool.poetry.group.setest.dependencies]
-deepdiff = "^6.2.1"
 
 [tool.poetry.group.test.dependencies]
 pylint = "^2.15.6"
