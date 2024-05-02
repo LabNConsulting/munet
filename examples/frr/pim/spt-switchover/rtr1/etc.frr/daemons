@@ -1,0 +1,9 @@
+zebra=1
+ospfd=1
+pimd=1
+vtysh_enable=1
+watchfrr_enable=1
+zebra_options="-d -F traditional --log=file:/var/log/frr/zebra.log"
+ospfd_options="-d -F traditional --log=file:/var/log/frr/ospfd.log"
+pimd_options="-d -F traditional --log=file:/var/log/frr/pimd.log"
+staticd_options="-d -F traditional --log=file:/var/log/frr/staticd.log"
