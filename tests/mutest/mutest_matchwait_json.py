@@ -1,7 +1,9 @@
 """Test match and wait send/expect-json step functionality."""
 from munet.mutest.userapi import log
+from munet.mutest.userapi import match_step
 from munet.mutest.userapi import match_step_json
 from munet.mutest.userapi import section
+from munet.mutest.userapi import script_dir
 from munet.mutest.userapi import step_json
 from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step_json
@@ -127,9 +129,6 @@ wait_step_json(
     timeout=1,
     interval=0.25,
     expect_fail=True,
-)
-wait_step_json(
-    "r1", """echo 'not json'""", '{ "name": "other" }', "Look for chopps", 1, 0.25, True
 )
 
 section("Test json exact matching (exact_match == True)")
@@ -348,48 +347,55 @@ _, ret = match_step_json(
 
 _, ret = match_step_json(
     "r1",
-    f"echo '{jsonbad}'",
-    jsongood,
-    "Output json is bad, match json is good, fail is pass",
-    expect_fail=True,
-)
-
-_, ret = match_step_json(
-    "r1",
     f"echo '{jsongood}'",
     jsonblank,
     "Output json is good, match json is blank, expect pass",
 )
 
-_, ret = match_step_json(
-    "r1",
-    f"echo '{jsonbad}'",
-    jsonblank,
-    "Output json is bad, match json is blank, fail is pass",
-    expect_fail=True,
+
+_, ret = match_step(
+    ".",
+    f"cd {script_dir()} && mutest -d $MUNET_RUNDIR/failtest2 --file-select='mufail_*'",
+    "run stats: 4 steps, 0 pass, 4 fail",
+    "Expect 4 failures for 4 bad json variations",
 )
 
-_, ret = match_step_json(
-    "r1",
-    f"echo '{jsongood}'",
-    jsonbad,
-    "Output json is good, match json is bad, fail is pass",
-    expect_fail=True,
-)
+# _, ret = match_step_json(
+#     "r1",
+#     f"echo '{jsonbad}'",
+#     jsongood,
+#     "Output json is bad, match json is good, fail is pass",
+#     expect_fail=True,
+# )
 
-_, ret = match_step_json(
-    "r1",
-    f"echo '{jsonblank}'",
-    jsonbad,
-    "Output json is blank, match json is bad, fail is pass",
-    expect_fail=True,
-)
+# _, ret = match_step_json(
+#     "r1",
+#     f"echo '{jsonbad}'",
+#     jsonblank,
+#     "Output json is bad, match json is blank, fail is pass",
+#     expect_fail=True,
+# )
 
-_, ret = match_step_json(
-    "r1",
-    f"echo '{jsonbad}'",
-    jsonbad,
-    "Output json and match json are bad, fail is pass",
-    expect_fail=True,
-)
+# _, ret = match_step_json(
+#     "r1",
+#     f"echo '{jsongood}'",
+#     jsonbad,
+#     "Output json is good, match json is bad, fail is pass",
+#     expect_fail=True,
+# )
 
+# _, ret = match_step_json(
+#     "r1",
+#     f"echo '{jsonblank}'",
+#     jsonbad,
+#     "Output json is blank, match json is bad, fail is pass",
+#     expect_fail=True,
+# )
+
+# _, ret = match_step_json(
+#     "r1",
+#     f"echo '{jsonbad}'",
+#     jsonbad,
+#     "Output json and match json are bad, fail is pass",
+#     expect_fail=True,
+# )

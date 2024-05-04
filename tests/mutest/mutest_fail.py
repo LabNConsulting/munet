@@ -25,7 +25,7 @@ match_step(
 )
 match_step(
     "host1",
-    f"cd {sd} && mutest -d /tmp/mutest2/ --file-select='mut_*'",
+    f"cd {sd} && mutest -d $MUNET_RUNDIR/failtest1 --file-select='mut_*'",
     "FAIL.*A failing test case",
     "Verify FAIL case",
 )

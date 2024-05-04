@@ -579,11 +579,6 @@ class SSHRemote(NodeMixin, Commander):
     def __init__(
         self,
         name,
-        server,
-        port=22,
-        user=None,
-        password=None,
-        idfile=None,
         **kwargs,
     ):
         super().__init__(name, **kwargs)
@@ -598,32 +593,33 @@ class SSHRemote(NodeMixin, Commander):
         self.mgmt_ip = None
         self.mgmt_ip6 = None
 
-        self.port = port
-
-        if user:
-            self.user = user
-        elif "SUDO_USER" in os.environ:
-            self.user = os.environ["SUDO_USER"]
-        else:
+        self.server = self.config["server"]
+        self.port = int(self.config.get("server-port", 22))
+        self.sudo_user = os.environ.get("SUDO_USER")
+        self.user = self.config.get("ssh-user")
+        if not self.user:
+            self.user = self.sudo_user
+        if not self.user:
             self.user = getpass.getuser()
-        self.password = password
-        self.idfile = idfile
-
-        self.server = f"{self.user}@{server}"
+        self.password = self.config.get("ssh-password")
+        self.idfile = self.config.get("ssh-identity-file")
+        self.use_host_network = None
 
         # Setup our base `pre-cmd` values
         #
         # We maybe should add environment variable transfer here in particular
         # MUNET_NODENAME. The problem is the user has to explicitly approve
         # of SendEnv variables.
-        self.__base_cmd = [
-            get_exec_path_host("sudo"),
-            "-E",
-            f"-u{self.user}",
-            get_exec_path_host("ssh"),
-        ]
-        if port != 22:
-            self.__base_cmd.append(f"-p{port}")
+        self.__base_cmd = []
+        if self.idfile and self.sudo_user:
+            self.__base_cmd += [
+                get_exec_path_host("sudo"),
+                "-E",
+                f"-u{self.sudo_user}",
+            ]
+        self.__base_cmd.append(get_exec_path_host("ssh"))
+        if self.port != 22:
+            self.__base_cmd.append(f"-p{self.port}")
         self.__base_cmd.append("-q")
         self.__base_cmd.append("-oStrictHostKeyChecking=no")
         self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
@@ -633,15 +629,34 @@ class SSHRemote(NodeMixin, Commander):
         # self.__base_cmd.append("-oSendVar='TEST'")
         self.__base_cmd_pty = list(self.__base_cmd)
         self.__base_cmd_pty.append("-t")
-        self.__base_cmd.append(self.server)
-        self.__base_cmd_pty.append(self.server)
+        server_str = f"{self.user}@{self.server}"
+        self.__base_cmd.append(server_str)
+        self.__base_cmd_pty.append(server_str)
         # self.set_pre_cmd(pre_cmd, pre_cmd_tty)
 
         self.logger.info("%s: created", self)
 
     def _get_pre_cmd(self, use_str, use_pty, ns_only=False, **kwargs):
-        pre_cmd = []
-        if self.unet:
+        # None on first use, set after
+        if self.use_host_network is None:
+            # We have networks now so try and ping the server in the namespace
+            if not self.unet:
+                self.use_host_network = True
+            else:
+                rc, _, _ = self.unet.cmd_status(f"ping -w1 -c1 {self.server}")
+                if rc:
+                    self.use_host_network = True
+                else:
+                    self.use_host_network = False
+
+            if self.use_host_network:
+                self.logger.debug("Using host namespace for ssh connection")
+            else:
+                self.logger.debug("Using munet namespace for ssh connection")
+
+        if self.use_host_network:
+            pre_cmd = []
+        else:
             pre_cmd = self.unet._get_pre_cmd(False, use_pty, ns_only=False, **kwargs)
         if ns_only:
             return pre_cmd
@@ -2909,14 +2924,6 @@ ff02::2\tip6-allrouters
             cls = L3QemuVM
         elif config and config.get("server"):
             cls = SSHRemote
-            kwargs["server"] = config["server"]
-            kwargs["port"] = int(config.get("server-port", 22))
-            if "ssh-identity-file" in config:
-                kwargs["idfile"] = config.get("ssh-identity-file")
-            if "ssh-user" in config:
-                kwargs["user"] = config.get("ssh-user")
-            if "ssh-password" in config:
-                kwargs["password"] = config.get("ssh-password")
         else:
             cls = L3NamespaceNode
         return super().add_host(name, cls=cls, config=config, **kwargs)
@@ -3072,10 +3079,10 @@ done"""
                     await asyncio.sleep(0.25)
                 logging.debug("%s is ready!", x)
 
+            tasks = [asyncio.create_task(wait_until_ready(x)) for x in ready_nodes]
+
             logging.debug("Waiting for ready on nodes: %s", ready_nodes)
-            _, pending = await asyncio.wait(
-                [wait_until_ready(x) for x in ready_nodes], timeout=30
-            )
+            _, pending = await asyncio.wait(tasks, timeout=30)
             if pending:
                 logging.warning("Timeout waiting for ready: %s", pending)
                 for nr in pending:

@@ -15,11 +15,12 @@ topology:
         - to: hostnet
           ip: 192.168.111.1/24
           hostintf: "vlan.111"
-    # - name: lake
-    #   server: 192.168.111.90
-
-kinds:
-  - name: remotessh
-    ssh-user: root
-    server-port: 22
-    ssh-identity-file: "/home/chopps/.ssh/id_rsa"
+    # - name: exthost
+    #   # Must be reachable either from the host or inside the topology
+    #   server: 192.168.2.90
+    #   ssh-user: root
+    #   server-port: 22
+    #   # The public key should be in ~root/.ssh/authorized_keys on exthost
+    #   # The identify file should be locally readable by SUDO_USER or root
+    #   # depending on how munet was run
+    #   ssh-identity-file: "/tmp/exthost-id_rsa"

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "munet"
-version = "0.14.1"
+version = "0.14.2"
 description = "A package to facilitate network simulations"
 authors = ["Christian Hopps <chopps@labn.net>"]
 license = "GPL-2.0-or-later"
@@ -138,7 +138,7 @@ log_level = "INFO"
 log_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
 
-python_functions = ["test*", "setest*"]
+python_functions = ["test*"]
 # python_files = ["test*.py"]
 
 # If verbose is specifyied log_cli will be set to 1, it can also be specified
