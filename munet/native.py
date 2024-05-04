@@ -573,6 +573,32 @@ class NodeMixin:
         await super()._async_delete()
 
 
+class HostnetNode(NodeMixin, LinuxNamespace):
+    """A node for running commands in the host network namespace."""
+
+    def __init__(self, name, pid=True, **kwargs):
+        if "net" in kwargs:
+            del kwargs["net"]
+        super().__init__(name, pid=pid, net=False, **kwargs)
+
+        self.logger.debug("%s: creating", self)
+
+        self.mgmt_ip = None
+        self.mgmt_ip6 = None
+        self.set_ns_cwd(self.rundir)
+
+        super().pytest_hook_open_shell()
+        self.logger.info("%s: created", self)
+
+    def get_ifname(self, netname):  # pylint: disable=useless-return
+        del netname
+        return None
+
+    async def _async_delete(self):
+        self.logger.debug("%s: deleting", self)
+        await super()._async_delete()
+
+
 class SSHRemote(NodeMixin, Commander):
     """SSHRemote a node representing an ssh connection to something."""
 
@@ -2924,6 +2950,8 @@ ff02::2\tip6-allrouters
             cls = L3QemuVM
         elif config and config.get("server"):
             cls = SSHRemote
+        elif config and config.get("hostnet"):
+            cls = HostnetNode
         else:
             cls = L3NamespaceNode
         return super().add_host(name, cls=cls, config=config, **kwargs)

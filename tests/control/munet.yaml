@@ -24,3 +24,5 @@ topology:
       connections:
         - to: "mgmt0"
           ip: 10.0.1.4/24
+    - name: hn1
+      hostnet: true

@@ -93,6 +93,9 @@
           "image": {
             "type": "string"
           },
+          "hostnet": {
+            "type": "boolean"
+          },
           "server": {
             "type": "string"
           },
@@ -424,6 +427,9 @@
               },
               "image": {
                 "type": "string"
+              },
+              "hostnet": {
+                "type": "boolean"
               },
               "server": {
                 "type": "string"

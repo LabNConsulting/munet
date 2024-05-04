@@ -50,7 +50,7 @@ async def _test_repl(unet, hostname, cmd, use_pty, will_echo=False):
     return repl
 
 
-@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 @pytest.mark.parametrize("mode", ["pty", "piped"])
 @pytest.mark.parametrize("shellcmd", ["/bin/bash", "/bin/dash", "/usr/bin/ksh"])
 async def test_spawn(unet_share, host, mode, shellcmd):

@@ -547,15 +547,25 @@ munet>
       }
       leaf image {
         type string;
-        must "not(../server) and not(../qemu)" {
-          error-message "Can only have one of image, server or qemu";
+        must "not(../hostnet) and not(../qemu) and not(../server)" {
+          error-message "Can only have one of hostnet, image, server or qemu";
         }
         description "Container image specification.";
       }
+      leaf hostnet {
+        type boolean;
+        must "not(../image) and not(../qemu) and not(../server)" {
+          error-message "Can only have one of hostnet, image, server or qemu";
+        }
+        description
+          "Node that runs commands in the host network namespace. For this
+           to work correclty the munet object should not be created with
+           unshare inline.";
+      }
       leaf server {
         type string;
-        must "not(../image) and not(../qemu)" {
-          error-message "Can only have one of image, server or qemu";
+        must "not(../hostnet) and not(../image) and not(../qemu)" {
+          error-message "Can only have one of hostnet, image, server or qemu";
         }
         description
           "Name of server for SSHRemote node functionality. If using
@@ -591,8 +601,8 @@ munet>
            `server` node.";
       }
       container qemu {
-        must "not(../image) and not(../server)" {
-          error-message "Can only have one of image, server or qemu";
+        must "not(../hostnet) and not(../image) and not(../server)" {
+          error-message "Can only have one of hostnet, image, server or qemu";
         }
         description "Specify parameters for Qemu VM node";
         leaf bios {
@@ -703,6 +713,9 @@ munet>
         }
       }
       list connections {
+        must "not(../hostnet) and not(../server)" {
+          error-message "SSHRemote and hostnet nodes have no munet connections.";
+        }
         key to;
         description "Connections to other networks or nodes from this node";
 

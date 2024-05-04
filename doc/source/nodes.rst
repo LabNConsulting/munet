@@ -95,6 +95,26 @@ network.
            initrd: "%CONFIGDIR%/rootfs.cpio.gz"
            cmdline-extra: "acpi=off nokaslr"
 
+Hostnet Node
+------------
+
+A node that can run commands within the host network namespace can be created by
+specifying ``hostnet: true`` configuration. This node type is implemented by the
+:py:class:`HostnetNode` class.
+
+NOTE: For this to node type to work correctly the main munet object should not
+be created with unshare_inline.
+
+Below is an example of creating an ssh connection to a server
+'server.example.com` using port 5100 named ``remote1``.
+
+.. code-block:: yaml
+
+   topology:
+     nodes:
+       - name: remote1
+         hostnet: true
+
 Remote Node (SSH)
 -----------------
 

@@ -30,7 +30,7 @@ async def wait_remote_up(unet):
     assert False, "took more than 5 seconds to bring up sshd server"
 
 
-@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 async def test_cmd_raises(unet, host):
     if host == "remote1":
         await wait_remote_up(unet)
@@ -56,7 +56,7 @@ async def test_cmd_raises(unet, host):
         assert False, "Failed to raise error"
 
 
-@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 async def test_cmd_status(unet, host):
     if host == "remote1":
         await wait_remote_up(unet)
@@ -83,7 +83,7 @@ async def test_cmd_status(unet, host):
     assert o == ""
 
 
-@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 async def test_cmd_nostatus(unet, host):
     if host == "remote1":
         await wait_remote_up(unet)
@@ -126,7 +126,7 @@ async def test_cmd_nostatus(unet, host):
     assert "No such file or directory" in e
 
 
-@pytest.mark.parametrize("host", ["host1", "container1", "remote1"])
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 async def test_popen(unet, host):
     if host == "remote1":
         await wait_remote_up(unet)
