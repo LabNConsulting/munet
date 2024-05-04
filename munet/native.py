@@ -3079,10 +3079,10 @@ done"""
                     await asyncio.sleep(0.25)
                 logging.debug("%s is ready!", x)
 
+            tasks = [asyncio.create_task(wait_until_ready(x)) for x in ready_nodes]
+
             logging.debug("Waiting for ready on nodes: %s", ready_nodes)
-            _, pending = await asyncio.wait(
-                [wait_until_ready(x) for x in ready_nodes], timeout=30
-            )
+            _, pending = await asyncio.wait(tasks, timeout=30)
             if pending:
                 logging.warning("Timeout waiting for ready: %s", pending)
                 for nr in pending:
