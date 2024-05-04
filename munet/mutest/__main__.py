@@ -20,6 +20,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Union
 
+from munet import mulog
 from munet import parser
 from munet.args import add_testing_args
 from munet.base import Bridge
@@ -380,8 +381,10 @@ async def run_tests(args):
     for result in results:
         test_name, passed, failed, e = result
         tnum += 1
-        s = "FAIL" if failed or e else "PASS"
-        reslog.info(" %s  %s:%s", s, tnum, test_name)
+        if failed or e:
+            reslog.warning(" FAIL  %s:%s", tnum, test_name)
+        else:
+            reslog.info(" PASS  %s:%s", tnum, test_name)
 
     reslog.info("-" * 70)
     reslog.info(
@@ -458,6 +461,9 @@ def main():
         exec_formatter = logging.Formatter(
             fconfig.get("format"), fconfig.get("datefmt")
         )
+
+    if not hasattr(sys.stderr, "isatty") or not sys.stderr.isatty():
+        mulog.do_color = False
 
     loop = None
     status = 4
