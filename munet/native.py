@@ -3035,10 +3035,30 @@ done"""
         #     f"\nCOVERAGE-SUMMARY-START\n{output}\nCOVERAGE-SUMMARY-END\n"
         # )
 
+    async def load_images(self, images):
+        tasks = []
+        for image in images:
+            logging.debug("Checking for image %s", image)
+            rc, _, _ = self.rootcmd.cmd_status(
+                f"podman image inspect {image}", warn=False
+            )
+            if not rc:
+                continue
+            logging.info("Pulling missing image %s", image)
+            aw = self.rootcmd.async_cmd_raises(f"podman pull {image}")
+            tasks.append(asyncio.create_task(aw))
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(tasks, timeout=600)
+        assert not pending, "Failed to pull container images"
+
     async def run(self):
         tasks = []
-
         hosts = self.hosts.values()
+
+        images = {x.container_image for x in hosts if hasattr(x, "container_image")}
+        await self.load_images(images)
+
         launch_nodes = [x for x in hosts if hasattr(x, "launch")]
         launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
         run_nodes = [x for x in hosts if x.has_run_cmd()]
