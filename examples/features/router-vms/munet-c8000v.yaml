@@ -1,0 +1,81 @@
+topology:
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+    - name: net0
+  nodes:
+    - name: r1
+      kind: cisco
+      connections:
+        - to: "mgmt0"
+          name: "GigabitEthernet1"
+        - to: "net0"
+          name: "GigabitEthernet2"
+
+kinds:
+  - name: cisco
+    shell: false
+    initial-cmd: |
+      terminal terminal-type dumb
+      terminal length 0
+      terminal width 511
+      conf t
+      username admin privilege 15 password admin
+      platform console serial
+      line console 0
+      exec-timeout 0
+      line aux 0
+      exec-timeout 0
+      line vty 0 4
+      login local
+      exec-timeout 0
+      int GigabitEthernet1
+      ip address 192.168.0.1 255.255.255.0
+      no shut
+      int GigabitEthernet2
+      ip address 10.0.2.1 255.255.255.0
+      no shut
+      exit
+      end
+      wr mem
+    cmd: |
+      terminal terminal-type dumb
+      terminal length 0
+      terminal width 511
+    qemu:
+      unix-os: false
+      disk-template: "%CONFIGDIR%/c8000v-universalk9_8G_serial.17.06.06a.qcow2"
+      disk: "%RUNDIR%/../%NAME%-disk.qcow2"
+      disk-driver: "sata"
+      memory: "8192M"
+      smp: 2
+      kvm: true
+      console:
+        stdio: false
+        user: "admin"
+        password: "admin"
+        initial-password: ""
+        prompt: "(^|\r?\n\r?)Router(\\([^\\)]+\\))?#"
+        expects:
+          - "Press RETURN to get started"
+          - "Would you like to enter the initial configuration dialog\\? \\[yes/no\\]:"
+          - "Would you like to terminate autoinstall\\? \\[yes\\]:"
+          - "Router>"
+        sends:
+          - "\r"
+          - "no\r"
+          - "yes\r"
+          - "enable\r"
+        timeout: 900
+
+cli:
+  commands:
+    - name: ssh
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@%IPADDR%"
+      kinds: ["cisco"]
+      format: "ssh NODE [NODE ...]"
+      top-level: true
+      new-window: true

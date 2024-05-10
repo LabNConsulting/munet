@@ -1974,7 +1974,11 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
     # InterfaceMixin override
     # We need a name unique in the shared namespace.
     def get_ns_ifname(self, ifname):
-        return self.name + ifname
+        ifname = self.name + ifname
+        ifname = re.sub("gigabitethernet", "GE", ifname, flags=re.I)
+        if len(ifname) >= 16:
+            ifname = ifname[0:7] + ifname[-8:]
+        return ifname
 
     async def add_host_intf(self, hname, lname, mtu=None):
         # L3QemuVM needs it's own add_host_intf for macvtap, We need to create the tap

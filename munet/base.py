@@ -2520,7 +2520,7 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         self.logger.debug("Bridge: Creating")
 
-        assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
+        # assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
         self.cmd_raises(f"ip link delete {name} || true")
         self.cmd_raises(f"ip link add {name} type bridge")
         if self.mtu:
@@ -2765,7 +2765,7 @@ class BaseMunet(LinuxNamespace):
                 self.logger.error('"%s" len %s > 16', nsif1, len(nsif1))
             elif len(nsif2) > 16:
                 self.logger.error('"%s" len %s > 16', nsif2, len(nsif2))
-            assert len(nsif1) <= 16 and len(nsif2) <= 16  # Make sure fits in IFNAMSIZE
+            assert len(nsif1) < 16 and len(nsif2) < 16  # Make sure fits in IFNAMSIZE
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
 
