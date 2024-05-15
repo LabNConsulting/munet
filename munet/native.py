@@ -2154,16 +2154,22 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             )
             con.cmd_raises(rf"rm -rf {tmpdir}")
 
-        self.logger.info("Saved coverage data in VM at %s", dest)
+        self.logger.debug("Saved coverage data in VM at %s", dest)
         ldest = os.path.join(self.rundir, "gcov-data.tgz")
         if self.use_ssh:
             self.cmd_raises(["/bin/cat", dest], stdout=open(ldest, "wb"))
-            self.logger.info("Saved coverage data on host at %s", ldest)
+            self.logger.debug("Saved coverage data on host at %s", ldest)
         else:
             output = con.cmd_raises(rf"base64 {dest}")
             with open(ldest, "wb") as f:
                 f.write(base64.b64decode(output))
-            self.logger.info("Saved coverage data on host at %s", ldest)
+            self.logger.debug("Saved coverage data on host at %s", ldest)
+        self.logger.info("Extracting coverage for %s into %s", self.name, ldest)
+
+        # We need to place the gcda files where munet expects to find them
+        gcdadir = Path(os.environ["GCOV_PREFIX"]) / self.name
+        self.unet.cmd_raises_nsonly(f"mkdir -p {gcdadir}")
+        self.unet.cmd_raises_nsonly(f"tar -C {gcdadir} -xzf {ldest}")
 
     async def _opencons(
         self,
@@ -3009,7 +3015,7 @@ ff02::2\tip6-allrouters
         bdir = Path(os.environ["GCOV_BUILD_DIR"])
         gcdadir = Path(os.environ["GCOV_PREFIX"])
 
-        # Create GCNO symlinks
+        # Create .gcno symlinks if they don't already exist, for kernel they will
         self.logger.info("Creating .gcno symlinks from '%s' to '%s'", gcdadir, bdir)
         commander.cmd_raises(
             f'cd "{gcdadir}"; bdir="{bdir}"'
@@ -3017,9 +3023,11 @@ ff02::2\tip6-allrouters
 for f in $(find . -name '*.gcda'); do
     f=${f#./};
     f=${f%.gcda}.gcno;
-    ln -fs $bdir/$f $f;
-    touch -h -r $bdir/$f $f;
-    echo $f;
+    if [ ! -h "$f" ]; then
+        ln -fs $bdir/$f $f;
+        touch -h -r $bdir/$f $f;
+        echo $f;
+    fi;
 done"""
         )
 
