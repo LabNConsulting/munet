@@ -780,8 +780,14 @@ class Commander:  # pylint: disable=R0904
 
         ps1 = re.escape(ps1)
         ps2 = re.escape(ps2)
-
-        extra = "PAGER=cat; export PAGER; TERM=dumb; unset HISTFILE; set +o emacs +o vi"
+        extra = [
+            "TERM=dumb",
+            "set +o emacs",
+            "set +o vi",
+            "unset HISTFILE",
+            "PAGER=cat",
+            "export PAGER",
+        ]
         pchg = "PS1='{0}' PS2='{1}' PROMPT_COMMAND=''\n".format(ps1p, ps2p)
         p.send(pchg)
         return ShellWrapper(p, ps1, ps2, extra_init_cmd=extra, will_echo=will_echo)
@@ -2993,8 +2999,11 @@ if True:  # pylint: disable=using-constant-test
                     self._expectf = self.child.expect
 
             if extra_init_cmd:
-                self.expect_prompt()
-                self.child.sendline(extra_init_cmd)
+                if isinstance(extra_init_cmd, str):
+                    extra_init_cmd = [extra_init_cmd]
+                for ecmd in extra_init_cmd:
+                    self.expect_prompt()
+                    self.child.sendline(ecmd)
             self.expect_prompt()
 
         def expect_prompt(self, timeout=-1):
