@@ -469,6 +469,8 @@ class Commander:  # pylint: disable=R0904
         env = {**(kwargs["env"] if "env" in kwargs else os.environ)}
         if "MUNET_NODENAME" not in env:
             env["MUNET_NODENAME"] = self.name
+        if "MUNET_PID" not in env and "MUNET_PID" in os.environ:
+            env["MUNET_PID"] = os.environ["MUNET_PID"]
         kwargs["env"] = env
 
         defaults.update(kwargs)
@@ -1226,7 +1228,13 @@ class Commander:  # pylint: disable=R0904
         if self.is_vm and self.use_ssh and not ns_only:  # pylint: disable=E1101
             if isinstance(cmd, str):
                 cmd = shlex.split(cmd)
-            cmd = ["/usr/bin/env", f"MUNET_NODENAME={self.name}"] + cmd
+            cmd = [
+                "/usr/bin/env",
+                f"MUNET_NODENAME={self.name}",
+            ]
+            if "MUNET_PID" in os.environ:
+                cmd.append(f"MUNET_PID={os.environ.get('MUNET_PID')}")
+            cmd += cmd
 
             # get the ssh cmd
             cmd = self._get_pre_cmd(False, True, ns_only=ns_only) + [shlex.join(cmd)]
@@ -1246,6 +1254,8 @@ class Commander:  # pylint: disable=R0904
             envvars = f"MUNET_NODENAME={self.name} NODENAME={self.name}"
             if hasattr(self, "rundir"):
                 envvars += f" RUNDIR={self.rundir}"
+            if "MUNET_PID" in os.environ:
+                envvars += f" MUNET_PID={os.environ.get('MUNET_PID')}"
             if hasattr(self.unet, "config_dirname") and self.unet.config_dirname:
                 envvars += f" CONFIGDIR={self.unet.config_dirname}"
             elif "CONFIGDIR" in os.environ:
@@ -2650,10 +2660,6 @@ class BaseMunet(LinuxNamespace):
 
         self.cfgopt = munet_config.ConfigOptionsProxy(pytestconfig)
 
-        super().__init__(
-            name, mount=True, net=isolated, uts=isolated, pid=pid, unet=None, **kwargs
-        )
-
         # This allows us to cleanup any leftover running munet's
         if "MUNET_PID" in os.environ:
             if os.environ["MUNET_PID"] != str(our_pid):
@@ -2663,6 +2669,10 @@ class BaseMunet(LinuxNamespace):
                     os.environ["MUNET_PID"],
                 )
         os.environ["MUNET_PID"] = str(our_pid)
+
+        super().__init__(
+            name, mount=True, net=isolated, uts=isolated, pid=pid, unet=None, **kwargs
+        )
 
         # this is for testing purposes do not use
         if not BaseMunet.g_unet:

@@ -450,8 +450,9 @@ def main():
         sys.exit(0)
 
     rundir = args.rundir if args.rundir else "/tmp/mutest"
-    args.rundir = Path(rundir)
-    os.environ["MUNET_RUNDIR"] = rundir
+    rundir = Path(rundir).absolute()
+    args.rundir = rundir
+    os.environ["MUNET_RUNDIR"] = str(rundir)
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)
 
     config = parser.setup_logging(args, config_base="logconf-mutest")
