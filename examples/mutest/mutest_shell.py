@@ -21,10 +21,10 @@ match_step(
 )
 
 step("h1", "(sleep 2 && touch foo) &")
-
 wait_step(
     "h1",
     "ls",
     "foo",
     "found file foo",
 )
+step("h1", "rm -f foo")
