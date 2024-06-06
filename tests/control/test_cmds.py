@@ -127,6 +127,27 @@ async def test_cmd_nostatus(unet, host):
 
 
 @pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
+async def test_cmd_status_timeout(unet, host):
+    if host == "remote1":
+        await wait_remote_up(unet)
+    host = unet.hosts[host]
+
+    try:
+        host.cmd_status("sleep 10", timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        assert False, "No timeout raised"
+
+    try:
+        await host.async_cmd_status("sleep 10", timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        assert False, "No timeout raised"
+
+
+@pytest.mark.parametrize("host", ["host1", "container1", "remote1", "hn1"])
 async def test_popen(unet, host):
     if host == "remote1":
         await wait_remote_up(unet)

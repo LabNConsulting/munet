@@ -942,15 +942,25 @@ class Commander:  # pylint: disable=R0904
 
     def _cmd_status(self, cmds, raises=False, warn=True, stdin=None, **kwargs):
         """Execute a command."""
+        timeout = None
+        if "timeout" in kwargs:
+            timeout = kwargs["timeout"]
+            del kwargs["timeout"]
+
         pinput, stdin = Commander._cmd_status_input(stdin)
         p, actual_cmd = self._popen("cmd_status", cmds, stdin=stdin, **kwargs)
-        o, e = p.communicate(pinput)
+        o, e = p.communicate(pinput, timeout=timeout)
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
 
     async def _async_cmd_status(
         self, cmds, raises=False, warn=True, stdin=None, text=None, **kwargs
     ):
         """Execute a command."""
+        timeout = None
+        if "timeout" in kwargs:
+            timeout = kwargs["timeout"]
+            del kwargs["timeout"]
+
         pinput, stdin = Commander._cmd_status_input(stdin)
         p, actual_cmd = await self._async_popen(
             "async_cmd_status", cmds, stdin=stdin, **kwargs
@@ -963,7 +973,12 @@ class Commander:  # pylint: disable=R0904
 
         if encoding is not None and isinstance(pinput, str):
             pinput = pinput.encode(encoding)
-        o, e = await p.communicate(pinput)
+        try:
+            o, e = await asyncio.wait_for(p.communicate(), timeout=timeout)
+        except (TimeoutError, asyncio.TimeoutError) as error:
+            raise subprocess.TimeoutExpired(
+                cmd=actual_cmd, timeout=timeout, output=None, stderr=None
+            ) from error
         if encoding is not None:
             o = o.decode(encoding) if o is not None else o
             e = e.decode(encoding) if e is not None else e
