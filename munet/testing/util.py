@@ -82,13 +82,21 @@ def retry(retry_timeout, initial_wait=0, expected=True):
             while True:
                 seconds_left = (retry_until - datetime.datetime.now()).total_seconds()
                 try:
-                    ret = func(*args, **kwargs)
-                    if _expected and ret is None:
+                    try:
+                        ret = func(*args, seconds_left=seconds_left, **kwargs)
+                    except TypeError as error:
+                        if "seconds_left" not in str(error):
+                            raise
+                        ret = func(*args, **kwargs)
+
+                    logging.debug("Function returned %s", ret)
+
+                    positive_result = ret is None
+                    if _expected == positive_result:
                         logging.debug("Function succeeds")
                         return ret
-                    logging.debug("Function returned %s", ret)
                 except Exception as error:
-                    logging.info("Function raised exception: %s", str(error))
+                    logging.info('Function raised exception: "%s"', error)
                     ret = error
 
                 if seconds_left < 0:
