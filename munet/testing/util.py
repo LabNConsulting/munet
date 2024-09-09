@@ -52,12 +52,13 @@ def pause_test(desc=""):
     asyncio.run(async_pause_test(desc))
 
 
-def retry(retry_timeout, initial_wait=0, expected=True):
+def retry(retry_timeout, initial_wait=0, retry_sleep=2, expected=True):
     """decorator: retry while functions return is not None or raises an exception.
 
     * `retry_timeout`: Retry for at least this many seconds; after waiting
                        initial_wait seconds
     * `initial_wait`: Sleeps for this many seconds before first executing function
+    * `retry_sleep`: The time to sleep between retries.
     * `expected`: if False then the return logic is inverted, except for exceptions,
                   (i.e., a non None ends the retry loop, and returns that value)
     """
@@ -65,9 +66,8 @@ def retry(retry_timeout, initial_wait=0, expected=True):
     def _retry(func):
         @functools.wraps(func)
         def func_retry(*args, **kwargs):
-            retry_sleep = 2
-
             # Allow the wrapped function's args to override the fixtures
+            _retry_sleep = float(kwargs.pop("retry_sleep", retry_sleep))
             _retry_timeout = kwargs.pop("retry_timeout", retry_timeout)
             _expected = kwargs.pop("expected", expected)
             _initial_wait = kwargs.pop("initial_wait", initial_wait)
@@ -107,10 +107,10 @@ def retry(retry_timeout, initial_wait=0, expected=True):
 
                 logging.info(
                     "Sleeping %ds until next retry with %.1f retry time left",
-                    retry_sleep,
+                    _retry_sleep,
                     seconds_left,
                 )
-                time.sleep(retry_sleep)
+                time.sleep(_retry_sleep)
 
         func_retry._original = func  # pylint: disable=W0212
         return func_retry
