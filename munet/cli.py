@@ -759,6 +759,9 @@ async def remote_cli(unet, prompt, title, background, remote_wait=False):
         if remote_wait:
             wait_tmux = bool(os.getenv("TMUX", ""))
             wait_x11 = not wait_tmux and bool(os.getenv("DISPLAY", ""))
+        else:
+            wait_tmux = False
+            wait_x11 = False
 
         # Open a new window with a new CLI
         python_path = await unet.async_get_exec_path(["python3", "python"])
