@@ -23,7 +23,7 @@ kinds:
       terminal length 0
       terminal width 511
       conf t
-      username admin privilege 15 password admin
+      username admin privilege 15 password AdminCrabby2024
       platform console serial
       line console 0
       exec-timeout 0
@@ -47,7 +47,7 @@ kinds:
       terminal width 511
     qemu:
       unix-os: false
-      disk-template: "%CONFIGDIR%/c8000v-universalk9_8G_serial.17.06.06a.qcow2"
+      disk-template: "%CONFIGDIR%/c8000v-universalk9_8G_serial.17.13.01a.qcow2"
       disk: "%RUNDIR%/../%NAME%-disk.qcow2"
       disk-driver: "sata"
       memory: "8192M"
@@ -56,18 +56,22 @@ kinds:
       console:
         stdio: false
         user: "admin"
-        password: "admin"
+        password: "AdminCrabby2024"
         initial-password: ""
         prompt: "(^|\r?\n\r?)Router(\\([^\\)]+\\))?#"
         expects:
           - "Press RETURN to get started"
           - "Would you like to enter the initial configuration dialog\\? \\[yes/no\\]:"
           - "Would you like to terminate autoinstall\\? \\[yes\\]:"
+          - "enable secret:"
+          - "Enter your selection \\["
           - "Router>"
         sends:
           - "\r"
           - "no\r"
           - "yes\r"
+          - "AdminCrabby2024\r"
+          - "0\r"
           - "enable\r"
         timeout: 900
 
