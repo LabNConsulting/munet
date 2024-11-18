@@ -53,25 +53,28 @@ module: labn-munet-config
   |  +--rw cleanup-cmd?         string
   |  +--rw ready-cmd?           string
   |  +--rw image?               string
+  |  +--rw hostnet?             boolean
   |  +--rw server?              string
   |  +--rw server-port?         uint16
   |  +--rw ssh-identity-file?   string
   |  +--rw ssh-user?            string
   |  +--rw ssh-password?        string
   |  +--rw qemu
-  |  |  +--rw bios?            string
-  |  |  +--rw disk?            string
-  |  |  +--rw disk-driver?     string
-  |  |  +--rw disk-template?   string
-  |  |  +--rw initial-cmd?     string
-  |  |  +--rw kerenel?         string
-  |  |  +--rw initrd?          string
-  |  |  +--rw kvm?             boolean
-  |  |  +--rw ncpu?            uint32
-  |  |  +--rw memory?          string
-  |  |  +--rw root?            string
-  |  |  +--rw cmdline-extra?   string
-  |  |  +--rw extra-args?      string
+  |  |  +--rw bios?              string
+  |  |  +--rw cloud-init?        boolean
+  |  |  +--rw cloud-init-disk?   string
+  |  |  +--rw disk?              string
+  |  |  +--rw disk-driver?       string
+  |  |  +--rw disk-template?     string
+  |  |  +--rw initial-cmd?       string
+  |  |  +--rw kernel?            string
+  |  |  +--rw initrd?            string
+  |  |  +--rw kvm?               boolean
+  |  |  +--rw ncpu?              uint32
+  |  |  +--rw memory?            string
+  |  |  +--rw root?              string
+  |  |  +--rw cmdline-extra?     string
+  |  |  +--rw extra-args?        string
   |  |  +--rw console
   |  |     +--rw user?               string
   |  |     +--rw password?           string
@@ -116,13 +119,16 @@ module: labn-munet-config
   |  +--rw shell?               union
   |  +--rw volumes*             string
   +--rw topology
-  |  +--rw dns-network?           -> ../networks/name
-  |  +--rw ipv6-enable?           boolean
-  |  +--rw networks-autonumber?   boolean
+  |  +--rw dns-network?              -> ../networks/name
+  |  +--rw ipv6-enable?              boolean
+  |  +--rw networks-autonumber?      boolean
+  |  +--rw initial-setup-cmd?        string
+  |  +--rw initial-setup-host-cmd?   string
   |  +--rw networks* [name]
-  |  |  +--rw name    string
-  |  |  +--rw ip?     string
-  |  |  +--rw ipv6?   string
+  |  |  +--rw name        string
+  |  |  +--rw ip?         string
+  |  |  +--rw ipv6?       string
+  |  |  +--rw external?   boolean
   |  +--rw nodes* [name]
   |     +--rw id?                  uint32
   |     +--rw kind?                -> ../../../kinds/name
@@ -132,25 +138,28 @@ module: labn-munet-config
   |     +--rw cleanup-cmd?         string
   |     +--rw ready-cmd?           string
   |     +--rw image?               string
+  |     +--rw hostnet?             boolean
   |     +--rw server?              string
   |     +--rw server-port?         uint16
   |     +--rw ssh-identity-file?   string
   |     +--rw ssh-user?            string
   |     +--rw ssh-password?        string
   |     +--rw qemu
-  |     |  +--rw bios?            string
-  |     |  +--rw disk?            string
-  |     |  +--rw disk-driver?     string
-  |     |  +--rw disk-template?   string
-  |     |  +--rw initial-cmd?     string
-  |     |  +--rw kerenel?         string
-  |     |  +--rw initrd?          string
-  |     |  +--rw kvm?             boolean
-  |     |  +--rw ncpu?            uint32
-  |     |  +--rw memory?          string
-  |     |  +--rw root?            string
-  |     |  +--rw cmdline-extra?   string
-  |     |  +--rw extra-args?      string
+  |     |  +--rw bios?              string
+  |     |  +--rw cloud-init?        boolean
+  |     |  +--rw cloud-init-disk?   string
+  |     |  +--rw disk?              string
+  |     |  +--rw disk-driver?       string
+  |     |  +--rw disk-template?     string
+  |     |  +--rw initial-cmd?       string
+  |     |  +--rw kernel?            string
+  |     |  +--rw initrd?            string
+  |     |  +--rw kvm?               boolean
+  |     |  +--rw ncpu?              uint32
+  |     |  +--rw memory?            string
+  |     |  +--rw root?              string
+  |     |  +--rw cmdline-extra?     string
+  |     |  +--rw extra-args?        string
   |     |  +--rw console
   |     |     +--rw user?               string
   |     |     +--rw password?           string
@@ -611,6 +620,18 @@ munet>
             "'open-firmare' to use open firmware bios, or a path to
              bios image file";
         }
+        leaf cloud-init {
+          type boolean;
+          default false;
+          description
+            "Use a cloud-init disk to initialize image. If a cloud-init-disk is
+             not specified one will be generated.";
+        }
+        leaf cloud-init-disk {
+          type string;
+          must "./cloud-init";
+          description "Path to custom cloud-init disk image to configure VM";
+        }
         leaf disk {
           type string;
           description "Path to disk image possibly to boot from";
@@ -638,7 +659,7 @@ munet>
              template. These commands are run prior to the standard ../../cmd
              when a disk is first created from a disk template";
         }
-        leaf kerenel {
+        leaf kernel {
           type string;
           description "path to kernel image (e.g,. bzImage) to boot";
         }
@@ -978,6 +999,21 @@ munet>
         description
           "Controls if networks and node connections are given IP addresses if
            not explicitly configured.";
+      }
+
+      leaf initial-setup-cmd {
+        type string;
+        description
+          "Shell command[s] to execute in the new namespace prior to bringing up
+           the topology. These are run after any ./initial-setup-host-cmd
+           commands.";
+      }
+
+      leaf initial-setup-host-cmd {
+        type string;
+        description
+          "Shell command[s] to execute on the host prior to bringing up the
+           topology. These are run prior to ./initial-setup-cmd commands.";
       }
 
       list networks {
