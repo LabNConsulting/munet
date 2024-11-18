@@ -31,12 +31,13 @@ cli:
       format: "con HOST [HOST ...]"
       help: "open console on given hosts, * for all"
       new-window: true
+      top-level: true
     - name: mon
       exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/monitor"
       format: "mon NODE [NODE ...]"
       help: "open monitor on given hosts, * for all"
       new-window: true
-
+      top-level: true
     - name: ssh
       exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %IPADDR%"
       kinds: ["linux"]
