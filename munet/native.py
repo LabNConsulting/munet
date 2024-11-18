@@ -3061,7 +3061,8 @@ done"""
             if not rc:
                 continue
             logging.info("Pulling missing image %s", image)
-            aw = self.rootcmd.async_cmd_raises(f"podman pull {image}")
+
+            aw = self.rootcmd.async_cmd_raises_once(f"podman pull {image}")
             tasks.append(asyncio.create_task(aw))
         if not tasks:
             return
