@@ -2307,6 +2307,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             net = {
                 "dhcp4": False,
                 "dhcp6": False,
+                "accept-ra": False,
                 "addresses": [],
             }
             if ifaddr4:
@@ -2530,7 +2531,7 @@ users:
             confdir = self.unet.config_dirname
             if re.match("(https|http|ftp|tftp):.*", dtpl):
                 await self.unet.async_cmd_raises_once(
-                    f"cd {confdir} && (test -e {basename} || curl -flO {dtpl})"
+                    f"cd {confdir} && (test -e {basename} || curl -fLO {dtpl})"
                 )
                 dtplpath = os.path.join(confdir, basename)
 
