@@ -25,6 +25,7 @@ kinds:
     ssh-user: "root"
     qemu:
       disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
+      cloud-init: true
       cloud-init-disk: "%RUNDIR%/../r1-seed.img"
       # cmdline-extra: "nokaslr"
       console:

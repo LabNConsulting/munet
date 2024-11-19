@@ -11,7 +11,6 @@ import os
 
 import pytest
 
-from common.fetch import fetch
 from munet.base import commander
 
 
@@ -27,10 +26,19 @@ async def setup_images(rundir_module):
     try:
         rdir = rundir_module
         release = "22.04"
-        image = f"https://cloud-images.ubuntu.com/releases/{release}/release/ubuntu-{release}-server-cloudimg-amd64.img"
-        limage = "ubuntu-tpl.qcow2"
-        if not os.path.exists(limage):
-            commander.cmd_raises(f"curl -fLo {limage} {image}")
+        # This is actually a qcow2 image regardless of the .img suffix
+        bimage = f"ubuntu-{release}-server-cloudimg-amd64.img"
+        image_url = (
+            f"https://cloud-images.ubuntu.com/releases/{release}/release/{bimage}"
+        )
+        qimage = "ubuntu-tpl.qcow2"
+
+        if not os.path.exists(bimage):
+            commander.cmd_raises(f"curl -fLO {image_url}")
+
+        if not os.path.exists(qimage):
+            commander.cmd_raises(f"rm -f {qimage} && ln -sf {bimage} {qimage}")
+
         if not os.path.exists(f"{rdir}/root-key"):
             commander.cmd_raises(
                 f'ssh-keygen -b 2048 -t rsa -f {rdir}/root-key -q -N ""'
@@ -54,7 +62,8 @@ runcmd:
 """
         commander.cmd_raises(f"cat > {rdir}/user-data.yaml", stdin=user_data)
         commander.cmd_raises(
-            f"cloud-localds -N netcfg.yaml -d qcow2 {rdir}/r1-seed.img {rdir}/user-data.yaml"
+            "cloud-localds -N netcfg.yaml -d raw"
+            f" {rdir}/r1-seed.img {rdir}/user-data.yaml"
         )
     except Exception:
         pytest.fail("Failed to fetch/setup qemu images")
