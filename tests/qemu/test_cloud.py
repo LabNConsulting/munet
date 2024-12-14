@@ -26,22 +26,28 @@ async def test_qemu_up(unet):
 
 async def test_net_up(unet):
     h1 = unet.hosts["h1"]
-    r1 = unet.hosts["r1"]
+    rs = [unet.hosts["r" + str(x)] for x in range(1, 5)]
 
     h1mgmt0ip = h1.get_intf_addr("eth0").ip
-    r1mgmt0ip = r1.get_intf_addr("eth0").ip
+    rs_mgmtips = [x.get_intf_addr("eth0").ip for x in rs]
 
-    h1r1ip = h1.get_intf_addr("eth1").ip
-    r1h1ip = r1.get_intf_addr("eth1").ip
+    h1_r1ips = [h1.get_intf_addr("eth" + str(x)).ip for x in range(1, 5)]
+    rs_h1ips = [x.get_intf_addr("eth1").ip for x in rs]
 
     logging.debug(h1.cmd_raises("ping -w1 -c1 192.168.0.254"))
-    logging.debug(h1.cmd_raises(f"ping -w1 -c1 {r1mgmt0ip}"))
-    logging.debug(h1.cmd_raises(f"ping -w1 -c1 {r1h1ip}"))
+    for ip in rs_mgmtips:
+        logging.debug(h1.cmd_raises(f"ping -w1 -c1 {ip}"))
+    for ip in rs_h1ips:
+        logging.debug(h1.cmd_raises(f"ping -w1 -c1 {ip}"))
 
-    # Convert to SSH when we download the root-key artifact
-    # logging.debug(r1.conrepl.cmd_raises("ping -w1 -c1 192.168.0.254"))
-    # logging.debug(r1.conrepl.cmd_raises(f"ping -w1 -c1 {h1mgmt0ip}"))
-    # logging.debug(r1.conrepl.cmd_raises(f"ping -w1 -c1 {h1r1ip}"))
-    logging.debug(r1.cmd_raises("ping -w1 -c1 192.168.0.254"))
-    logging.debug(r1.cmd_raises(f"ping -w1 -c1 {h1mgmt0ip}"))
-    logging.debug(r1.cmd_raises(f"ping -w1 -c1 {h1r1ip}"))
+    # Will use Console.
+    for r, h1ip in zip(rs, h1_r1ips):
+        logging.debug(r.conrepl.cmd_raises("ping -w1 -c1 192.168.0.254"))
+        logging.debug(r.conrepl.cmd_raises(f"ping -w1 -c1 {h1mgmt0ip}"))
+        logging.debug(r.conrepl.cmd_raises(f"ping -w1 -c1 {h1ip}"))
+
+    # Will use SSH.
+    for r, h1ip in zip(rs, h1_r1ips):
+        logging.debug(r.cmd_raises("ping -w1 -c1 192.168.0.254"))
+        logging.debug(r.cmd_raises(f"ping -w1 -c1 {h1mgmt0ip}"))
+        logging.debug(r.cmd_raises(f"ping -w1 -c1 {h1ip}"))

@@ -2380,14 +2380,14 @@ runcmd:
 users:
   - name: root
     lock_passwd: false
-    plain_text_passwd: {root_password}
+    plain_text_passwd: "{root_password}"
     {ssh_auth_s}
 """
         if user != "root":
             udata += """
   - name: {user}
     lock_passwd: false
-    plain_text_passwd: {password}
+    plain_text_passwd: "{password}"
     {ssh_auth_s}
 """
         #
@@ -2662,7 +2662,7 @@ users:
         if use_cmdcon:
             confiles.append("_cmdcon")
 
-        password = cc.get("password", "")
+        password = cc.get("password", "admin")
         if self.disk_created:
             password = cc.get("initial-password", password)
 

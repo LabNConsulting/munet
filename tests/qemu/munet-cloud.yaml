@@ -15,25 +15,60 @@ topology:
         - to: "mgmt0"
         - to: "r1"
           ip: 10.0.1.1/24
+        - to: "r2"
+          ip: 10.0.2.1/24
+        - to: "r3"
+          ip: 10.0.3.1/24
+        - to: "r4"
+          ip: 10.0.4.1/24
     - name: r1
       kind: disk-linux
       connections:
         - to: "mgmt0"
         - to: "h1"
           ip: 10.0.1.2/24
+      qemu:
+        disk-template: "https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+    - name: r2
+      kind: disk-linux
+      connections:
+        - to: "mgmt0"
+        - to: "h1"
+          ip: 10.0.2.2/24
+      qemu:
+        disk-template: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    - name: r3
+      kind: disk-linux
+      connections:
+        - to: "mgmt0"
+        - to: "h1"
+          ip: 10.0.3.2/24
+      qemu:
+        disk-template: "https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+    - name: r4
+      kind: disk-linux
+      connections:
+        - to: "mgmt0"
+        - to: "h1"
+          ip: 10.0.4.2/24
+      qemu:
+        disk-template: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
 
 kinds:
   - name: disk-linux
     ssh-identity-file: "%RUNDIR%/../root-key"
     ssh-user: "root"
+    merge: [ "qemu" ]
     qemu:
-      disk-template: "https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+      # disk-template: "https://cdimage.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+      # disk-template: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
       # disk-template: "https://dl.rockylinux.org/pub/rocky/7/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+      # disk-template: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
       cloud-init: true
-      console:
-        user: "root"
-        password: "foobar"
-        timeout: 3600
+      # console:
+      #   user: "root"
+      #   password: "foobar"
+      #   timeout: 3600
       memory: "1G"
       kvm: true
       ncpu: 2

@@ -624,17 +624,20 @@ munet>
           type boolean;
           default false;
           description
-            "Use a cloud-init disk to initialize image. If a cloud-init-disk is
-             not specified one will be generated.";
+            "Use a cloud-init disk to initialize image. Normally a
+             ./cloud-init-disk is not specified, so one will be generated";
         }
         leaf cloud-init-disk {
           type string;
           must "./cloud-init";
-          description "Path to custom cloud-init disk image to configure VM";
+          description
+            "Path to a custom cloud-init disk image to configure the VM";
         }
         leaf disk {
           type string;
-          description "Path to disk image possibly to boot from";
+          description
+            "Path to disk image possibly to boot from. If this is a relative path
+             it will be relative to the configuration directory";
         }
         leaf disk-driver {
           type string;
@@ -647,9 +650,9 @@ munet>
         leaf disk-template {
           type string;
           description
-            "Path to disk image template. If a ../disk image is not specified, or
+            "Path to disk image template. If a ./disk image is not specified, or
              does not yet exist. Then this template is used to create a new disk
-             image. If ../disk is not specified then the disk image path will be
+             image. If ./disk is not specified then the disk image path will be
              %RUNDIR%/%NAME%-<disk-template-basename>";
         }
         leaf initial-cmd {
@@ -699,10 +702,12 @@ munet>
           description "Configuration for console handling";
           leaf user {
             type string;
+	    default "root";
             description "User to login to console with";
           }
           leaf password {
             type string;
+	    default "admin";
             description "Password to login to console with";
           }
           leaf initial-password {
