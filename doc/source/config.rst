@@ -35,6 +35,34 @@ configuration.
     mounting runtime directories (e.g., log directories) in the node namespace.
 
 
+Environment Variables
+^^^^^^^^^^^^^^^^^^^^^
+
+Enviornment variables will additionally be made available to any command executed
+within a munet node or interactive terminal opened within a munet node. These
+variables should not be overwritten since they may be used to assist munet in
+cleaning up.
+
+  ``MUNET_PID``
+    The PID of the parent munet process.
+
+  ``MUNET_NODENAME``
+    The name of the target munet node.
+
+Some extra variables are also set *only* in interactive terminals to make
+availible the same variables present within the regular munet config. (i.e.
+see the start of the ``Variables`` section.)
+
+  ``RUNDIR``
+    Same as ``%RUNDIR%``.
+
+  ``NODENAME``
+    Same as ``%NAME%``.
+
+  ``CONFIGDIR``
+    Same as ``%CONFIGDIR%``.
+
+
 Topology
 --------
 

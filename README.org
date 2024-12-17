@@ -218,14 +218,16 @@ of ~10.0.0.2~.
 
 #+begin_src yaml
   topology:
-  networks-autonumber: true
-  networks:
-    - name: net0
-  nodes:
-    - name: h1
-      connections: ["net0"]
-    - name: h2
-      connections: ["net0"]
+    networks-autonumber: true
+    networks:
+      - name: net0
+    nodes:
+      - name: h1
+        connections:
+          - to: net0
+      - name: h2
+        connections:
+          - to: net0
 #+end_src
 
 *** Router VM
@@ -242,24 +244,24 @@ cisco VM using a nexos file system image.
 
 #+begin_src yaml
   topology:
-  networks-autonumber: true
-  dns-network: "mgmt0"
-  networks:
-    - name: mgmt0
-      ip: 192.168.0.254/24
-      nat: true
-    - name: net0
-  nodes:
-    # ...
-    - name: r1
-      kind: cisco
-      connections:
-        - to: "mgmt0"
-          name: "eth1"
-          driver: "e1000"
-        - to: "net0"
-          name: "eth2"
-          driver: "e1000"
+    networks-autonumber: true
+    dns-network: "mgmt0"
+    networks:
+      - name: mgmt0
+        ip: 192.168.0.254/24
+        nat: true
+      - name: net0
+    nodes:
+      # ...
+      - name: r1
+        kind: cisco
+        connections:
+          - to: "mgmt0"
+            name: "eth1"
+            driver: "e1000"
+          - to: "net0"
+            name: "eth2"
+            driver: "e1000"
   kinds:
     - name: cisco
       shell: false
