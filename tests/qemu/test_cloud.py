@@ -26,12 +26,17 @@ async def test_qemu_up(unet):
 
 async def test_net_up(unet):
     h1 = unet.hosts["h1"]
-    rs = [unet.hosts["r" + str(x)] for x in range(1, 5)]
+
+    r_names = sorted([x for x in unet.hosts if x.startswith("r")])
+    # eth1 => r1, eth2 => r2 ...
+    hr_intf_names = [f"eth{name[1:]}" for name in r_names]
+
+    rs = [unet.hosts[x] for x in r_names]
 
     h1mgmt0ip = h1.get_intf_addr("eth0").ip
     rs_mgmtips = [x.get_intf_addr("eth0").ip for x in rs]
 
-    h1_r1ips = [h1.get_intf_addr("eth" + str(x)).ip for x in range(1, 5)]
+    h1_r1ips = [h1.get_intf_addr(x).ip for x in hr_intf_names]
     rs_h1ips = [x.get_intf_addr("eth1").ip for x in rs]
 
     logging.debug(h1.cmd_raises("ping -w1 -c1 192.168.0.254"))
