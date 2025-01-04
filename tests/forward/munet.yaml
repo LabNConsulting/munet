@@ -8,21 +8,6 @@
 version: 1
 kinds:
   - name: frr
-    cmd: |
-      chown frr:frr -R /var/run/frr
-      chown frr:frr -R /var/log/frr
-      /usr/lib/frr/frrinit.sh start
-      tail -F /var/log/frr/frr.log
-    cleanup-cmd: |
-      /usr/lib/frr/frrinit.sh stop
-    volumes:
-      - "./%NAME%/etc.frr:/etc/frr"
-      - "%RUNDIR%/var.log.frr:/var/log/frr"
-      - "%RUNDIR%/var.run.frr:/var/run/frr"
-    cap-add:
-      - SYS_ADMIN
-      - AUDIT_WRITE
-    merge: ["volumes"]
 topology:
   ipv6-enable: true
   networks-autonumber: true
@@ -33,21 +18,15 @@ topology:
     - name: r1
       kind: frr
       connections: ["net1"]
+      cmd: |
+        ip route add 10.0.2.0/24 via 10.0.1.2
+        ip -6 route add fc00:0:0:2::/64 via fc00:0:0:1::2
     - name: r2
       kind: frr
       connections: ["net1", "net2"]
     - name: r3
       kind: frr
       connections: ["net2"]
-cli:
-  commands:
-    - name: ""
-      exec: "vtysh -c '{}'"
-      format: "[ROUTER ...] COMMAND"
-      help: "execute vtysh COMMAND on the router[s]"
-      kinds: ["frr"]
-    - name: "vtysh"
-      exec: "/usr/bin/vtysh"
-      format: "vtysh ROUTER [ROUTER ...]"
-      new-window: true
-      kinds: ["frr"]
+      cmd: |
+        ip route add 10.0.1.0/24 via 10.0.2.2
+        ip -6 route add fc00:0:0:1::/64 via fc00:0:0:2::2
