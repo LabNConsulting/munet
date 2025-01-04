@@ -751,9 +751,11 @@ class L3NodeMixin(NodeMixin):
             # Disable IPv6
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=0")
         else:
             self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=1")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
+            self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
         self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
         self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
@@ -2938,9 +2940,11 @@ ff02::2\tip6-allrouters
                 # Disable IPv6
                 self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=0")
                 self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=0")
             else:
                 self.cmd_raises("sysctl -w net.ipv6.conf.all.autoconf=1")
                 self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
+                self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
         # we really need overlay, but overlay-layers (used by overlay-images)
         # counts on things being present in overlay so this temp stuff doesn't work.
