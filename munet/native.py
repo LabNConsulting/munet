@@ -24,7 +24,12 @@ import time
 
 from pathlib import Path
 
-import yaml
+
+try:
+    # We only want to require yaml for the gen cloud image feature
+    import yaml
+except ImportError:
+    pass
 
 from . import cli
 from .base import BaseMunet
