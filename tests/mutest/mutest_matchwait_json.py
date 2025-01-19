@@ -242,11 +242,10 @@ _, ret = match_step_json(
     "r1",
     f"echo '{json2}'",
     json1,
-    "Data in different arrays don't match",
-    expect_fail=True,
+    "Data in one array is a subset of another"
 )
 test_step(
-    ret == {'iterable_item_added': {'root[1]': 'bar'}},
+    ret == ['foo', 'bar'],
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -300,11 +299,10 @@ _, ret = match_step_json(
     "r1",
     f"echo '{json4}'",
     json1,
-    "Data in different arrays don't match (nested)",
-    expect_fail=True
+    "Data in one array is a subset of another"
 )
 test_step(
-    ret == {'iterable_item_added': {"root['level1'][1]['level3'][1]": 'l4'}},
+    ret == {"level1": ["level2", {"level3": ["level4", "l4"]}]},
     "    Correct return value",
 )
 match_step_json(
