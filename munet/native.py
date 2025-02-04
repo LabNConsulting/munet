@@ -762,7 +762,10 @@ class L3NodeMixin(NodeMixin):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
-        self.next_p2p_network = ipaddress.ip_network(f"10.254.{self.id}.0/31")
+        assert self.id < 256 * (256 - 200)  # Beyond this, ipv4 address would be invalid
+        self.next_p2p_network = ipaddress.ip_network(
+            f"10.{200 + int(self.id) // 256}.{int(self.id) % 256}.0/31"
+        )
         self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
 
         self.loopback_ip = None

@@ -12,13 +12,13 @@ section("Test network connectivity")
 match_step("r1", "ping -w1 -c1 10.0.1.2", "0% packet loss",
            "Ping container r2 from host r1 over net0")
 
-match_step("r1", "ping -w1 -c1 10.254.1.1", "0% packet loss",
+match_step("r1", "ping -w1 -c1 10.200.1.1", "0% packet loss",
            "Ping container r2 from host r1 over p2p connection")
 
 match_step("r2", "ping -w1 -c1 10.0.1.1", "0% packet loss",
            "Ping host r1 from container r2 over net0")
 
-match_step("r2", "ping -w1 -c1 10.254.1.0", "0% packet loss",
+match_step("r2", "ping -w1 -c1 10.200.1.0", "0% packet loss",
           "Ping host r1 from container r2 over p2p connection")
 
 match_step("r2",
