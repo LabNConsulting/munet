@@ -85,6 +85,8 @@ class ScriptError(Exception):
 
 class CLIOnErrorError(Exception):
     """Enter CLI after error."""
+    def __init__(self, desc=""):
+        self.desc = desc
 
 
 def pause_test(desc=""):
@@ -97,6 +99,8 @@ def pause_test(desc=""):
     while True:
         if desc:
             print(f"\n== PAUSING: {desc} ==")
+        else:
+            print("\n== PAUSING: *NO DESCRIPTION PROVIDED* ==")
         try:
             user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
         except EOFError:
@@ -119,7 +123,7 @@ def act_on_result(success, args, desc=""):
     elif success:
         return
     if args.cli_on_error:
-        raise CLIOnErrorError()
+        raise CLIOnErrorError(desc)
     if args.pause_on_error:
         pause_test(desc)
 
