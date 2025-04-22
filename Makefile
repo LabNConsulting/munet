@@ -51,7 +51,7 @@ run:
 	sudo -E $(POETRYRUN) python3 -m munet
 
 install:
-	$(POETRY) install
+	$(POETRY) install --all-extras
 
 # ====
 # YANG
