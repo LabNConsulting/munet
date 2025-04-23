@@ -102,7 +102,7 @@ def pause_test(desc=""):
         else:
             print("\n== PAUSING: *NO DESCRIPTION PROVIDED* ==")
         try:
-            user = input('PAUSED, "cli" for CLI, "pdb" to debug, "Enter" to continue: ')
+            user = input('PAUSED, type "cli" for CLI, "pdb" to debug, or press [Enter] to continue: ')
         except EOFError:
             print("^D...continuing")
             break
@@ -111,6 +111,8 @@ def pause_test(desc=""):
             raise CLIOnErrorError()
         if user == "pdb":
             breakpoint()  # pylint: disable=W1515
+        elif user == "Enter" or user == "enter":
+            break
         elif user:
             print(f'Unrecognized input: "{user}"')
         else:
