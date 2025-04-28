@@ -43,11 +43,11 @@ async def test_autonumber_ping(unet_perfunc):
     o = await r1.async_cmd_raises("ping -w1 -c1 192.168.10.3")
     logging.debug("r1 ping r3 (192.168.10.3) output: %s", o)
 
-    o = await r2.async_cmd_raises("ping -w1 -c1 10.254.1.0")
-    logging.debug("r2 ping r1 p2p (10.254.1.0) output: %s", o)
+    o = await r2.async_cmd_raises("ping -w1 -c1 10.200.1.0")
+    logging.debug("r2 ping r1 p2p (10.200.1.0) output: %s", o)
 
-    o = await r2.async_cmd_raises("ping -w1 -c1 10.254.2.1")
-    logging.debug("r2 ping r3 p2p (10.254.2.1) output: %s", o)
+    o = await r2.async_cmd_raises("ping -w1 -c1 10.200.2.1")
+    logging.debug("r2 ping r3 p2p (10.200.2.1) output: %s", o)
 
     if unet.ipv6_enable:
         addr = "fc00:0:0:1::2"
