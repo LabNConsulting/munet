@@ -3110,6 +3110,7 @@ ff02::2\tip6-allrouters
             # p2p link
             assert node1.name in self.hosts
             assert node1.name in self.hosts
+            assert c1 and c2
             isp2p = True
 
         if "name" not in c1:
