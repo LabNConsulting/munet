@@ -1,4 +1,3 @@
-unexport VIRTUAL_ENV
 ORG := README.org
 YANG := labn-munet-config.yang
 YANG_SCHEMA := munet/munet-schema.json
@@ -6,9 +5,7 @@ SCHEMA := test-schema.json
 LOG_CLI := # --log-cli
 TMP := .testtmp
 
-unexport VIRTUAL_ENV
-
-POETRY := env -u VIRTUAL_ENV PATH="$(PATH)" poetry
+POETRY := env PATH="$(PATH)" poetry
 POETRYRUN := $(POETRY) run
 
 MAKE_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
