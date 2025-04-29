@@ -1204,6 +1204,7 @@ class Commander:  # pylint: disable=R0904
         new_window=False,
         tmux_target=None,
         ns_only=False,
+        env_vars=None,
     ):
         """Run a command in a new window (TMUX, Screen or XTerm).
 
@@ -1217,6 +1218,7 @@ class Commander:  # pylint: disable=R0904
             forcex: Force use of X11.
             new_window: Open new window (instead of pane) in TMUX
             tmux_target: Target for tmux pane.
+            env_vars: Dict of extra env variables to set in the window
 
         Returns:
             the pane/window identifier from TMUX (depends on `new_window`)
@@ -1227,6 +1229,9 @@ class Commander:  # pylint: disable=R0904
         elif wait_for is True:
             channel = "{}-wait-{}".format(our_pid, Commander.tmux_wait_gen)
             Commander.tmux_wait_gen += 1
+
+        if not isinstance(env_vars, dict):
+            env_vars = {}
 
         if forcex or ("TMUX" not in os.environ and "STY" not in os.environ):
             root_level = False
@@ -1249,8 +1254,11 @@ class Commander:  # pylint: disable=R0904
                 cmd = shlex.split(cmd)
             cmd = [
                 "/usr/bin/env",
-                f"MUNET_NODENAME={self.name}",
             ]
+            # Set extra env variables first so that they will be overwritted if needed
+            for key, value in env_vars:
+                cmd.append(f"{key}={shell_quote(value)}")
+            cmd.append(f"MUNET_NODENAME={self.name}")
             if "MUNET_PID" in os.environ:
                 cmd.append(f"MUNET_PID={os.environ.get('MUNET_PID')}")
             cmd += cmd
@@ -1269,8 +1277,12 @@ class Commander:  # pylint: disable=R0904
             ]
         else:
             # This is the command to execute to be inside the namespace.
+            # Set extra env variables first so that they will be overwritted if needed
+            envvars = ""
+            for key, value in env_vars.items():
+                envvars += f' {key}={shell_quote(value)}'
             # We are getting into trouble with quoting.
-            envvars = f"MUNET_NODENAME={self.name} NODENAME={self.name}"
+            envvars += f" MUNET_NODENAME={self.name} NODENAME={self.name}"
             if hasattr(self, "rundir"):
                 envvars += f" RUNDIR={self.rundir}"
             if "MUNET_PID" in os.environ:
