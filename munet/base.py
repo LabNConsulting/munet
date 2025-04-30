@@ -603,7 +603,7 @@ class Commander:  # pylint: disable=R0904
             p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], echo=echo, **defaults)
         return p, actual_cmd
 
-    def spawn(
+    async def spawn(
         self,
         cmd,
         spawned_re,
@@ -616,7 +616,7 @@ class Commander:  # pylint: disable=R0904
         trace=None,
         **kwargs,
     ):
-        """Create a spawned send/expect process.
+        """Create an async spawned send/expect process.
 
         Args:
             cmd: list of args to exec/popen with, or an already open socket
@@ -677,12 +677,18 @@ class Commander:  # pylint: disable=R0904
 
         # Now send a CRLF to cause the prompt (or whatever else) to re-issue
         p.send("\n")
-        try:
-            patterns = [spawned_re, *expects]
+        patterns = [spawned_re, *expects]
 
-            self.logger.debug("%s: expecting: %s", self, patterns)
+        self.logger.debug("%s: expecting: %s", self, patterns)
 
-            while index := p.expect(patterns):
+        timeout = kwargs.get("timeout", 120)
+        timeout_ts = datetime.datetime.now() + datetime.timedelta(seconds=timeout)
+        while timeout_ts > datetime.datetime.now():
+            try:
+                await asyncio.sleep(0)  # Avoid blocking other coroutines
+                index = p.expect(patterns, timeout=0.1)
+                if index == 0:
+                    break
                 if trace:
                     assert p.match is not None
                     self.logger.debug(
@@ -697,35 +703,38 @@ class Commander:  # pylint: disable=R0904
                     p.send(sends[index - 1])
 
                 self.logger.debug("%s: expecting again: %s", self, patterns)
-            self.logger.debug(
-                "%s: got spawned_re: '%s' matching '%s'",
-                self,
-                p.match.group(0),
-                spawned_re,
-            )
-            return p
-        except pexpect.TIMEOUT:
+            except pexpect.TIMEOUT:
+                continue
+            except pexpect.EOF as eoferr:
+                if p.isalive():
+                    raise
+                rc = p.status
+                before = indent(p.before)
+                error = CalledProcessError(rc, ac, output=before)
+                self.logger.error(
+                    "%s: EOF looking for spawned_re '%s' before EOF:\n%s",
+                    self,
+                    spawned_re,
+                    before,
+                )
+                p.close()
+                raise error from eoferr
+
+        if p.match is None:
             self.logger.error(
                 "%s: TIMEOUT looking for spawned_re '%s' expect buffer so far:\n%s",
                 self,
                 spawned_re,
                 indent(p.buffer),
             )
-            raise
-        except pexpect.EOF as eoferr:
-            if p.isalive():
-                raise
-            rc = p.status
-            before = indent(p.before)
-            error = CalledProcessError(rc, ac, output=before)
-            self.logger.error(
-                "%s: EOF looking for spawned_re '%s' before EOF:\n%s",
-                self,
-                spawned_re,
-                before,
-            )
-            p.close()
-            raise error from eoferr
+            raise pexpect.TIMEOUT("spawn() timed out within Munet")
+        self.logger.debug(
+            "%s: got spawned_re: '%s' matching '%s'",
+            self,
+            p.match.group(0),
+            spawned_re,
+        )
+        return p
 
     async def shell_spawn(
         self,
@@ -761,7 +770,7 @@ class Commander:  # pylint: disable=R0904
         combined_prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
 
         assert not is_file_like(cmd) or not use_pty
-        p = self.spawn(
+        p = await self.spawn(
             cmd,
             combined_prompt,
             expects=expects,
