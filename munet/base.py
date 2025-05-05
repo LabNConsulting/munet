@@ -603,7 +603,7 @@ class Commander:  # pylint: disable=R0904
             p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], echo=echo, **defaults)
         return p, actual_cmd
 
-    def spawn(
+    async def spawn(
         self,
         cmd,
         spawned_re,
@@ -616,7 +616,7 @@ class Commander:  # pylint: disable=R0904
         trace=None,
         **kwargs,
     ):
-        """Create a spawned send/expect process.
+        """Create an async spawned send/expect process.
 
         Args:
             cmd: list of args to exec/popen with, or an already open socket
@@ -682,7 +682,13 @@ class Commander:  # pylint: disable=R0904
 
             self.logger.debug("%s: expecting: %s", self, patterns)
 
-            while index := p.expect(patterns):
+            if p.fileno() == -1:
+                # XXX PopenSpawn's lack of file descriptor (p.fileno()) causes error
+                # with expect() only when async_=True is set. Is this an upstream issue?
+                logging.error("pexpect.popen_spawn.PopenSpawn causes asyncio errors")
+                assert False
+
+            while index := await p.expect(patterns, async_=True):
                 if trace:
                     assert p.match is not None
                     self.logger.debug(
@@ -761,7 +767,7 @@ class Commander:  # pylint: disable=R0904
         combined_prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
 
         assert not is_file_like(cmd) or not use_pty
-        p = self.spawn(
+        p = await self.spawn(
             cmd,
             combined_prompt,
             expects=expects,
