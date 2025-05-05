@@ -682,6 +682,12 @@ class Commander:  # pylint: disable=R0904
 
             self.logger.debug("%s: expecting: %s", self, patterns)
 
+            if p.fileno() == -1:
+                # XXX PopenSpawn's lack of file descriptor (p.fileno()) causes error
+                # with expect() only when async_=True is set. Is this an upstream issue?
+                logging.error("pexpect.popen_spawn.PopenSpawn causes asyncio errors")
+                assert False
+
             while index := await p.expect(patterns, async_=True):
                 if trace:
                     assert p.match is not None
