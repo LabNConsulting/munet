@@ -2673,18 +2673,29 @@ users:
         if self.disk_created:
             password = cc.get("initial-password", password)
 
+        expects=cc.get("expects")
+        if expects is not None:
+            for expect_str in expects:
+                expect_str.replace("%NAME%", str(self.name))
+        sends=cc.get("sends")
+        if sends is not None:
+            for send_str in sends:
+                send_str.replace("%NAME%", str(self.name))
+
         #
         # Connect to the console socket, retrying
         #
         prompt = cc.get("prompt")
+        if prompt is not None:
+            prompt.replace("%NAME%", str(self.name))
         cons = await self._opencons(
             *confiles,
             prompt=prompt,
             is_bourne=not bool(prompt),
             user=cc.get("user", "root"),
             password=password,
-            expects=cc.get("expects"),
-            sends=cc.get("sends"),
+            expects=expects,
+            sends=sends,
             timeout=int(cc.get("timeout", 60)),
         )
         self.conrepl = cons[0]
