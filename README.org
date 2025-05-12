@@ -164,6 +164,7 @@ module: labn-munet-config
   |     |     +--rw user?               string
   |     |     +--rw password?           string
   |     |     +--rw initial-password?   string
+  |     |     +--rw prompt?             string
   |     |     +--rw expects*            string
   |     |     +--rw sends*              string
   |     |     +--rw timeout?            uint32
