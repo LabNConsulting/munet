@@ -16,9 +16,14 @@ found XXX`here`.
 Variables
 ---------
 
-Munet defines a few variables to use within the configuration. The following
-variables are expanded with their dynamic values when reading in the
-configuration.
+Munet defines a few variables for use within both any munet configuration file
+and the enviornment namespaces of any munet node.
+
+Configuration Files
+^^^^^^^^^^^^^^^^^^^
+
+The following variables are expanded with their dynamic values when munet
+interprets the configuration.
 
   ``%CONFIGDIR%``
     Expands to the absolute path to the directory containing the config file.
@@ -34,11 +39,16 @@ configuration.
     the config item this variable is used in. This directory is often useful for
     mounting runtime directories (e.g., log directories) in the node namespace.
 
+.. warning::
+  Some configuration options do not support the full range of configuration
+  variables. In order to determine whether a variable will be expanded or not,
+  please check the config's description within the YANG module definition.
+
 
 Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^
 
-Enviornment variables will additionally be made available to any command executed
+The following enviornment variables are made available to any command executed
 within a munet node or interactive terminal opened within a munet node. These
 variables should not be overwritten since they may be used to assist munet in
 cleaning up.

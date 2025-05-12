@@ -164,6 +164,7 @@ module: labn-munet-config
   |     |     +--rw user?               string
   |     |     +--rw password?           string
   |     |     +--rw initial-password?   string
+  |     |     +--rw prompt?             string
   |     |     +--rw expects*            string
   |     |     +--rw sends*              string
   |     |     +--rw timeout?            uint32
@@ -720,9 +721,19 @@ munet>
                for the user. Often part of the bring-up process will set a new
                password and that should then be stored in the ../password leaf.";
           }
+          leaf prompt {
+            type string;
+            description
+              "String of expected prompt within the console.
+
+               CONFIG: Only expands %NAME%.";
+          }
           leaf-list expects {
             type string;
-            description "Strings to expect for logging into the console";
+            description
+              "Strings to expect for logging into the console.
+
+               CONFIG: Only expands %NAME%.";
           }
           leaf-list sends {
             type string;
@@ -732,7 +743,9 @@ munet>
                corresponding expect is seen, zero length strings are
                allowed which indicate send nothing. An Expect with a
                send nothing could be used to reset the timeout timer on
-               long boots";
+               long boots.
+
+               CONFIG: Only expands %NAME%.";
           }
           leaf timeout {
             type uint32;
