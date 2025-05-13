@@ -84,6 +84,9 @@
           "cmd": {
             "type": "string"
           },
+          "cmd-file": {
+            "type": "string"
+          },
           "cleanup-cmd": {
             "type": "string"
           },
@@ -133,6 +136,9 @@
                 "type": "string"
               },
               "initial-cmd": {
+                "type": "string"
+              },
+              "initial-cmd-file": {
                 "type": "string"
               },
               "kernel": {
@@ -434,6 +440,9 @@
               "cmd": {
                 "type": "string"
               },
+              "cmd-file": {
+                "type": "string"
+              },
               "cleanup-cmd": {
                 "type": "string"
               },
@@ -483,6 +492,9 @@
                     "type": "string"
                   },
                   "initial-cmd": {
+                    "type": "string"
+                  },
+                  "initial-cmd-file": {
                     "type": "string"
                   },
                   "kernel": {
