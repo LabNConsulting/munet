@@ -1,0 +1,25 @@
+version: 2
+ethernets:
+  nic0:
+    match:
+      macaddress: "02:aa:aa:aa:00:03"
+    set-name: eth0
+  nic1:
+    match:
+      macaddress: "02:aa:aa:aa:01:03"
+    set-name: eth1
+  eth0:
+    dhcp4: false
+    dhcp6: false
+    addresses:
+      - 192.168.0.2/24
+    gateway4: 192.168.0.254
+    nameservers:
+      addresses:
+        - 8.8.8.8
+        - 8.8.4.4
+  eth1:
+    dhcp4: false
+    dhcp6: false
+    addresses:
+      - 10.0.1.2/24
