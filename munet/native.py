@@ -266,15 +266,26 @@ class NodeMixin:
         commander.cmd_raises(f"rm -rf {self.rundir}")
         commander.cmd_raises(f"mkdir -p {self.rundir}")
 
-    def _shebang_prep(self, config_key):
-        cmd = self.config.get(config_key, "").strip()
+    def _shebang_prep(self, config_key, is_file=False):
+        shell_cmd = "/bin/bash"  # default shell
+        if not is_file:
+            cmd = self.config.get(config_key, "").strip()
+        else:
+            cmd_file = self.config.get(config_key, "").strip()
+            with open(cmd_file, "r", encoding="ascii") as f:
+                lines = f.readlines()
+                # We want to avoid overwriting the shebang if it already exists
+                if lines and lines[0].startswith("#!"):
+                    shell_cmd = lines.pop(0)[2:].strip()
+                cmd = ''.join(lines).strip()
+
         if not cmd:
             return []
 
         script_name = fsafe_name(config_key)
 
         # shell_cmd is a union and can be boolean or string
-        shell_cmd = self.config.get("shell", "/bin/bash")
+        shell_cmd = self.config.get("shell", shell_cmd)
         if not isinstance(shell_cmd, str):
             if shell_cmd:
                 # i.e., "shell: true"
@@ -319,8 +330,8 @@ class NodeMixin:
 
         return cmds
 
-    async def _async_shebang_cmd(self, config_key, warn=True):
-        cmds = self._shebang_prep(config_key)
+    async def _async_shebang_cmd(self, config_key, warn=True, is_file=False):
+        cmds = self._shebang_prep(config_key, is_file)
         if not cmds:
             return 0
 
@@ -341,7 +352,9 @@ class NodeMixin:
         return rc
 
     def has_run_cmd(self) -> bool:
-        return bool(self.config.get("cmd", "").strip())
+        has_cmd = bool(self.config.get("cmd", "").strip())
+        has_cmd_file = bool(self.config.get("cmd-file", "").strip())
+        return has_cmd or has_cmd_file
 
     async def get_proc_child_pid(self, p):
         # commander is right for both unshare inline (our proc pidns)
@@ -376,7 +389,11 @@ class NodeMixin:
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
-        cmds = self._shebang_prep("cmd")
+        if self.config.get("cmd-file"):
+            cmds = self._shebang_prep("cmd-file", is_file=True)
+        else:
+            cmds = self._shebang_prep("cmd")
+
         if not cmds:
             return
 
@@ -1473,7 +1490,11 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                     # u'--entrypoint=""',
                     f"--volume={shebang_cmdpath}:/tmp/{script_name}.shebang",
                 ]
-
+        if self.config.get("cmd-file", "").strip():
+            self.logger.critical(
+                "%s: cmd-file is not supported for podman yet. Ignoring",
+                self.name,
+            )
         cmd = self.config.get("cmd", "").strip()
 
         # See if we have a custom update for this `kind`
@@ -1893,18 +1914,29 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if args:
             self.extra_mounts += args
 
-    async def _run_cmd(self, cmd_node):
+    async def _run_cmd(self, cmd_node, is_file=False):
         """Run the configured commands for this node inside VM."""
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
-        cmd = self.config.get(cmd_node, "").strip()
+        shell_cmd = "/bin/bash"  # default shell
+        if not is_file:
+            cmd = self.config.get(cmd_node, "").strip()
+        else:
+            cmd_file = self.config.get(cmd_node, "").strip()
+            with open(cmd_file, "r", encoding="ascii") as f:
+                lines = f.readlines()
+                # We want to avoid overwriting the shebang if it already exists
+                if lines and lines[0].startswith("#!"):
+                    shell_cmd = lines.pop(0)[2:].strip()
+                cmd = ''.join(lines).strip()
+
         if not cmd:
             self.logger.debug("%s: no `%s` to run", self, cmd_node)
             return None
 
-        shell_cmd = self.config.get("shell", "/bin/bash")
+        shell_cmd = self.config.get("shell", shell_cmd)
         if not isinstance(shell_cmd, str):
             if shell_cmd:
                 shell_cmd = "/bin/bash"
@@ -1976,8 +2008,15 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
 
     async def run_cmd(self):
         if self.disk_created:
-            await self._run_cmd("initial-cmd")
-        await self._run_cmd("cmd")
+            if self.config.get("initial-cmd-file"):
+                await self._run_cmd("initial-cmd-file", is_file=True)
+            else:
+                await self._run_cmd("initial-cmd")
+
+        if self.config.get("cmd-file"):
+            await self._run_cmd("cmd-file", is_file=True)
+        else:
+            await self._run_cmd("cmd")
 
         # stdout and err both combined into logfile from the spawned repl
         if self.cmdrepl:
@@ -2583,7 +2622,8 @@ users:
 
         use_stdio = cc.get("stdio", True)
         has_cmd = self.config.get("cmd")
-        use_cmdcon = has_cmd and use_stdio
+        has_cmd_file = self.config.get("cmd-file")
+        use_cmdcon = (has_cmd or has_cmd_file) and use_stdio
 
         #
         # Any extra serial/console ports beyond thw first, require entries in
