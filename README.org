@@ -164,6 +164,7 @@ module: labn-munet-config
   |     |     +--rw user?               string
   |     |     +--rw password?           string
   |     |     +--rw initial-password?   string
+  |     |     +--rw prompt?             string
   |     |     +--rw expects*            string
   |     |     +--rw sends*              string
   |     |     +--rw timeout?            uint32
@@ -719,6 +720,12 @@ munet>
                template, this value can be used to specify an initial password
                for the user. Often part of the bring-up process will set a new
                password and that should then be stored in the ../password leaf.";
+          }
+          leaf prompt {
+            type string;
+            description
+              "String of expected prompt within the console. Any instances
+               of %NAME% will be replaced with the node's configured name.";
           }
           leaf-list expects {
             type string;
