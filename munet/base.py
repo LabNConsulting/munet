@@ -727,6 +727,151 @@ class Commander:  # pylint: disable=R0904
             p.close()
             raise error from eoferr
 
+    async def async_spawn(
+        self,
+        cmd,
+        spawned_re,
+        expects=(),
+        sends=(),
+        use_pty=False,
+        logfile=None,
+        logfile_read=None,
+        logfile_send=None,
+        trace=None,
+        **kwargs,
+    ):
+        """Create an async spawned send/expect process.
+
+        Args:
+            cmd: list of args to exec/popen with, or an already open socket
+            spawned_re: what to look for to know when done, `spawn` returns when seen
+            expects: a list of regex other than `spawned_re` to look for. Commonly,
+                "ogin:" or "[Pp]assword:"r.
+            sends: what to send when an element of `expects` matches. So e.g., the
+                username or password if thats what corresponding expect matched. Can
+                be the empty string to send nothing.
+            use_pty: true for pty based expect, otherwise uses popen (pipes/files)
+            trace: if true then log send/expects
+            **kwargs - kwargs passed on the _spawn.
+
+        Returns:
+            A pexpect process.
+
+        Raises:
+            pexpect.TIMEOUT, pexpect.EOF as documented in `pexpect`
+            CalledProcessError if EOF is seen and `cmd` exited then
+                raises a CalledProcessError to indicate the failure.
+        """
+        if is_file_like(cmd):
+            assert not use_pty
+            ac = "*socket*"
+            p = self._fdspawn(cmd, **kwargs)
+        else:
+            p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
+
+        if logfile:
+            p.logfile = logfile
+        if logfile_read:
+            p.logfile_read = logfile_read
+        if logfile_send:
+            p.logfile_send = logfile_send
+
+        # for spawned shells (i.e., a direct command an not a console)
+        # this is wrong and will cause 2 prompts
+        if not use_pty:
+            # This isn't very nice looking
+            p.echo = False
+            if not is_file_like(cmd):
+                p.isalive = lambda: p.proc.poll() is None
+            if not hasattr(p, "close"):
+                p.close = p.wait
+
+        # Do a quick check to see if we got the prompt right away, otherwise we may be
+        # at a console so we send a \n to re-issue the prompt
+        index = p.expect([spawned_re, pexpect.TIMEOUT, pexpect.EOF], timeout=0.1)
+        if index == 0:
+            assert p.match is not None
+            self.logger.debug(
+                "%s: got spawned_re quick: '%s' matching '%s'",
+                self,
+                p.match.group(0),
+                spawned_re,
+            )
+            return p
+
+        # Now send a CRLF to cause the prompt (or whatever else) to re-issue
+        p.send("\n")
+        try:
+            patterns = [spawned_re, *expects]
+
+            self.logger.debug("%s: expecting: %s", self, patterns)
+
+            # The timestamp is only used for the case of use_pty != True
+            timeout = kwargs.get("timeout", 120)
+            timeout_ts = datetime.datetime.now() + datetime.timedelta(seconds=timeout)
+            index = None
+            while True:
+                if use_pty is True:
+                    index = await p.expect(patterns, async_=True)
+                else:
+                    # Due to an upstream issue, async_=True cannot be mixed with
+                    # pipes (pexpect.popen_spawn.PopenSpawn). This hack is used
+                    # to bypass that problem.
+                    await asyncio.sleep(0)  # Avoid blocking other coroutines
+                    try:
+                        index = p.expect(patterns, timeout=0.1)
+                    except pexpect.TIMEOUT:
+                        # We must declare when a timeout occurs instead of pexpect
+                        if timeout_ts < datetime.datetime.now():
+                            raise
+                        continue
+                if index == 0:
+                    break
+
+                if trace:
+                    assert p.match is not None
+                    self.logger.debug(
+                        "%s: got expect: '%s' matching %d '%s', sending '%s'",
+                        self,
+                        p.match.group(0),
+                        index,
+                        patterns[index],
+                        sends[index - 1],
+                    )
+                if sends[index - 1]:
+                    p.send(sends[index - 1])
+
+                self.logger.debug("%s: expecting again: %s", self, patterns)
+            self.logger.debug(
+                "%s: got spawned_re: '%s' matching '%s'",
+                self,
+                p.match.group(0),
+                spawned_re,
+            )
+            return p
+        except pexpect.TIMEOUT:
+            self.logger.error(
+                "%s: TIMEOUT looking for spawned_re '%s' expect buffer so far:\n%s",
+                self,
+                spawned_re,
+                indent(p.buffer),
+            )
+            raise
+        except pexpect.EOF as eoferr:
+            if p.isalive():
+                raise
+            rc = p.status
+            before = indent(p.before)
+            error = CalledProcessError(rc, ac, output=before)
+            self.logger.error(
+                "%s: EOF looking for spawned_re '%s' before EOF:\n%s",
+                self,
+                spawned_re,
+                before,
+            )
+            p.close()
+            raise error from eoferr
+
     async def shell_spawn(
         self,
         cmd,
@@ -761,7 +906,7 @@ class Commander:  # pylint: disable=R0904
         combined_prompt = r"({}|{})".format(re.escape(PEXPECT_PROMPT), prompt)
 
         assert not is_file_like(cmd) or not use_pty
-        p = self.spawn(
+        p = await self.async_spawn(
             cmd,
             combined_prompt,
             expects=expects,

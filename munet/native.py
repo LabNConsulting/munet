@@ -911,7 +911,12 @@ ff02::2\tip6-allrouters
         logfile_read = open(lfname, "a+", encoding="utf-8")
         logfile_read.write("-- start read logging for: '{}' --\n".format(sock))
 
-        p = self.spawn(sock, prompt, logfile=logfile, logfile_read=logfile_read)
+        p = await self.async_spawn(
+            sock,
+            prompt,
+            logfile=logfile,
+            logfile_read=logfile_read,
+        )
         from .base import ShellWrapper  # pylint: disable=C0415
 
         p.send("\n")
