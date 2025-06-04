@@ -330,6 +330,21 @@ match_step_json(
     exact_match=False,
 )
 
+# This case only passes when json_cmp (DeepDiff) is given
+# the arg `cutoff_distance_for_pairs` at 0.4 or higher
+# the default value is 0.3.
+full = '[{"1one": 1, "1two": 2, "1three": 3, "1four": 4, "1five": 5, "1six": 6}, {"2one": 1, "2two": 2, "2three": 3, "2four": 4, "2five": 5, "2six": 6}]'
+subset = '[{"2three": 3}]'
+
+match_step_json(
+    "r1",
+    f"echo '{full}'",
+    subset,
+    "Verify alternate subset matches full",
+    expect_fail=False,
+    exact_match=False,
+)
+
 section("Test json errors")
 
 jsonblank = '{}'
