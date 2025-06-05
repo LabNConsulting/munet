@@ -120,6 +120,7 @@ Tree diagram for node config::
    |     +--rw cap-add*       string
    |     +--rw cap-remove*    string
    |     +--rw cmd?           string
+   |     +--rw cmd-file?      string
    |     +--rw cleanup-cmd?   string
    |     +--rw image?         string
    |     +--rw server?        string
@@ -144,6 +145,28 @@ Tree diagram for node config::
    |     +--rw shell?         union
    |     +--rw volumes*       string
 
+A particularly useful config option for any node is to set the ``cmd``. The
+``cmd`` is a startup command that will run each time when the node is
+started by munet. It can be used to setup the runtime directory,
+automatically run utilities, etc. ::
+
+    topology:
+     nodes:
+       - name: h1
+	 cmd: |
+	   echo "foo" > foo.txt
+	   cat ./foo.txt
+
+The default interpreter for this is ``/bin/bash``, however, separate interpreters
+can be used when ``shell`` is set to the interpreter path (e.g. ``/usr/bin/python3``)
+Alternatively, the ``cmd`` can be treated as basic console input if ``shell`` is set
+to `false`.
+
+When ``cmd-file`` is set to a path, the startup command is instead read from the
+specified file (and the configured ``cmd`` ignored.) A best effort attempt is made
+to use the same interpreter as specified by the file's shebang (again, defaulting
+to ``/bin/bash`` if none is found). Setting ``shell`` overrides this behavior to use
+a specific configured interpreter instead.
 
 Connections
 """""""""""
