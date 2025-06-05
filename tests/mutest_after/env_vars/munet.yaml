@@ -1,0 +1,11 @@
+
+topology:
+  nodes:
+    - name: r1
+      cmd: |
+        echo $foo0
+      env:
+      - name: foo0
+        value: bar
+      - name: foo1
+        value: 'bar ''" baz'
