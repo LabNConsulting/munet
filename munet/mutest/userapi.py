@@ -125,7 +125,7 @@ def pause_test(desc=""):
 def act_on_result(success, args, desc=""):
     if args.pause:
         pause_test(desc)
-    elif success:
+    elif success or len(desc) == 0:
         return
     if args.cli_on_error:
         raise CLIOnErrorError(desc)
