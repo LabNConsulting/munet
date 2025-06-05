@@ -33,6 +33,8 @@ Control/Utility functions:
 
     - :py:func:`test`
 
+    - :py:func:`pause`
+
 Test scripts are located by the :command:`mutest` command by their name.  The name of a
 test script should take the form ``mutest_TESTNAME.py`` where ``TESTNAME`` is replaced
 with a user chosen name for the test case.
@@ -111,6 +113,7 @@ def pause_test(desc=""):
             raise CLIOnErrorError()
         if user == "pdb":
             breakpoint()  # pylint: disable=W1515
+            break
         elif user == "Enter" or user == "enter":
             break
         elif user:
@@ -751,6 +754,19 @@ class TestCase:
         self.oplogf("   section setting __in_section to True")
         self.__print_header(self.info.tag, desc, add_nl)
 
+    def pause(self):
+        """See :py:func:`~munet.mutest.userapi.pause`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:PAUSE",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+        )
+        pause_test("mutest paused")
+
     def step(self, target: str, cmd: str) -> str:
         """See :py:func:`~munet.mutest.userapi.step`.
 
@@ -1014,6 +1030,11 @@ def script_dir() -> Path:
 def get_target(name: str) -> Commander:
     """Get the target object with the given ``name``."""
     return TestCase.g_tc.targets[name]
+
+
+def pause():
+    """Pause the mutest and allow a user to either enter pdb or the cli."""
+    return TestCase.g_tc.pause()
 
 
 def step(target: str, cmd: str) -> str:
