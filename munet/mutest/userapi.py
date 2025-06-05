@@ -574,7 +574,11 @@ class TestCase:
             json_diff = json.loads(deep_diff.to_json())
         else:
             deep_diff = json_cmp(
-                expect, js, ignore_order=True, cutoff_intersection_for_pairs=1
+                expect,
+                js,
+                ignore_order=True,
+                cutoff_intersection_for_pairs=1,
+                cutoff_distance_for_pairs=1,
             )
             # Convert DeepDiff completely into dicts or lists at all levels
             json_diff = json.loads(deep_diff.to_json())
