@@ -334,13 +334,22 @@ with poetry:
   source ~/.poetrybin/bin/activate
   pip install poetry
   pip uninstall keyring
+  deactivate
 #+end_src
 
 NOTE: add "~/.poetrybin/bin" to your $PATH
 
 Install μNET with dependencies:
 
-  poetry install --all-extras
+#+begin_src shell
+  make install
+#+end_src
+
+NOTE: To run munet or mutest locally, you need to enter the poetry virtual enviornment:
+
+#+begin_src shell
+  $(poetry env activate)
+#+end_src
 
 *** Check your install
 
