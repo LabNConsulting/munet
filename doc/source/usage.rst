@@ -17,6 +17,12 @@ Install munet using pip:
 
    $ pip install munet
 
+Or if you need the latest changes from master:
+
+.. code-block:: console
+
+   $ pip install git+https://github.com/LabNConsulting/munet.git#egg=munet
+
 Running
 -------
 

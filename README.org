@@ -316,6 +316,10 @@ cisco VM using a nexos file system image.
 
 ** Development
 
+For most users, it is recommended to install munet through pip (see:
+https://munet.readthedocs.io/en/latest/usage.html). However, if you want to run
+the unit tests, then you will need to set up your local enviornment:
+
 *** Dependencies
 
 μNET requires the following packages:
