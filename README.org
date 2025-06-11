@@ -50,6 +50,7 @@ module: labn-munet-config
   |  +--rw cap-add*             string
   |  +--rw cap-remove*          string
   |  +--rw cmd?                 string
+  |  +--rw cmd-file?            string
   |  +--rw cleanup-cmd?         string
   |  +--rw ready-cmd?           string
   |  +--rw image?               string
@@ -67,6 +68,7 @@ module: labn-munet-config
   |  |  +--rw disk-driver?       string
   |  |  +--rw disk-template?     string
   |  |  +--rw initial-cmd?       string
+  |  |  +--rw initial-cmd-file?  string
   |  |  +--rw kernel?            string
   |  |  +--rw initrd?            string
   |  |  +--rw kvm?               boolean
@@ -135,6 +137,7 @@ module: labn-munet-config
   |     +--rw cap-add*             string
   |     +--rw cap-remove*          string
   |     +--rw cmd?                 string
+  |     +--rw cmd-file?            string
   |     +--rw cleanup-cmd?         string
   |     +--rw ready-cmd?           string
   |     +--rw image?               string
@@ -152,6 +155,7 @@ module: labn-munet-config
   |     |  +--rw disk-driver?       string
   |     |  +--rw disk-template?     string
   |     |  +--rw initial-cmd?       string
+  |     |  +--rw initial-cmd-file?  string
   |     |  +--rw kernel?            string
   |     |  +--rw initrd?            string
   |     |  +--rw kvm?               boolean
@@ -555,6 +559,13 @@ munet>
         type string;
         description "Shell command[s] to execute when creating the node.";
       }
+      leaf cmd-file {
+        type string;
+        description
+          "Shell command[s] to execute when creating the node, loaded
+           from the specified file. Takes precedence over `cmd` when
+           both are configured.";
+      }
       leaf cleanup-cmd {
         type string;
         description
@@ -678,6 +689,15 @@ munet>
              template. These commands are run prior to the standard ../../cmd
              when a disk is first created from a disk template";
         }
+        leaf initial-cmd-file {
+          type string;
+          description
+            "Shell command[s] to execute when creating the node from a disk
+             template. These commands are run prior to the standard ../../cmd
+             when a disk is first created from a disk template and are loaded
+             from the specified file. Takes precedence over `initial-cmd` when
+             both are configured.";
+        }
         leaf kernel {
           type string;
           description "path to kernel image (e.g,. bzImage) to boot";
@@ -718,12 +738,12 @@ munet>
           description "Configuration for console handling";
           leaf user {
             type string;
-	    default "root";
+            default "root";
             description "User to login to console with";
           }
           leaf password {
             type string;
-	    default "admin";
+            default "admin";
             description "Password to login to console with";
           }
           leaf initial-password {

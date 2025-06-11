@@ -1,0 +1,69 @@
+topology:
+  ipv6-enable: false
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+  nodes:
+    - name: h1
+      connections:
+        - to: "mgmt0"
+        - to: "r1"
+          ip: 10.0.1.1/24
+    - name: r1
+      kind: disk-linux
+      cmd-file: "cmd-qemu.sh"
+      connections:
+        - to: "mgmt0"
+        - to: "h1"
+          ip: 10.0.1.2/24
+
+kinds:
+  - name: disk-linux
+    ssh-identity-file: "%RUNDIR%/../root-key"
+    ssh-user: "root"
+    qemu:
+      disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
+      cloud-init: true
+      cloud-init-disk: "%RUNDIR%/../%NAME%-config-cmd.img"
+      initial-cmd-file: "cmd-initial-qemu.sh"
+      console:
+        user: "root"
+        password: "foobar"
+        timeout: 3600
+      memory: "1G"
+      kvm: true
+      ncpu: 2
+
+cli:
+  commands:
+    - name: con
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/vcon0"
+      format: "con HOST [HOST ...]"
+      help: "open console on given hosts, * for all"
+      new-window: true
+      top-level: true
+    - name: mon
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/monitor"
+      format: "mon NODE [NODE ...]"
+      help: "open monitor on given hosts, * for all"
+      new-window: true
+      top-level: true
+    - name: ssh
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %IPADDR%"
+      kinds: ["linux"]
+      format: "ssh NODE [NODE ...]"
+      top-level: true
+      new-window: true
+    - name: sship
+      exec: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {}"
+      format: "sship [user@]ip-addr"
+      top-level: true
+      new-window: true
+    - name: vtysh
+      exec: "expect -c 'spawn ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %IPADDR% ; expect \"assword:\"; send \"\n\"; interact'"
+      format: "vtysh NODE"
+      top-level: true
+      new-window: true

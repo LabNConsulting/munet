@@ -1,0 +1,15 @@
+version: 1
+topology:
+  nodes:
+    - name: h-shcmd
+      cmd: echo foo
+    - name: h-shcmd-file
+      cmd-file: "cmd.sh"
+    - name: h-pycmd
+      cmd: print("foo")
+      shell: "/usr/bin/python3"
+    - name: h-pycmd-file
+      cmd-file: "pycmd.py"
+    - name: h-shcmd-file-noshebang
+      cmd-file: "cmd-noshebang.sh"
+
