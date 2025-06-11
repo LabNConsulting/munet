@@ -1242,6 +1242,11 @@ class L3NamespaceNode(L3NodeMixin, LinuxNamespace):
         #     kwargs,
         # )
         super().__init__(name, pid=pid, **kwargs)
+
+        # Create a new mounted FS for tracking nested network namespaces creatd by the
+        # user with `ip netns add`
+        self.tmpfs_mount("/run/netns")
+
         super().pytest_hook_open_shell()
 
     async def _async_delete(self):
@@ -2676,11 +2681,11 @@ users:
         if self.disk_created:
             password = cc.get("initial-password", password)
 
-        expects=cc.get("expects")
+        expects = cc.get("expects")
         if expects is not None:
             for expect_str in expects:
                 expect_str.replace("%NAME%", str(self.name))
-        sends=cc.get("sends")
+        sends = cc.get("sends")
         if sends is not None:
             for send_str in sends:
                 send_str.replace("%NAME%", str(self.name))
