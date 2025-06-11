@@ -85,6 +85,7 @@ class ScriptError(Exception):
 
 class CLIOnErrorError(Exception):
     """Enter CLI after error."""
+
     def __init__(self, desc=""):
         self.desc = desc
 
@@ -102,7 +103,9 @@ def pause_test(desc=""):
         else:
             print("\n== PAUSING: *NO DESCRIPTION PROVIDED* ==")
         try:
-            user = input('PAUSED, type "cli" for CLI, "pdb" to debug, or press [Enter] to continue: ')
+            user = input(
+                'PAUSED, type "cli" for CLI, "pdb" to debug, or press [Enter] to continue: '
+            )
         except EOFError:
             print("^D...continuing")
             break
@@ -123,6 +126,7 @@ def act_on_result(success, args, desc=""):
     if args.pause:
         pause_test(desc)
     elif success or len(desc) == 0:
+        # No success on description-less steps are not considered errors.
         return
     if args.cli_on_error:
         raise CLIOnErrorError(desc)
@@ -1081,7 +1085,8 @@ def match_step(
         target: the target to execute the ``cmd`` on.
         cmd: string to execut on the ``target``.
         match: regex to match against output.
-        desc: description of test, if no description then no result is logged.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
         expect_fail: if True then succeed when the regexp doesn't match.
         flags: python regex flags to modify matching behavior
         exact_match: if True then ``match`` must be exactly matched somewhere
@@ -1116,7 +1121,8 @@ def match_step_json(
         cmd: string to execut on the ``target``.
         match: A json ``str``, object (``dict``), or array (``list``) to compare
             against the json output from ``cmd``.
-        desc: description of test, if no description then no result is logged.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
         expect_fail: if True then succeed if the a json doesn't match.
         exact_match: if True then the json must exactly match.
 
@@ -1160,7 +1166,8 @@ def wait_step(
             specified the value is calculated from the timeout value so that on
             average the cmd will execute 10 times. The minimum calculated interval
             is .25s, shorter values can be passed explicitly.
-        desc: description of test, if no description then no result is logged.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
         expect_fail: if True then succeed when the regexp *doesn't* match.
         flags: python regex flags to modify matching behavior
         exact_match: if True then ``match`` must be exactly matched somewhere
@@ -1197,7 +1204,8 @@ def wait_step_json(
         cmd: string to execut on the ``target``.
         match: A json object, json array, or str representation of json to compare
             against json output from ``cmd``.
-        desc: description of test, if no description then no result is logged.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
         timeout: The number of seconds to repeat the ``cmd`` looking for a match
             (or non-match if ``expect_fail`` is True).
         interval: The number of seconds between running the ``cmd``. If not
