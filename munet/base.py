@@ -603,6 +603,41 @@ class Commander:  # pylint: disable=R0904
             p = pexpect.spawn(actual_cmd[0], actual_cmd[1:], echo=echo, **defaults)
         return p, actual_cmd
 
+    def _spawn_with_logging(
+        self,
+        cmd,
+        use_pty=False,
+        logfile=None,
+        logfile_read=None,
+        logfile_send=None,
+        **kwargs,
+    ):
+        """Create a spawned process with logging to files configured."""
+        if is_file_like(cmd):
+            assert not use_pty
+            ac = "*socket*"
+            p = self._fdspawn(cmd, **kwargs)
+        else:
+            p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
+
+        if logfile:
+            p.logfile = logfile
+        if logfile_read:
+            p.logfile_read = logfile_read
+        if logfile_send:
+            p.logfile_send = logfile_send
+
+        # for spawned shells (i.e., a direct command an not a console)
+        # this is wrong and will cause 2 prompts
+        if not use_pty:
+            # This isn't very nice looking
+            p.echo = False
+            if not is_file_like(cmd):
+                p.isalive = lambda: p.proc.poll() is None
+            if not hasattr(p, "close"):
+                p.close = p.wait
+        return p, ac
+
     def spawn(
         self,
         cmd,
@@ -638,29 +673,14 @@ class Commander:  # pylint: disable=R0904
             CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
-        if is_file_like(cmd):
-            assert not use_pty
-            ac = "*socket*"
-            p = self._fdspawn(cmd, **kwargs)
-        else:
-            p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
-
-        if logfile:
-            p.logfile = logfile
-        if logfile_read:
-            p.logfile_read = logfile_read
-        if logfile_send:
-            p.logfile_send = logfile_send
-
-        # for spawned shells (i.e., a direct command an not a console)
-        # this is wrong and will cause 2 prompts
-        if not use_pty:
-            # This isn't very nice looking
-            p.echo = False
-            if not is_file_like(cmd):
-                p.isalive = lambda: p.proc.poll() is None
-            if not hasattr(p, "close"):
-                p.close = p.wait
+        p, ac = self._spawn_with_logging(
+            cmd,
+            use_pty,
+            logfile,
+            logfile_read,
+            logfile_send,
+            **kwargs,
+        )
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
@@ -762,29 +782,14 @@ class Commander:  # pylint: disable=R0904
             CalledProcessError if EOF is seen and `cmd` exited then
                 raises a CalledProcessError to indicate the failure.
         """
-        if is_file_like(cmd):
-            assert not use_pty
-            ac = "*socket*"
-            p = self._fdspawn(cmd, **kwargs)
-        else:
-            p, ac = self._spawn(cmd, use_pty=use_pty, **kwargs)
-
-        if logfile:
-            p.logfile = logfile
-        if logfile_read:
-            p.logfile_read = logfile_read
-        if logfile_send:
-            p.logfile_send = logfile_send
-
-        # for spawned shells (i.e., a direct command an not a console)
-        # this is wrong and will cause 2 prompts
-        if not use_pty:
-            # This isn't very nice looking
-            p.echo = False
-            if not is_file_like(cmd):
-                p.isalive = lambda: p.proc.poll() is None
-            if not hasattr(p, "close"):
-                p.close = p.wait
+        p, ac = self._spawn_with_logging(
+            cmd,
+            use_pty,
+            logfile,
+            logfile_read,
+            logfile_send,
+            **kwargs,
+        )
 
         # Do a quick check to see if we got the prompt right away, otherwise we may be
         # at a console so we send a \n to re-issue the prompt
