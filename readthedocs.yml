@@ -8,9 +8,12 @@ build:
       # Install poetry
       - pip install poetry~=1.2
       # Tell poetry to not use a virtual environment
-      - poetry config virtualenvs.create false
+      #- poetry config virtualenvs.create false
     post_install:
       # Install dependencies
       - poetry install --with doc
+      # Install dependencies to the correct site-packages
+      - poetry run pip freeze > reqs.txt
+      - pip install --upgrade -r reqs.txt
 sphinx:
   configuration: doc/source/conf.py
