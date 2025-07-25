@@ -2293,7 +2293,6 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                         expects=expects,
                         sends=sends,
                         timeout=timeout,
-                        init_newline=True,
                         trace=True,
                     )
                 )
