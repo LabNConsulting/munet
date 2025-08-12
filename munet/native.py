@@ -1883,7 +1883,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 continue
             s = m.split(":", 1)
             if len(s) == 1:
-                args.append(("", s[0], ""))
+                args.append(("", s[0], "", "tmpfs"))
             else:
                 spath = s[0]
                 spath = os.path.abspath(
@@ -1893,7 +1893,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 )
                 if not self.test_nsonly("-e", spath):
                     self.cmd_raises_nsonly(f"mkdir -p {spath}")
-                args.append((spath, s[1], ""))
+                args.append((spath, s[1], "", "bind"))
 
         for m in self.config.get("mounts", []):
             src = m.get("src", m.get("source", ""))
@@ -1908,18 +1908,22 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             dst = m.get("dst", m.get("destination"))
             assert dst, "destination path required for mount"
 
+            # Implicitly guess "bind" or "tmpfs". Alternatives are manually specified.
+            mtype = "tmpfs" if src == "" else "bind"
+
             margs = []
             for k, v in m.items():
                 if k in ["destination", "dst", "source", "src"]:
                     continue
                 if k == "type":
-                    assert v in ["bind", "tmpfs"]
+                    assert v in ["bind", "tmpfs", "usb"]
+                    mtype = v
                     continue
                 if not v:
                     margs.append(k)
                 else:
                     margs.append(f"{k}={v}")
-            args.append((src, dst, ",".join(margs)))
+            args.append((src, dst, ",".join(margs), mtype))
 
         if args:
             self.extra_mounts += args
@@ -2130,21 +2134,57 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         """Mount any shared directories."""
         self.logger.info("Mounting shared directories")
         con = self.conrepl
+
+        # Mount (unordered) emulated USB devices
+        usb_devices = [d for d in self.extra_mounts if d[3] == "usb"]
+        if usb_devices:
+            # Retreive a list of ready QEMU USB blocks
+            rv = con.cmd_raises('lsblk -f | grep "QEMU.*FAT"')
+            devs = []
+            blks = rv.split("\n")
+            for blk in blks:
+                name = ' '.join(blk.split())  # Strip excess whitespace
+                name = re.sub(r'[^a-zA-Z0-9_ ]', '', name)  # Strip unexpected chars
+                name = name.split(' ')[0]  # Finally, extract the name (e.g. sdb1)
+                devs += [name]
+            tmp_mnt = '/tmp/munet-mnt'
+            for dev in devs:
+                # Investigatory mount
+                self.logger.info(
+                    "Temp. mounting USB dev %s to %s", dev, tmp_mnt
+                )
+                con.cmd_raises(f"mkdir -p {tmp_mnt}")
+                con.cmd_raises(f"mount /dev/{dev} {tmp_mnt}")
+                dest = con.cmd_raises(f"cat {tmp_mnt}/.munet")
+                con.cmd_raises(f"rm -f {tmp_mnt}/.munet")
+                # Real mount
+                self.logger.info("Mounting USB dev %s to %s", dev, dest)
+                con.cmd_raises(f"umount {tmp_mnt}")
+                con.cmd_raises(f"mkdir -p {dest}")
+                con.cmd_raises(f"mount /dev/{dev} {dest}")
+
+        # Mount remaining directories
         for i, m in enumerate(self.extra_mounts):
-            outer, mp, uargs = m
-            if not outer:
+            outer, mp, uargs, mtype = m
+            if mtype == "tmpfs":
                 con.cmd_raises(f"mkdir -p {mp}")
                 margs = f"-o {uargs}" if uargs else ""
+                self.logger.info("Mounting tmpfs on %s with %s", mp, margs)
                 con.cmd_raises(f"mount {margs} -t tmpfs tmpfs {mp}")
-                continue
-
-            uargs = "" if uargs is None else uargs
-            margs = "trans=virtio"
-            if uargs:
-                margs += f",{uargs}"
-            self.logger.info("Mounting %s on %s with %s", outer, mp, margs)
-            con.cmd_raises(f"mkdir -p {mp}")
-            con.cmd_raises(f"mount -t 9p -o {margs} shared{i} {mp}")
+            elif mtype == "bind":
+                uargs = "" if uargs is None else uargs
+                margs = "trans=virtio"
+                if uargs:
+                    margs += f",{uargs}"
+                self.logger.info(
+                    "Mounting bind (9p) %s on %s with %s", outer, mp, margs
+                )
+                con.cmd_raises(f"mkdir -p {mp}")
+                con.cmd_raises(f"mount -t 9p -o {margs} shared{i} {mp}")
+            elif mtype == "usb":
+                con.cmd_raises(f"test -d {mp}")  # Directory should already exist!
+            else:
+                assert False, "Unknown L3QemuVM mount option"
 
     async def renumber_interfaces(self):
         """Re-number the interfaces.
@@ -2677,11 +2717,28 @@ users:
             f"unix:{_sd}/gdbserver,server,nowait",
         ]
 
+        usb_id = 0
         for i, m in enumerate(self.extra_mounts):
-            args += [
-                "-virtfs",
-                f"local,path={m[0]},mount_tag=shared{i},security_model=passthrough",
-            ]
+            src, mp, _, mtype = m
+            if mtype == "bind":
+                args += [
+                    "-virtfs",
+                    f"local,path={m[0]},mount_tag=shared{i},security_model=passthrough",
+                ]
+            elif mtype == "usb":
+                if usb_id == 0:
+                    args += ["-usb"]
+                drive_id = f"munet_fat32_id{usb_id}"
+                args += [
+                    "-device",
+                    f"usb-storage,drive={drive_id}",
+                    "-drive",
+                    f"file=fat:rw:{src},id={drive_id},format=raw,if=none",
+                ]
+                usb_id += 1
+                # tag the directory with its destination. We cannot assume mount order
+                with open(f"{src}/.munet", "w", encoding="ascii") as f:
+                    f.write(f"{mp}\n")
 
         args += ["-nographic"]
 
