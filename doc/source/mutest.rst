@@ -27,11 +27,28 @@ any founc test scripts simply run the command:
    $ sudo mutest
 
 Mutest will then search the current directory and sub-directories for all files
-matching the shell glob pattern ``mutest_*.py`` and co-reside with a munet
-topology configuration ``munet.yaml``. Finding both it will then launch a munet
-topology with the given configuration file and execute each test on the
-resulting topology. The munet topology is launched at the start and brought down
-at the end of each test script.
+matching the shell glob pattern ``mutest_*.py`` and that either co-reside with a
+munet topology configuration ``munet.yaml`` or exist in a subdirectory of a
+munet topology containing a configuration ``munet.yaml``. Finding both, it will
+then launch instances of the munet topology with the given configuration file
+and execute each test on the resulting topologies according to the following
+rules:
+
+* Test files co-residing with a munet topology configuration ``munet.yaml`` are
+  run within their own munet topology instance. The topology is launched at the
+  start and brought down at the end of each of these test scripts.
+* Test files found within the subdirectory of a munet topology containing a
+  configuration ``munet.yaml`` are considered to be of the same ``group``. Tests
+  in the same ``group`` share a single instance of a munet topology instance.
+
+.. code-block::
+
+   topology-root
+   |--munet.yaml
+   |--mutest_singleton.py  <-- runs within own topology instance
+   |--grouped-tests
+      |--mutest_01_first.py   <-- both of these tests share
+      |--mutest_02_second.py  <-- the same topology instance
 
 Log Files
 ---------

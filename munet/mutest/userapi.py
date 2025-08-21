@@ -197,7 +197,7 @@ class TestCase:
 
     def __init__(
         self,
-        tag: int,
+        tag: str,
         name: str,
         path: Path,
         targets: dict,

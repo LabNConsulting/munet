@@ -172,20 +172,25 @@ async def collect(args: Namespace):
 
     ocwd = Path().absolute()
     try:
-        os.chdir(common)
-        # Work with relative paths to the common directory
-        for path in (x.relative_to(common) for x in sortedpaths):
+        # We don't want to work with relative paths to the common directory since
+        # The common directory may not end up containing the configuration file.
+        for path in sortedpaths:
             dirpath = path.parent
             if dirpath not in configs:
                 try:
                     configs[dirpath] = get_config(search=[dirpath])
                 except FileNotFoundError:
-                    logging.warning(
-                        "Skipping '%s' as munet.{yaml,toml,json} not found in '%s'",
-                        path,
-                        dirpath,
-                    )
-                    continue
+                    try:
+                        # For defining groups of tests, the config might be located in the parent
+                        configs[dirpath] = get_config(search=[dirpath.parent])
+                    except FileNotFoundError:
+                        logging.warning(
+                            "Skipping '%s' as munet.{yaml,toml,json} not found in '%s' or '%s'",
+                            path,
+                            dirpath,
+                            dirpath.parent,
+                        )
+                        continue
             if dirpath not in tests:
                 tests[dirpath] = []
             tests[dirpath].append(path.absolute())
@@ -198,7 +203,8 @@ async def execute_test(
     unet: Munet,
     test: Path,
     args: Namespace,
-    test_num: int,
+    tag: str,
+    test_group_name: str,
     exec_handler: logging.Handler,
 ) -> (int, int, int, Exception):
     """Execute a test case script.
@@ -210,29 +216,30 @@ async def execute_test(
         unet: a running topology.
         test: path to the test case script file.
         args: argparse results.
-        test_num: the number of this test case in the run.
+        tag: the identity of this test within a run. (x.x...)
+        test_group_name: the name of the current running group for logging purposes.
         exec_handler: exec file handler to add to test loggers which do not propagate.
     """
     test_name = testname_from_path(test)
 
     # Get test case loggers
-    logger = logging.getLogger(f"mutest.output.{test_name}")
-    reslog = logging.getLogger(f"mutest.results.{test_name}")
+    logger = logging.getLogger(f"mutest.output.{test_group_name}")
+    reslog = logging.getLogger(f"mutest.results.{test_group_name}")
     logger.addHandler(exec_handler)
     reslog.addHandler(exec_handler)
 
-    # We need to send an info level log to cause the speciifc handler to be
+    # We need to send an info level log to cause the specific handler to be
     # created, otherwise all these debug ones don't get through
     reslog.info("")
 
-    # reslog.debug("START: %s:%s from %s", test_num, test_name, test.stem)
+    # reslog.debug("START: %s:%s from %s", tag, test_name, test.stem)
     # reslog.debug("-" * 70)
 
     targets = dict(unet.hosts.items())
     targets["."] = unet
 
     tc = uapi.TestCase(
-        str(test_num), test_name, test, targets, args, logger, reslog, args.full_summary
+        tag, test_name, test, targets, args, logger, reslog, args.full_summary
     )
     try:
         passed, failed, e = tc.execute()
@@ -259,7 +266,7 @@ async def execute_test(
         run_time,
     )
     reslog.debug("-" * 70)
-    reslog.debug("END: %s %s:%s\n", status, test_num, test_name)
+    reslog.debug("END: %s %s:%s\n", status, tag, test_name)
 
     return passed, failed, e
 
@@ -293,6 +300,7 @@ async def run_tests(args):
     errlog = logging.getLogger("mutest.error")
     reslog = logging.getLogger("mutest.results")
     printed_header = False
+    snum = 0
     tnum = 0
     start_time = time.time()
     try:
@@ -302,11 +310,22 @@ async def run_tests(args):
                 continue
 
             test_files = tests[dirpath]
-            for test in test_files:
-                tnum += 1
+            test_groups = {}
+            # Each mutest coexisting with their config file run in a separate
+            #  group (and therefore, topology instance; backwards compatible!)
+            # All other mutests are grouped into groups corresponding to their
+            #  shared dirpath. All tests within the group share a topology instance.
+            if str(dirpath.absolute()) in configs[dirpath]['config_pathname']:
+                test_groups = {testname_from_path(test): [test] for test in test_files}
+            else:
+                assert dirpath.name != ''
+                test_groups[dirpath.name] = [test for test in test_files]
+
+            for test_group_name, test_group in test_groups.items():
+                tnum = 0
+                snum += 1
                 config = deepcopy(configs[dirpath])
-                test_name = testname_from_path(test)
-                rundir = args.rundir.joinpath(test_name)
+                rundir = args.rundir.joinpath(test_group_name)
 
                 # Add an test case exec file handler to the root logger and result
                 # logger
@@ -316,32 +335,47 @@ async def run_tests(args):
                 exec_handler.setFormatter(exec_formatter)
                 root_logger.addHandler(exec_handler)
 
-                try:
-                    async for unet in get_unet(config, common, rundir, args):
+                async for unet in get_unet(config, common, rundir, args):
+                    for test in test_group:
+                        tnum += 1
+                        test_name = testname_from_path(test)
+                        try:
+                            if not printed_header:
+                                print_header(reslog, unet)
+                                printed_header = True
 
-                        if not printed_header:
-                            print_header(reslog, unet)
-                            printed_header = True
-
-                        passed, failed, e = await execute_test(
-                            unet, test, args, tnum, exec_handler
-                        )
-                except KeyboardInterrupt as error:
-                    errlog.warning("KeyboardInterrupt while running test %s", test_name)
-                    passed, failed, e = 0, 0, error
-                    raise
-                except Exception as error:
-                    logging.error(
-                        "Error executing test %s: %s", test, error, exc_info=True
-                    )
-                    errlog.error(
-                        "Error executing test %s: %s", test, error, exc_info=True
-                    )
-                    passed, failed, e = 0, 0, error
-                finally:
-                    # Remove the test case exec file handler form the root logger.
-                    root_logger.removeHandler(exec_handler)
-                    results.append((test_name, passed, failed, e))
+                            passed, failed, e = await execute_test(
+                                unet, test, args, f"{snum}.{tnum}", test_group_name, exec_handler
+                            )
+                        except KeyboardInterrupt as error:
+                            errlog.warning(
+                                "KeyboardInterrupt while running group: %s, test: %s",
+                                test_group_name,
+                                test_name
+                            )
+                            passed, failed, e = 0, 0, error
+                            raise
+                        except Exception as error:
+                            logging.error(
+                                "Error executing test group %s, test %s: %s",
+                                test_group_name,
+                                test_name,
+                                error,
+                                exc_info=True,
+                            )
+                            errlog.error(
+                                "Error executing test group %s, test %s: %s",
+                                test_group_name,
+                                test_name,
+                                error,
+                                exc_info=True,
+                            )
+                            passed, failed, e = 0, 0, error
+                        finally:
+                            # Remove the test case exec file handler form the root logger.
+                            if test == test_group[-1]:
+                                root_logger.removeHandler(exec_handler)
+                            results.append((test_group_name, test_name, passed, failed, e))
 
     except KeyboardInterrupt:
         pass
@@ -350,7 +384,6 @@ async def run_tests(args):
         return False
 
     run_time = time.time() - start_time
-    tnum = 0
     tpassed = 0
     tfailed = 0
     texc = 0
@@ -359,8 +392,7 @@ async def run_tests(args):
     sfailed = 0
 
     for result in results:
-        _, passed, failed, e = result
-        tnum += 1
+        _, _, passed, failed, e = result
         spassed += passed
         sfailed += failed
         if e:
@@ -382,17 +414,24 @@ async def run_tests(args):
     reslog.info("-" * 70)
 
     tnum = 0
+    tgroup = 0
+    last_group_name = ""
     for result in results:
-        test_name, passed, failed, e = result
-        tnum += 1
-        if failed or e:
-            reslog.warning(" FAIL  %s:%s", tnum, test_name)
+        test_group_name, test_name, passed, failed, e = result
+        if test_group_name != last_group_name:
+            tgroup += 1
+            tnum = 1
         else:
-            reslog.info(" PASS  %s:%s", tnum, test_name)
+            tnum += 1
+        last_group_name = test_group_name
+        if failed or e:
+            reslog.warning(" FAIL  %s:%s:%s", tgroup, tnum, test_name)
+        else:
+            reslog.info(" PASS  %s:%s:%s", tgroup, tnum, test_name)
 
     reslog.info("-" * 70)
     reslog.info(
-        "END RUN: %s test scripts, %s passed, %s failed", tnum, tpassed, tfailed
+        "END RUN: %s test scripts, %s passed, %s failed", len(results), tpassed, tfailed
     )
 
     return 1 if tfailed else 0
