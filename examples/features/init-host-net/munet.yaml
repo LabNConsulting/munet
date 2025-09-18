@@ -1,0 +1,62 @@
+topology:
+  networks-autonumber: false
+  networks:
+    - name: external
+      external: true
+  nodes:
+    - name: host-bridge
+      kind: bridge-node
+      connections:
+        - to: host1
+        - to: host2
+        - to: external
+          hostintf: "host-veth0"
+    - name: host1
+      connections:
+        - to: host2
+          ip: 10.0.1.1/24
+        - to: host-bridge
+          ip: 16.0.1.1/24
+    - name: host2
+      connections:
+        - to: host1
+          ip: 10.0.1.2/24
+        - to: host-bridge
+          ip: 16.0.1.2/24
+  initial-setup-host-cmd: |
+    ns="host-demo"
+    if0="host-veth0"
+    if1="host-veth1"
+
+    # The following connects host1,host2 <---> namespace
+    # However, it shouldn't be hard to adapt this to
+    # connect host1,host2,etc. <---> user's host env
+
+    if ip netns show | grep $ns > /dev/null 2>&1; then
+      ip link del $if0
+      ip netns del $ns
+    fi
+
+    ip netns add $ns
+    ip link add $if0 type veth peer name $if1
+    ip link set $if1 netns $ns
+    ip netns exec $ns ip addr add 16.0.1.99/24 dev $if1
+    ip netns exec $ns ip link set $if1 up
+    ip netns exec $ns ip route add default via 16.0.1.99 dev $if1
+    #ip netns exec $ns echo 1 > /proc/sys/net/ipv4/ip_forward
+
+    # host1 and host2 should now be able to ping 16.0.1.99, even
+    # though munet didn't internally create the namespace.
+
+
+kinds:
+  - name: bridge-node
+    cmd: |
+      eths=($(ip link show | awk '/eth[0-9]/{sub(/@/," "); print $2}'))
+      # Script to bridge all interfaces
+      ip link add brnet type bridge
+      for eth in ${eths[@]}; do
+          ip link set $eth master brnet
+      done
+      ip link set brnet up
+    merge: ["env"]
