@@ -33,7 +33,6 @@ from munet.native import Munet
 from munet.parser import async_build_topology
 from munet.parser import get_config
 
-
 # We want all but critical to fit in 5 characters for alignment
 logging.addLevelName(logging.WARNING, "WARN")
 root_logger = logging.getLogger("")
@@ -197,9 +196,10 @@ async def collect(args: Namespace):
 async def execute_test(
     unet: Munet,
     test: Path,
-    args: Namespace,
+    args: dict,
     test_num: int,
-    exec_handler: logging.Handler,
+    logger: logging.Logger,
+    reslog: logging.Logger,
 ) -> (int, int, int, Exception):
     """Execute a test case script.
 
@@ -209,17 +209,12 @@ async def execute_test(
     Args:
         unet: a running topology.
         test: path to the test case script file.
-        args: argparse results.
+        args: argparse results as a dict.
         test_num: the number of this test case in the run.
-        exec_handler: exec file handler to add to test loggers which do not propagate.
+        logger: logger to record test run info.
+        reslog: logger to record test results.
     """
     test_name = testname_from_path(test)
-
-    # Get test case loggers
-    logger = logging.getLogger(f"mutest.output.{test_name}")
-    reslog = logging.getLogger(f"mutest.results.{test_name}")
-    logger.addHandler(exec_handler)
-    reslog.addHandler(exec_handler)
 
     # We need to send an info level log to cause the speciifc handler to be
     # created, otherwise all these debug ones don't get through
@@ -232,7 +227,7 @@ async def execute_test(
     targets["."] = unet
 
     tc = uapi.TestCase(
-        str(test_num), test_name, test, targets, args, logger, reslog, args.full_summary
+        str(test_num), test_name, test, targets, args, logger, reslog, args.get('full_summary', False)
     )
     try:
         passed, failed, e = tc.execute()
@@ -323,8 +318,14 @@ async def run_tests(args):
                             print_header(reslog, unet)
                             printed_header = True
 
+                        # Get test case loggers
+                        logger = logging.getLogger(f"mutest.output.{test_name}")
+                        reslog = logging.getLogger(f"mutest.results.{test_name}")
+                        logger.addHandler(exec_handler)
+                        reslog.addHandler(exec_handler)
+
                         passed, failed, e = await execute_test(
-                            unet, test, args, tnum, exec_handler
+                            unet, test, vars(args), tnum, logger, reslog
                         )
                 except KeyboardInterrupt as error:
                     errlog.warning("KeyboardInterrupt while running test %s", test_name)
