@@ -33,7 +33,9 @@ from .native import Munet
 
 def get_schema():
     if get_schema.schema is None:
-        with importlib.resources.path("munet", "munet-schema.json") as datapath:
+        with importlib.resources.path(  # pylint: disable=deprecated-method
+            "munet", "munet-schema.json"
+        ) as datapath:
             search = [str(datapath.parent)]
         get_schema.schema = get_config(basename="munet-schema", search=search)
     return get_schema.schema
@@ -131,7 +133,9 @@ def setup_logging(args, config_base="logconf"):
     os.chdir(args.rundir)
     try:
         search = [old]
-        with importlib.resources.path("munet", config_base + ".yaml") as datapath:
+        with importlib.resources.path(  # pylint: disable=deprecated-method
+            "munet", config_base + ".yaml"
+        ) as datapath:
             search.append(str(datapath.parent))
 
         def logf(msg, *p, **k):
@@ -234,7 +238,9 @@ def load_kinds(args, search=None):
     try:
         if search is None:
             search = [cwd]
-        with importlib.resources.path("munet", "kinds.yaml") as datapath:
+        with importlib.resources.path(  # pylint: disable=deprecated-method
+            "munet", "kinds.yaml"
+        ) as datapath:
             search.insert(0, str(datapath.parent))
 
         configs = []

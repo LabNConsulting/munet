@@ -293,7 +293,7 @@ def get_event_loop():
     try:
         watcher = asyncio.PidfdChildWatcher()  # pylint: disable=no-member
     except Exception:
-        watcher = asyncio.SafeChildWatcher()
+        watcher = asyncio.SafeChildWatcher()                # pylint: disable=deprecated-class
     loop = policy.get_event_loop()
 
     logging.debug(
