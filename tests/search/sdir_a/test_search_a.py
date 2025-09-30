@@ -18,7 +18,7 @@ commander = Commander("base")
 @pytest.fixture(name="stdargs")
 def fixture_stdargs(rundir):
     a = [
-        "poetry",
+        "uv",
         "run",
         "munet",
         f"--rundir={rundir}",

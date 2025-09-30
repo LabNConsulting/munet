@@ -31,7 +31,7 @@ def check(p):
 @pytest.fixture(name="stdargs")
 def fixture_stdargs(rundir):
     a = [
-        "poetry",
+        "uv",
         "run",
         "munet",
         "--no-kill",

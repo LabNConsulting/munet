@@ -6,10 +6,12 @@ SCHEMA := test-schema.json
 LOG_CLI := # --log-cli
 TMP := .testtmp
 
-unexport VIRTUAL_ENV
-
-POETRY := env -u VIRTUAL_ENV PATH="$(PATH)" poetry
-POETRYRUN := $(POETRY) run
+UV := uv
+UVRUN := $(UV) run
+UVSYNC := $(UV) sync
+# PYANG_PLUGIN_BASE := .venv/pyang-json-schema-plugin
+PYANG_PLUGIN_DIR := $(PYANG_PLUGIN_BASE)/jsonschema
+PYANG_PLUGIN := $(PYANG_PLUGIN_DIR)/jsonschema.py
 
 MAKE_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
@@ -17,7 +19,7 @@ all: $(TMP) $(YANG) $(YANG_SCHEMA) doc ci-lint test yang-test
 
 .PHONY: doc
 doc:
-	$(POETRYRUN) $(MAKE) -C doc html
+	$(UVRUN) $(MAKE) -C doc html
 
 doc-start:
 	sudo podman run -it --rm -p 8088:80 -d --volume $(MAKE_DIR)/doc/build/html:/usr/share/nginx/html --name sphinx docker.io/nginx
@@ -27,31 +29,32 @@ doc-stop:
 
 # We hand craft this to keep things cleaner
 doc-apidoc:
-	$(POETRYRUN) sphinx-apidoc -f --module-first --ext-doctest --extensions sphinx-prompt -o doc/source/apidoc munet
+	$(UVRUN) sphinx-apidoc -f --module-first --ext-doctest --extensions sphinx-prompt -o doc/source/apidoc munet
 
 prepare-publish: $(YANG_SCHEMA)
 
 lint:
-	$(POETRYRUN) pydocstyle ./munet
-	$(POETRYRUN) pylint ./munet $(shell find ./tests/*/* -name '*.py')
+	$(UVRUN) pydocstyle ./munet
+	$(UVRUN) pylint ./munet $(shell find ./tests/*/* -name '*.py')
 
 ci-lint:
-	$(POETRYRUN) pydocstyle ./munet
-	$(POETRYRUN) pylint --disable="fixme" ./munet ./tests
+	$(UVRUN) pydocstyle ./munet
+	$(UVRUN) pylint --disable="fixme" ./munet ./tests
 
 test: test-validate ci-lint
-	sudo -E $(POETRYRUN) mutest tests
-	sudo -E $(POETRYRUN) pytest -s -v --cov=munet --cov-report=xml tests
+	$(UVRUN) sudo -E mutest tests
+	$(UVRUN) sudo -E pytest -s -v --cov=munet --cov-report=xml tests
 
 clean:
 	rm -f *.yang coverage.xml err.out ox-rfc.el
 	rm -rf .testtmp/schema
+	rm -rf $(PYANG_PLUGIN_BASE)
 
 run:
-	sudo -E $(POETRYRUN) python3 -m munet
+	$(UVRUN) sudo -E python3 -m munet
 
 install:
-	$(POETRY) install --all-extras
+	$(UVSYNC) --all-groups
 
 # ====
 # YANG
@@ -62,7 +65,7 @@ install:
 # -------------------------
 
 ajv = $(or $(and $(shell which ajv),ajv $(1)),)
-y2j = $(POETRYRUN) python -c 'import sys; import json; import yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout, indent=2)' < $(1) > $(2)
+y2j = $(UVRUN) python -c 'import sys; import json; import yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout, indent=2)' < $(1) > $(2)
 
 $(YANG): $(ORG)
 	sed -n '/#+begin_src yang :exports code/,/^#+end_src/p' $< | sed '/^#/d' >$@
@@ -94,8 +97,11 @@ ox-rfc.el:
 # YANG data validation
 # --------------------
 
-$(YANG_SCHEMA): $(YANG)
-	$(POETRYRUN) pyang --plugindir .venv/src/pyang-json-schema-plugin/jsonschema/jsonschema.py --format jsonschema  -o $@ $<
+#$(PYANG_PLUGIN):
+#	$(UV) pip install --no-deps --target $(PYANG_PLUGIN_BASE) git+https://github.com/LabNConsulting/pyang-json-schema-plugin.git@labn-master
+
+$(YANG_SCHEMA): $(YANG) # $(PYANG_PLUGIN)
+	$(UVRUN) pyang --format jsonschema -o $@ $<
 
 $(TMP):
 	mkdir -p .testtmp
@@ -111,8 +117,8 @@ KINDS_DATA := .testtmp/kinds.json
 test-validate: $(YANG_SCHEMA) $(KINDS_DATA) .testtmp/basic.json $(TMP)
 	@echo "testing basic with yang generated schema"
 	$(call ajv,--spec=draft2020 -d .testtmp/basic.json -s $(YANG_SCHEMA))
-	$(POETRYRUN) jsonschema --instance .testtmp/basic.json $(YANG_SCHEMA)
+	$(UVRUN) jsonschema --instance .testtmp/basic.json $(YANG_SCHEMA)
 
 	@echo "testing kinds with yang generated schema"
 	$(call ajv,--spec=draft2020 -d .testtmp/kinds.json -s $(YANG_SCHEMA))
-	$(POETRYRUN) jsonschema --instance .testtmp/kinds.json $(YANG_SCHEMA)
+	$(UVRUN) jsonschema --instance .testtmp/kinds.json $(YANG_SCHEMA)
