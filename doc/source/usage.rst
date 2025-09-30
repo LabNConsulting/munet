@@ -23,6 +23,23 @@ Or if you need the latest changes from master:
 
    $ pip install git+https://github.com/LabNConsulting/munet.git#egg=munet
 
+`sudo -E` configuration
+-----------------------
+
+sudo/root is required for most uses of munet and mutest; however, when you
+install munet as a non-root user (typical) either in your default
+environment or in a virtual environment, it may not be found when you `sudo`.
+
+First you should always run with `sudo -E` which carries the user environment
+over into the new process running as root. However, it is also common for sudo
+to be configured to override the user's `$PATH` even when the `-E` flag is
+specified. To make sure this isn't the case you should disable the `Default
+secure_path` configuration if present. One way to do that is:
+
+.. code-block:: console
+
+   $ sudo sed -i -e '/secure_path/s/^/#/' /etc/sudoers
+
 Running
 -------
 

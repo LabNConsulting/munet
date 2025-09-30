@@ -324,31 +324,35 @@ For most users, it is recommended to install munet through pip (see:
 https://munet.readthedocs.io/en/latest/usage.html). However, if you want to run
 the unit tests, then you will need to set up your local enviornment:
 
+*** `sudo -E` configuration
+
+To allow munet to be found when running with `sudo -E` the `secure_path` config
+should be disabled in /etc/sudoers:
+
+#+begin_src shell
+   $ sudo sed -i -e '/secure_path/s/^/# /' /etc/sudoers
+#+end_src
+
 *** Dependencies
 
-μNET requires the following packages:
-
-  python3 python3-venv
-
-Automate tests require the following system packages:
-
-  podman
-
-Install the [[https://docs.astral.sh/uv/][uv]] package manager (either through
-your system's package manager or directly via the official installer):
+Install the [[https://docs.astral.sh/uv/][uv]] python project
+manager (either through your system's package manager or directly via the
+official installer):
 
 #+begin_src shell
   curl -LsSf https://astral.sh/uv/install.sh | sh
 #+end_src
+
+Some of the munet unit tests will require the following system packages which
+you should install according to your OS procedures:
+
+  podman
 
 Install μNET with dependencies:
 
 #+begin_src shell
   make install
 #+end_src
-
-NOTE: After syncing the environment with =uv sync=, you can either activate the
-virtual environment (in =.venv= by default) or prefix commands with =uv run=.
 
 *** Check your install
 
@@ -358,11 +362,11 @@ virtual environment (in =.venv= by default) or prefix commands with =uv run=.
 
 The following uses FRR (see https://frrouting.org)
 
-   sudo uv run munet -c examples/frr/ospf/ospf/munet.yaml
+   uv run sudo -E munet -c examples/frr/ospf/ospf/munet.yaml
 
 For example:
 #+begin_src shell
-munet$ sudo uv run munet -c examples/frr/ospf/ospf/munet.yaml
+munet$ uv run sudo -E munet -c examples/frr/ospf/ospf/munet.yaml
 2022-09-16 13:37:05,603: INFO: Loaded logging config /home/lberger/Code/github/labn/munet/munet/logconf.yaml
 2022-09-16 13:37:05,609: INFO: Loaded config from /home/lberger/Code/github/labn/munet/examples/frr/ospf/ospf/munet.yaml
 2022-09-16 13:37:05,623: INFO: Loaded kinds config /home/lberger/Code/github/labn/munet/munet/kinds.yaml
