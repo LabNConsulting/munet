@@ -13,10 +13,7 @@ import subprocess
 import pytest
 
 
-# All tests are coroutines
-pytestmark = pytest.mark.asyncio
-
-# How does this double assignment work, what's going on?
+# Run tests with unshare_inline and not.
 pytestmark = pytest.mark.parametrize("unet", [True, False], indirect=["unet"])
 
 
