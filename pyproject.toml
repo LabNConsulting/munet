@@ -1,57 +1,61 @@
-[tool.poetry]
+[project]
 name = "munet"
-version = "0.15.6"
+version = "0.16.0"
 description = "A package to facilitate network simulations"
-authors = ["Christian Hopps <chopps@labn.net>"]
-license = "GPL-2.0-or-later"
-readme = "README.org"
-repository = "https://github.com/LabNConsulting/munet"
+readme = {file = "README.org", content-type = "text/plain"}
+requires-python = ">=3.9"
+license = {text = "GPL-2.0-or-later"}
+authors = [{name = "Christian Hopps", email = "chopps@labn.net"}]
+urls = {Repository = "https://github.com/LabNConsulting/munet"}
+dependencies = [
+  # "deepdiff>=8.4.2",
+  "deepdiff>=6.2.1,<8.0.0", # +8.0.0 causes another deepdiff json cmp issue
+  "jsonschema>=4.23.0",
+  "pexpect>=4.9.0",
+  "pyyaml>=6.0.3",
+]
+#"toml>=0.10.2,<0.11.0",
 
 include = ["logconf.yaml", "logconf-mutest.yaml", "munet-schema.json"]
-
-[tool.poetry.dependencies]
-python = "^3.9"
-deepdiff = "^6.2.1"
-pexpect = "^4.8.0"
-pyyaml = "^6.0"
-jsonschema = "^4.17.1"
-toml = {version = "^0.10.2", optional = true}
-
-[tool.poetry.scripts]
+[project.scripts]
 munet = "munet.__main__:main"
 mucmd = "munet.mucmd:main"
 mutini = "munet.mutini:main"
 mushare = "munet.mutestshare:main"
 mutest = "munet.mutest.__main__:main"
 
-[tool.poetry.group.schemadev.dependencies]
-pyang = "^2.5.3"
-pyang-json-schema-plugin = {git = "https://github.com/LabNConsulting/pyang-json-schema-plugin.git", rev = "labn-master"}
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+# requires = ["uv-build>=0.1"]   # package name for the backend
+# build-backend = "uv_build"
 
-[tool.poetry.group.test.dependencies]
-pylint = "^3.3.8"
-pytest = "^7.1.3"
-pytest-asyncio = "^0.20.2"
-pytest-cov = "^4.0.0"
-requests = "^2.28.1"
-toml = "^0.10.2"
-pytest-xdist = "^3.0.2"
+[dependency-groups]
+dev = [
+    "autoflake>=2.3.1",
+    "black>=25.9.0",
+    "jsonschema>=4.25.1",
+    "pyang>=2.7.1",
+    "pyang-json-schema-plugin @ git+https://github.com/LabNConsulting/pyang-json-schema-plugin.git@labn-master",
+    "pydocstyle>=6.3.0",
+    "pylint>=3.3.8",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
+    "requests>=2.32.5",
+    "setuptools",
+    "sphinx>=7.4.7",
+    "sphinx-prompt>=1.8.0",
+    "toml>=0.10.2",
+]
 
-
-[tool.poetry.group.ide.dependencies]
-autoflake = "^1.7.7"
-black = "^22.10.0"
-importmagic = "^0.1.7"
-isort = "^5.10.1"
-pylint = "^3.3.8"
-astunparse = "^1.6.3"
-python-lsp-server = {extras = ["flake8", "pydocstyle", "pylint"], version = "^1.6.0"}
-
-
-[tool.poetry.group.doc.dependencies]
-sphinx = "^5.3.0"
-python-docs-theme = "^2022.1"
-sphinx-prompt = "^1.5.0"
+ide = [
+    "basedpyright>=1.31.5",
+    "importmagic>=0.1.7",
+    "isort>=6.0.1",
+    "python-lsp-server[all]>=1.13.1",
+]
 
 [tool.isort]
 profile = "black"
@@ -68,27 +72,22 @@ known_first_party = "munet"
 
 [tool.black]
 line-length = 88
-include = '\.pyi?$'
+include = '\\.(pyi?)$'
 exclude = '''
 /(
-    \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.poetryvenv
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-  | tests/.*/setup.py
+\\.eggs
+| \\.git
+| \\.hg
+| \\.mypy_cache
+| \\.tox
+| \\.venv
+| _build
+| buck-out
+| build
+| dist
+| tests/.*/setup.py
 )/
 '''
-
-[build-system]
-requires = ["poetry-core>=1.0.8"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.flake8]
 max-line-length = 88
@@ -96,24 +95,24 @@ ignore = "E203,E741,W504"
 
 [tool.pylint.messages_control]
 disable = [
-  "broad-except",
-  "broad-exception-raised",
-  "consider-using-f-string",    # this would also be nice, but too much
-  "consider-using-with",        # this would be nice if it wasn't so simple
-  "duplicate-code",
-  "fixme",
-  "invalid-name",               # sometimes 1 char variable names are fine
-  "missing-function-docstring", # would be nice, a pipe-dream really
-  "too-few-public-methods",
-  "too-many-arguments",
-  "too-many-branches",
-  "too-many-instance-attributes",
-  "too-many-lines",
-  "too-many-locals",
-  "too-many-positional-arguments",
-  "too-many-return-statements",
-  "too-many-statements",
-  "unknown-option-value",
+"broad-except",
+"broad-exception-raised",
+"consider-using-f-string",    # this would also be nice, but too much
+"consider-using-with",        # this would be nice if it wasn't so simple
+"duplicate-code",
+"fixme",
+"invalid-name",               # sometimes 1 char variable names are fine
+"missing-function-docstring", # would be nice, a pipe-dream really
+"too-few-public-methods",
+"too-many-arguments",
+"too-many-branches",
+"too-many-instance-attributes",
+"too-many-lines",
+"too-many-locals",
+"too-many-positional-arguments",
+"too-many-return-statements",
+"too-many-statements",
+"unknown-option-value",
 ]
 max-line-length = 88
 
@@ -122,34 +121,22 @@ convention = "google"
 add_ignore = "D102,D103,D105,D107"
 
 [tool.pylint.design]
-# limiting the number of returns might discourage
-# the use of guard clauses. So we increase the
-# allowed number of returns from 6 to 8
 max-returns = 8
 
 [tool.pytest.ini_options]
-
 asyncio_mode = "auto"
-
 testpaths = [
         "tests",
 ]
-
 log_level = "INFO"
 log_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_date_format = "%Y-%m-%d %H:%M:%S"
-
 python_functions = ["test*"]
-# python_files = ["test*.py"]
-
-# If verbose is specifyied log_cli will be set to 1, it can also be specified
-# here or on the CLI.
-# log_cli = 1
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
-
 log_file = "exec-pytest.log"
 log_file_level = "DEBUG"
 log_file_format = "%(asctime)s,%(msecs)03d %(levelname)s: %(name)s: %(message)s"
 log_file_date_format = "%Y-%m-%d %H:%M:%S"
+

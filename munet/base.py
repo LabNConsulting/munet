@@ -268,34 +268,34 @@ def _get_exec_path(binary, cmdf, cache):
     return None
 
 
-def get_event_loop():
-    """Configure and return our non-thread using event loop.
+def ensure_non_threaded_event_watcher():
+    # Skip all this if >= python 3.12
+    if sys.version_info >= (3, 12):
+        return
 
-    This function configures a new child watcher to not use threads.
-    Threads cannot be used when we inline unshare a PID namespace.
-    """
     policy = asyncio.get_event_loop_policy()
-    loop = policy.get_event_loop()
-    if not hasattr(os, "pidfd_open"):
-        return loop
-
     owatcher = policy.get_child_watcher()
+    try:
+        want_class = asyncio.PidfdChildWatcher  # pylint: disable=no-member
+    except Exception:
+        want_class = asyncio.SafeChildWatcher  # pylint: disable=deprecated-class
+
     logging.debug(
-        "event_loop_fixture: global policy %s, current loop %s, current watcher %s",
+        "ensure_non_threaded_event_watcher: global policy %s, current watcher %s",
         policy,
-        loop,
         owatcher,
     )
+
+    # It's already non-threaded
+    if isinstance(owatcher, (want_class, asyncio.SafeChildWatcher)):
+        return
 
     policy.set_child_watcher(None)
     owatcher.close()
 
-    try:
-        watcher = asyncio.PidfdChildWatcher()  # pylint: disable=no-member
-    except Exception:
-        watcher = asyncio.SafeChildWatcher()                # pylint: disable=deprecated-class
+    watcher = want_class()
+    # Reget the loop (why, does it change with the watcher.close()?)
     loop = policy.get_event_loop()
-
     logging.debug(
         "event_loop_fixture: attaching new watcher %s to loop and setting in policy",
         watcher,
@@ -304,8 +304,6 @@ def get_event_loop():
     policy.set_child_watcher(watcher)
     policy.set_event_loop(loop)
     assert asyncio.get_event_loop_policy().get_child_watcher() is watcher
-
-    return loop
 
 
 class Commander:  # pylint: disable=R0904
@@ -2188,11 +2186,16 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
             linux.unshare(uflags)
 
-            if not pid:
+            if not self.pid_ns:
                 p = None
                 self.pid = None
                 self.nsenter_fork = False
             else:
+                # If we are unsharing inline and creating a new pid namespace we need to
+                # ensure the default event loop watcher is a non-threaded version.
+                if not kvok or sys.version_info < (3, 12):
+                    ensure_non_threaded_event_watcher()
+
                 # Need to fork to create the PID namespace, but we need to continue
                 # running from the parent so that things like pytest work. We'll execute
                 # a mutini process to manage the child init 1 duties.
@@ -2331,7 +2334,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # process using self.pid
         #
 
-        if pid:
+        if self.pid_ns:
             nsenter_fork = True
         elif unet and unet.nsenter_fork:
             # if unet created a pid namespace we need to enter it since we aren't
@@ -2376,7 +2379,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
 
         # We need to remount the procfs for the new PID namespace, since we aren't using
         # unshare(1) which does that for us.
-        if pid and unshare_inline:
+        if self.pid_ns and unshare_inline:
             assert mount
             self.cmd_raises_nsonly("mount -t proc proc /proc")
 
@@ -2443,7 +2446,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                     self.bind_mount(s[0], s[1])
 
         # this will fail if running inside the namespace with PID
-        if pid:
+        if self.pid_ns:
             o = self.cmd_nostatus_nsonly("ls -l /proc/1/ns")
         else:
             o = self.cmd_nostatus_nsonly("ls -l /proc/self/ns")

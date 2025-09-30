@@ -1,3 +1,0 @@
-# create and use virtual env in <projectroot>/.venv
-[virtualenvs]
-in-project = false
