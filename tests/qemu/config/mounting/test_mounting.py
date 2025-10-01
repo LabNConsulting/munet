@@ -14,11 +14,7 @@ import pytest
 from munet.base import commander
 
 
-# All tests are coroutines
-pytestmark = [
-    pytest.mark.asyncio,
-    pytest.mark.parametrize("unet", ["munet-vm"], indirect=["unet"]),
-]
+pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -27,44 +23,23 @@ async def setup_images(rundir_module):
         rdir = rundir_module
         release = "22.04"
         # This is actually a qcow2 image regardless of the .img suffix
-        bimage = f"ubuntu-{release}-server-cloudimg-amd64.img"
+        image = f"ubuntu-{release}-server-cloudimg-amd64.img"
+        dimage = os.path.realpath(f"../../{image}")
         image_url = (
-            f"https://cloud-images.ubuntu.com/releases/{release}/release/{bimage}"
+            f"https://cloud-images.ubuntu.com/releases/{release}/release/{image}"
         )
         qimage = "ubuntu-tpl.qcow2"
 
-        if not os.path.exists(bimage):
-            commander.cmd_raises(f"curl -fLO {image_url}")
+        if not os.path.exists(dimage):
+            commander.cmd_raises(f"curl -fLo {dimage} {image_url}")
 
         if not os.path.exists(qimage):
-            commander.cmd_raises(f"rm -f {qimage} && ln -sf {bimage} {qimage}")
+            commander.cmd_raises(f"rm -f {qimage} && ln -sf {dimage} {qimage}")
 
         if not os.path.exists(f"{rdir}/root-key"):
             commander.cmd_raises(
                 f'ssh-keygen -b 2048 -t rsa -f {rdir}/root-key -q -N ""'
             )
-        pubkey = commander.cmd_raises(f"cat {rdir}/root-key.pub").strip()
-        user_data = f"""#cloud-config
-disable_root: 0
-ssh_pwauth: 1
-users:
-  - name: root
-    lock_passwd: false
-    plain_text_passwd: foobar
-    ssh_authorized_keys:
-      - "{pubkey}"
-hostname: r1
-runcmd:
-  - systemctl enable serial-getty@ttyS1.service
-  - systemctl start serial-getty@ttyS1.service
-  - systemctl enable serial-getty@ttyS2.service
-  - systemctl start serial-getty@ttyS2.service
-"""
-        commander.cmd_raises(f"cat > {rdir}/user-data.yaml", stdin=user_data)
-        commander.cmd_raises(
-            "cloud-localds -N netcfg.yaml -d raw"
-            f" {rdir}/r1-mounting.img {rdir}/user-data.yaml"
-        )
     except Exception:
         pytest.fail("Failed to fetch/setup qemu images")
 
@@ -82,24 +57,24 @@ async def test_mounting(unet):
     logging.debug(output)
 
     # tmpfs from volume config
-    assert 'tmpfs1' in output
+    assert "tmpfs1" in output
 
     # 9p bind from volume config
-    assert 'bind1' in output
+    assert "bind1" in output
     contents = r1.conrepl.cmd_raises("cat /tmp/bind1/mount.txt")
-    assert 'bind mount' in contents
+    assert "bind mount" in contents
 
     # tmpfs from mounts config
-    assert 'tmpfs2' in output
+    assert "tmpfs2" in output
     contents = r1.conrepl.cmd_raises("df | grep tmpfs2")
-    assert '4096' in contents
+    assert "4096" in contents
 
     # 9p bind from mounts config
-    assert 'bind2' in output
+    assert "bind2" in output
     contents = r1.conrepl.cmd_raises("cat /tmp/bind2/mount.txt")
-    assert 'bind mount' in contents
+    assert "bind mount" in contents
 
     # usb drive from mounts config
-    assert 'usb' in output
+    assert "usb" in output
     contents = r1.conrepl.cmd_raises("cat /tmp/usb/mount.txt")
-    assert 'usb fat32 mount' in contents
+    assert "usb fat32 mount" in contents
