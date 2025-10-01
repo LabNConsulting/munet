@@ -112,7 +112,7 @@ module: labn-munet-config
   |  +--rw mounts* [destination]
   |  |  +--rw destination    string
   |  |  +--rw source?        string
-  |  |  +--rw tmpfs-size?    string
+  |  |  +--rw size?    string
   |  |  +--rw type?          string
   |  +--rw name                 string
   |  +--rw podman
@@ -200,7 +200,7 @@ module: labn-munet-config
   |     +--rw mounts* [destination]
   |     |  +--rw destination    string
   |     |  +--rw source?        string
-  |     |  +--rw tmpfs-size?    string
+  |     |  +--rw size?    string
   |     |  +--rw type?          string
   |     +--rw name                 string
   |     +--rw podman
@@ -876,7 +876,7 @@ munet>
         key destination;
         description
           "Mounts to be made inside the namespace. Currently only supported for
-           container based nodes.";
+           container and qemu based nodes.";
 
         leaf destination {
           type string;
@@ -888,13 +888,19 @@ munet>
           type string;
           description "The source of the bind mount.";
         }
-        leaf tmpfs-size {
+        leaf size {
           type string;
           description "The size of the tmpfs.";
         }
         leaf type {
           type string;
-          description "The type of the mount (currently bind or tmpfs).";
+          description
+            "The type of the mount. Includes:
+             `bind`: Mount source into node
+              - Note: Qemu bind mount is facilitated by 9p network file system
+             `tmpfs`: Mount tmpfs into node
+             `usb`: Mount source into node (alternative)
+              - Note: Qemu-only. Do not write to the source while munet is running!";
         }
       }
       leaf name {

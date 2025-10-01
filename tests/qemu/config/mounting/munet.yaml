@@ -1,0 +1,54 @@
+topology:
+  ipv6-enable: false
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+      ip: 192.168.0.254/24
+      nat: true
+  nodes:
+    - name: r1
+      kind: disk-linux
+      connections: ["mgmt0"]
+      volumes:
+        - "%CONFIGDIR%/bind1:/tmp/bind1"
+        - "/tmp/tmpfs1"
+      mounts:
+        - destination: "/tmp/bind2"
+          source: "%CONFIGDIR%/bind2"
+          type: "bind"
+        - destination: "/tmp/tmpfs2"
+          size: "4M"
+          type: "tmpfs"
+        - destination: "/tmp/usb"
+          source: "%CONFIGDIR%/usb"
+          type: "usb"
+
+kinds:
+  - name: disk-linux
+    ssh-identity-file: "%RUNDIR%/../root-key"
+    ssh-user: "root"
+    qemu:
+      disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
+      cloud-init: true
+      console:
+        user: "root"
+        password: "foobar"
+        timeout: 3600
+      memory: "512M"
+      kvm: true
+      ncpu: 1
+
+cli:
+  commands:
+    - name: con
+      exec: "socat /dev/stdin,rawer,escape=0x1d,,echo=0,icanon=0 unix-connect:%RUNDIR%/s/vcon0"
+      format: "con HOST [HOST ...]"
+      help: "open console on given hosts, * for all"
+      new-window: true
+      top-level: true
+    - name: ssh
+      exec: "ssh -i root-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null %IPADDR%"
+      format: "ssh NODE [NODE ...]"
+      top-level: true
+      new-window: true

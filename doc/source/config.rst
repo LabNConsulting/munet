@@ -208,9 +208,22 @@ Tree diagrame for node mounts::
    |     +--rw mounts* [destination]
    |     |  +--rw destination    string
    |     |  +--rw source?        string
-   |     |  +--rw tmpfs-size?    string
+   |     |  +--rw size?          string
    |     |  +--rw type?          string
 
+Two main types of mounts are supported: `bind` and `tempfs` mounts. Use the `bind`
+mount to bind the `source` file/directory to the specified `destination` within
+the munet node. Alternatively, use the `tmpfs` mount to create a temporary file
+system within the munet node at the specified `destination` of size `size`.
+
+.. note::
+
+   The `bind` mount for Qemu (VM) nodes is tightly bound with the 9p network
+   file system. For guests that do not support the 9p file system, an alternative
+   `usb` type is supported that emulates a directory as a USB drive.
+
+   Note that using the `usb` type might require additional configuration within
+   the guest operating system, such as disabling `usbguard` in some RHEL systems.
 
 Kinds
 -----

@@ -331,7 +331,7 @@
                 "source": {
                   "type": "string"
                 },
-                "tmpfs-size": {
+                "size": {
                   "type": "string"
                 },
                 "type": {
@@ -687,7 +687,7 @@
                     "source": {
                       "type": "string"
                     },
-                    "tmpfs-size": {
+                    "size": {
                       "type": "string"
                     },
                     "type": {
