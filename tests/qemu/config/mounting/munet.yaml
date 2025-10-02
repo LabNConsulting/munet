@@ -1,11 +1,9 @@
 topology:
   ipv6-enable: false
   networks-autonumber: true
-  dns-network: "mgmt0"
   networks:
     - name: mgmt0
       ip: 192.168.0.254/24
-      nat: true
   nodes:
     - name: r1
       kind: disk-linux
@@ -35,9 +33,9 @@ kinds:
         user: "root"
         password: "foobar"
         timeout: 3600
-      memory: "512M"
+      memory: "1G"
       kvm: true
-      ncpu: 1
+      ncpu: 2
 
 cli:
   commands:
