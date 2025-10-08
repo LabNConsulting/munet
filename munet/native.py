@@ -3405,11 +3405,12 @@ done"""
             self.coverage_setup()
 
         pcapopt = self.cfgopt.getoption("--pcap")
-        pcapopt = pcapopt if pcapopt else ""
-        if pcapopt == "all":
-            pcapopt = self.switches.keys()
+        pcapopt = set(pcapopt.split(",")) if pcapopt else set()
+        if 'all' in pcapopt:
+            pcapopt.remove('all')
+            pcapopt.update(self.switches.keys())
         if pcapopt:
-            for pcap in pcapopt.split(","):
+            for pcap in pcapopt:
                 if ":" in pcap:
                     host, intf = pcap.split(":")
                     pcap = f"{host}-{intf}"
