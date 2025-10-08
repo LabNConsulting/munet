@@ -8,5 +8,7 @@ build:
     #   - pip install uv
     post_install:
       - pip install --editable .
+      # Installing from dependency groups (e.g. 'dev') is not yet supported.
+      - pip install sphinx-prompt
 sphinx:
   configuration: doc/source/conf.py
