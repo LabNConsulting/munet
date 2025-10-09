@@ -46,6 +46,8 @@ module: labn-munet-config
   |     +--rw new-window?    boolean
   |     +--rw top-level?     boolean
   +--rw kinds* [name]
+  |  +--rw ip*                  string
+  |  +--rw ipv6*                string
   |  +--rw merge*               string
   |  +--rw cap-add*             string
   |  +--rw cap-remove*          string
@@ -134,6 +136,8 @@ module: labn-munet-config
   |  +--rw nodes* [name]
   |     +--rw id?                  uint32
   |     +--rw kind?                -> ../../../kinds/name
+  |     +--rw ip*                  string
+  |     +--rw ipv6*                string
   |     +--rw cap-add*             string
   |     +--rw cap-remove*          string
   |     +--rw cmd?                 string
@@ -540,6 +544,14 @@ munet>
 
     grouping common-node {
       description "Common node properties";
+      leaf-list ip {
+          type string;
+          description "IPv4 prefixes to set as loopback addresses.";
+      }
+      leaf-list ipv6 {
+          type string;
+          description "IPv6 prefixes to set as loopback addresses.";
+      }
       leaf-list cap-add {
         type string;
         description "Capabilities to add to a container.";
@@ -1153,4 +1165,3 @@ munet>
   [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc"
   if ! $DOCKER pyang -P build --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
 #+end_src
-
