@@ -65,10 +65,10 @@ kinds:
       # disk-template: "https://dl.rockylinux.org/pub/rocky/7/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
       # disk-template: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
       cloud-init: true
-      # console:
+      console:
       #   user: "root"
       #   password: "foobar"
-      #   timeout: 3600
+        timeout: 600
       memory: "1G"
       kvm: true
       ncpu: 2

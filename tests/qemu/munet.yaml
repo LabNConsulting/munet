@@ -20,6 +20,8 @@ kinds:
       kernel: "%CONFIGDIR%/bzImage"
       initrd: "%CONFIGDIR%/rootfs.cpio.gz"
       cmdline-extra: "nokaslr"
+      console:
+        timeout: 600
       memory: "1G"
       kvm: true
       ncpu: 2
