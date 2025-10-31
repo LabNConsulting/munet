@@ -103,6 +103,9 @@ async def test_basic_config(unet_perfunc):
     o = await r3.async_cmd_raises("ping -w1 -c1 fe8f:ffff:33::1")
     logging.debug("r3 ping lo (fe8f:ffff:33::1) output: %s", o)
 
+    o = await r3.async_cmd_raises("ip link show | grep 02:aa:aa:aa:aa:aa")
+    logging.debug("r3 check for link mac (02:aa:aa:aa:aa:aa) output: %s", o)
+
 
 @pytest.mark.parametrize("ipv6", [False, True])
 @pytest.mark.parametrize("unet_perfunc", [False, True], indirect=["unet_perfunc"])

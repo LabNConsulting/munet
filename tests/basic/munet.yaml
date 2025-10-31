@@ -55,6 +55,7 @@ topology:
         - to: "r2"
           ip: "192.168.202.1/31"
           ipv6: "fd00::1/127"
+          mac: "02:AA:AA:AA:AA:AA"
           remote-name: "p2p2"
           mtu: 9000
       cmd: |
