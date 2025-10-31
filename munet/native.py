@@ -3298,8 +3298,15 @@ ff02::2\tip6-allrouters
             pass
         elif "physical" not in c1 and not node1.is_vm:
             node1.set_intf_constraints(if1, **c1)
+            mac1 = c1.get("mac", None)
+            if mac1:
+                node1.intf_ip_cmd(if1, f"ip link set dev {if1} address {mac1}")
         if "physical" not in c2 and not node2.is_vm:
             node2.set_intf_constraints(if2, **c2)
+            mac2 = c2.get("mac", None)
+            if mac2:
+                node2.intf_ip_cmd(if2, f"ip link set dev {if2} address {mac2}")
+
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
