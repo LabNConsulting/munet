@@ -3194,8 +3194,9 @@ ff02::2\tip6-allrouters
                     continue
                 to = cconf["to"]
                 if to in self.switches:
+                    # Same switch config applies to all adjacent links.
                     switch = self.switches[to]
-                    swconf = find_matching_net_config(name, cconf, switch.config)
+                    swconf = switch.config.copy()
                     await self.add_native_link(switch, node, swconf, cconf)
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.
@@ -3218,12 +3219,14 @@ ff02::2\tip6-allrouters
         c1 = {} if c1 is None else c1
         c2 = {} if c2 is None else c2
 
-        if node1.name in self.switches:
-            assert node2.name in self.hosts
-        elif node2.name in self.switches:
-            assert node1.name in self.hosts
+        if node2.name in self.switches:
             node1, node2 = node2, node1
             c1, c2 = c2, c1
+
+        if node1.name in self.switches:
+            # network link
+            assert node2.name in self.hosts
+            c1["name"] = node1.get_next_intf_name()
         else:
             # p2p link
             assert node1.name in self.hosts

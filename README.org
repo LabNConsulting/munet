@@ -131,6 +131,15 @@ module: labn-munet-config
   |  |  +--rw ip?         string
   |  |  +--rw ipv6?       string
   |  |  +--rw external?   boolean
+  |  |  +--rw delay?                uint64
+  |  |  +--rw jitter?               uint64
+  |  |  +--rw jitter-correlation?   decimal64
+  |  |  +--rw loss?                 uint64
+  |  |  +--rw loss-correlation?     decimal64
+  |  |  +--rw rate
+  |  |     +--rw rate?    number64
+  |  |     +--rw limit?   number64
+  |  |     +--rw burst?   number64
   |  +--rw nodes* [name]
   |     +--rw id?                  uint32
   |     +--rw kind?                -> ../../../kinds/name
@@ -1103,6 +1112,7 @@ munet>
              This is most useful when adding host interfaces to nodes as the
              connection point.";
         }
+        uses intf-constraints;
       }
 
       list nodes {
@@ -1153,4 +1163,3 @@ munet>
   [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc"
   if ! $DOCKER pyang -P build --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
 #+end_src
-
