@@ -23,8 +23,8 @@ Or if you need the latest changes from master:
 
    $ pip install git+https://github.com/LabNConsulting/munet.git#egg=munet
 
-`sudo -E` configuration
------------------------
+Configuring `sudo -E`
+---------------------
 
 sudo/root is required for most uses of munet and mutest; however, when you
 install munet as a non-root user (typical) either in your default
@@ -47,14 +47,14 @@ Launching the topology:
 
 .. code-block:: console
 
-   $ sudo munet
-   $ sudo munet -c otherconf.yaml
+   $ sudo -E munet
+   $ sudo -E munet -c otherconf.yaml
 
 For a list of option use the ``--help`` arg.
 
 .. code-block:: console
 
-   $ sudo munet --help
+   $ sudo -E munet --help
 
    usage: () [-h] [-c CONFIG] [-C] [-k KINDS_CONFIG] [--gdb GDB] [--gdb-breakpoints GDB_BREAKPOINTS] [--host] [--log-config LOG_CONFIG] [--no-kill] [--no-cli] [--no-wait] [-d RUNDIR] [--validate-only] [--topology-only] [-v] [-V] [--shell SHELL] [--stdout STDOUT] [--stderr STDERR] [--pcap PCAP]
 
