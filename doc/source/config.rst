@@ -77,7 +77,7 @@ Topology
 --------
 
 The topology section defines the networks and nodes that make up the topology
-along withe a few global topology options.
+along with a few global topology options.
 
 .. pyang labn-munet-config.yang -f tree --tree-path=/topology
 
@@ -117,6 +117,8 @@ Tree diagram for node config::
    |  +--rw nodes* [name]
    |     +--rw id?            uint32
    |     +--rw kind?          -> ../../../kinds/name
+   |     +--rw ip*            string
+   |     +--rw ipv6*          string
    |     +--rw cap-add*       string
    |     +--rw cap-remove*    string
    |     +--rw cmd?           string
@@ -180,6 +182,8 @@ Tree diagram for node connections::
    |     +--rw connections* [to]
    |     |  +--rw to                    string
    |     |  +--rw ip?                   string
+   |     |  +--rw ipv6?                 string
+   |     |  +--rw mac?                  string
    |     |  +--rw name?                 string
    |     |  +--rw hostintf?             string
    |     |  +--rw physical?             string
