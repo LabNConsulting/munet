@@ -49,6 +49,9 @@ async def test_autonumber_ping(unet_perfunc):
     o = await r2.async_cmd_raises("ping -w1 -c1 10.254.2.1")
     logging.debug("r2 ping r3 p2p (10.254.2.1) output: %s", o)
 
+    o = await r2.async_cmd_raises("ping -w1 -c1 10.255.0.2")
+    logging.debug("r2 ping lo (10.255.0.2) output: %s", o)
+
     if unet.ipv6_enable:
         addr = "fc00:0:0:1::2"
         o = await r1.async_cmd_nostatus("ip -6 neigh show dev xyz0")
@@ -74,8 +77,31 @@ async def test_autonumber_ping(unet_perfunc):
         o = await r2.async_cmd_raises("ping -w1 -c1 fcff:ffff:2::1")
         logging.debug("r2 ping r3 p2p (fcff:ffff:2::1) output: %s", o)
 
+        o = await r2.async_cmd_raises("ping -w1 -c1 fcfe:ffff:2::1")
+        logging.debug("r2 ping lo (fcfe:ffff:2::1) output: %s", o)
+
         o = await r1.async_cmd_nostatus("ip -6 neigh show")
         logging.info("ip -6 neigh show: %s", o)
+
+
+@pytest.mark.parametrize(
+    "unet_perfunc", ["munet"], indirect=["unet_perfunc"]
+)
+async def test_basic_config(unet_perfunc):
+    unet = unet_perfunc
+    r3 = unet.hosts["r3"]
+
+    o = await r3.async_cmd_raises("ping -w1 -c1 172.16.0.3")
+    logging.debug("r3 ping lo (172.16.0.3) output: %s", o)
+
+    o = await r3.async_cmd_raises("ping -w1 -c1 172.16.0.33")
+    logging.debug("r3 ping lo (172.16.0.33) output: %s", o)
+
+    o = await r3.async_cmd_raises("ping -w1 -c1 fe8f:ffff:3::1")
+    logging.debug("r3 ping lo (fe8f:ffff:3::1) output: %s", o)
+
+    o = await r3.async_cmd_raises("ping -w1 -c1 fe8f:ffff:33::1")
+    logging.debug("r3 ping lo (fe8f:ffff:33::1) output: %s", o)
 
 
 @pytest.mark.parametrize("ipv6", [False, True])

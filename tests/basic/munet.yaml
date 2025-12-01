@@ -46,6 +46,8 @@ topology:
         which ping
         tail -f /dev/null
     - name: r3
+      ip:  ["172.16.0.3/32", "172.16.0.33/32"]
+      ipv6: ["fe8f:ffff:3::1/128", "fe8f:ffff:33::1/128"]
       connections:
         - to: "net1"
         - to: "r2"
