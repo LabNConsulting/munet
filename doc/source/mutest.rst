@@ -80,7 +80,7 @@ Here is a simple example test case:
   match_step("r1", 'vtysh -c "show ip fib 10.0.2.1"', "Routing entry for 10.0.2.0/24")
 
 This use of :py:func:`match_step` left off the an optional parameter to :py:func:`match_step`,
-``explicit_fail`` which defaults to ``False``. Here is the example
+``expect_fail`` which defaults to ``False``. Here is the example
 :py:func:`match_step` which specifies all of it's parameters.
 
 .. code-block:: python
@@ -90,19 +90,19 @@ This use of :py:func:`match_step` left off the an optional parameter to :py:func
 
 One can also pass the parameters using their names. This allows one to specify
 only the non-default values. Below is an example of another step variant,
-:py:func:`wait_step`. In this case the the ``explicit_fail`` parameter is change to
+:py:func:`wait_step`. In this case the the ``expect_fail`` parameter is change to
 True, and the other optional values (``timeout`` and ``interval``) are left to
 their defaults (``10`` and ``.5`` respectively).
 
 .. code-block:: python
 
   wait_step("r1", 'vtysh -c "show ip fib 10.0.2.1"', "Routing entry for 10.0.2.0/24",
-      explicit_fail=True)
+      expect_fail=True)
 
 The above example could be used after making some change in the network that
 should cause the FIB entry to be removed on ``r1``. In detail, mutest will issue
 the command ``vtysh -c "show ip fib 10.0.2.1"`` on the target ``r1`` every 1/2
-second until it no longer sees a match (because ``explicit_fail`` is True) or
+second until it no longer sees a match (because ``expect_fail`` is True) or
 until the timeout is reached in 10 seconds. If the timeout is reached the step
 status is marked **FAIL**. Conversely, if at some point prior to the timeout, the FIB
 entry is removed the match text will no longer be seen in the output, and so the
