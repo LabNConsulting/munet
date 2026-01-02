@@ -1,0 +1,9 @@
+topology:
+  networks-autonumber: true
+  dns-network: "mgmt0"
+  networks:
+    - name: mgmt0
+  nodes:
+    - name: r1
+      connections:
+        - to: mgmt0
