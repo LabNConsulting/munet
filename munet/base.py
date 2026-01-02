@@ -99,6 +99,9 @@ class Timeout:
             raise StopIteration()
         return remaining
 
+    def __bool__(self):
+        return self.remaining() > 0
+
 
 def fsafe_name(name):
     return "".join(x if x.isalnum() else "_" for x in name)
