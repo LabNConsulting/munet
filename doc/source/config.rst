@@ -104,6 +104,17 @@ Tree diagram for network config::
    |  +--rw networks* [name]
    |  |  +--rw name    string
    |  |  +--rw ip?     string
+   |  |  +--rw ip6?     string
+   |  |  +--rw external?             boolean
+   |  |  +--rw delay?                uint64
+   |  |  +--rw jitter?               uint64
+   |  |  +--rw jitter-correlation?   decimal64
+   |  |  +--rw loss?                 uint64
+   |  |  +--rw loss-correlation?     decimal64
+   |  |  +--rw rate
+   |  |     +--rw rate?    number64
+   |  |     +--rw limit?   number64
+   |  |     +--rw burst?   number64
 
 
 Nodes
