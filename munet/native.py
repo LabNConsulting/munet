@@ -277,7 +277,7 @@ class NodeMixin:
                 # We want to avoid overwriting the shebang if it already exists
                 if lines and lines[0].startswith("#!"):
                     shell_cmd = lines.pop(0)[2:].strip()
-                cmd = ''.join(lines).strip()
+                cmd = "".join(lines).strip()
 
         if not cmd:
             return []
@@ -1945,7 +1945,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 # We want to avoid overwriting the shebang if it already exists
                 if lines and lines[0].startswith("#!"):
                     shell_cmd = lines.pop(0)[2:].strip()
-                cmd = ''.join(lines).strip()
+                cmd = "".join(lines).strip()
 
         if not cmd:
             self.logger.debug("%s: no `%s` to run", self, cmd_node)
@@ -2143,16 +2143,14 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             devs = []
             blks = rv.split("\n")
             for blk in blks:
-                name = ' '.join(blk.split())  # Strip excess whitespace
-                name = re.sub(r'[^a-zA-Z0-9_ ]', '', name)  # Strip unexpected chars
-                name = name.split(' ')[0]  # Finally, extract the name (e.g. sdb1)
+                name = " ".join(blk.split())  # Strip excess whitespace
+                name = re.sub(r"[^a-zA-Z0-9_ ]", "", name)  # Strip unexpected chars
+                name = name.split(" ")[0]  # Finally, extract the name (e.g. sdb1)
                 devs += [name]
-            tmp_mnt = '/tmp/munet-mnt'
+            tmp_mnt = "/tmp/munet-mnt"
             for dev in devs:
                 # Investigatory mount
-                self.logger.info(
-                    "Temp. mounting USB dev %s to %s", dev, tmp_mnt
-                )
+                self.logger.info("Temp. mounting USB dev %s to %s", dev, tmp_mnt)
                 con.cmd_raises(f"mkdir -p {tmp_mnt}")
                 con.cmd_raises(f"mount /dev/{dev} {tmp_mnt}")
                 dest = con.cmd_raises(f"cat {tmp_mnt}/.munet")
@@ -3406,8 +3404,8 @@ done"""
 
         pcapopt = self.cfgopt.getoption("--pcap")
         pcapopt = set(pcapopt.split(",")) if pcapopt else set()
-        if 'all' in pcapopt:
-            pcapopt.remove('all')
+        if "all" in pcapopt:
+            pcapopt.remove("all")
             pcapopt.update(self.switches.keys())
         if pcapopt:
             for pcap in pcapopt:
