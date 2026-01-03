@@ -1,13 +1,28 @@
+# Runtime and build files
 **/__pycache__/
 /dist/
 doc/build
-err.out
-/coverage.xml
-/.testtmp/
-*.log
 *.pyc
-*.yang
+/*.yang
+
+# Test fragments
+err.out
+*.log
+
+# Coverage files
+*.coverage*
+coverage.xml
+
+# Unknown
+/.testtmp/
+
+# Image files
+*.qcow2
+*.img
+*.raw
+*.iso
 bzImage
 rootfs.cpio.gz
-.coverage*
+
+# Developer files
 .dir-locals.el
