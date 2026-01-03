@@ -461,7 +461,6 @@ class NodeMixin:
             self.cmd_pid = None
             self.cmd_p = None
         except asyncio.CancelledError:
-            # Should we stop the container if we have one?
             self.logger.debug("%s: node cmd_p.wait() canceled", future)
 
     def pytest_hook_run_cmd(self, stdout, stderr):
@@ -1641,8 +1640,8 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         return await self._async_cleanup_cmd()
 
     def cmd_completed(self, future):
+        log = self.logger.debug if self.deleting else self.logger.warning
         try:
-            log = self.logger.debug if self.deleting else self.logger.warning
             n = future.result()
             if self.deleting:
                 log("contianer `cmd:` result: %s", n)
@@ -1653,11 +1652,12 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
                     n,
                 )
         except asyncio.CancelledError as error:
-            # Should we stop the container if we have one? or since we are canceled
-            # we know we will be deleting soon?
-            self.logger.warning(
-                "node container cmd wait() canceled: %s:%s", future, error
-            )
+            if self.deleting:
+                log("contianer's self.cmd_p.wait() canceled during cleanup")
+            else:
+                # This should only happen if the user cancels the task which is waiting
+                # on self.cmd_p.wait(). Should not normally happen during runtime.
+                log("contianer's self.cmd_p.wait() canceled during runtime: %s", error)
         self.cmd_p = None
 
     async def _async_delete(self):

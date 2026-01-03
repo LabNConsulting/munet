@@ -17,9 +17,18 @@ import select
 import sys
 import time
 
+from typing import Callable
+from typing import TypeVar
+
 from ..base import BaseMunet
 from ..base import Timeout
 from ..cli import async_cli
+
+
+try:
+    from typing import ParamSpec
+except ImportError:
+    from typing_extensions import ParamSpec
 
 
 # =================
@@ -59,9 +68,17 @@ def pause_test(desc=""):
     asyncio.run(async_pause_test(desc))
 
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
 def retry(
-    retry_timeout, initial_wait=0, retry_sleep=2, expected=True, assert_is_except=True
-):
+    retry_timeout: float,
+    initial_wait: float = 0.0,
+    retry_sleep: float = 2.0,
+    expected: bool = True,
+    assert_is_except: bool = True,
+) -> Callable[[Callable[P, R]], Callable[..., R]]:
     """Retry decorated function until it returns None, raises an exception, or timeout.
 
     * `retry_timeout`: Retry for at least this many seconds; after waiting
