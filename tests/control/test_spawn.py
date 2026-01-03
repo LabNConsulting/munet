@@ -9,6 +9,7 @@
 import logging
 import os
 import time
+
 import pexpect
 import pytest
 
@@ -158,7 +159,8 @@ async def test_spawn_err(unet_share, mode, catch_err):
     if catch_err == "timeout":
         expected_error = pexpect.TIMEOUT
         cmd = ["/bin/bash"]
-    elif catch_err == "eof":
+    else:
+        assert catch_err == "eof"
         expected_error = munet.base.CalledProcessError
         # A command that exits instantly results in a broken pipe
         cmd = ["/bin/sleep", "1"]

@@ -7,7 +7,6 @@
 #
 "Testing of basic topology configuration."
 import asyncio
-import os
 import subprocess
 
 import pytest
