@@ -15,8 +15,10 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.mark.parametrize("host", ["h-shcmd", "h-shcmd-file", "h-pycmd", "h-pycmd-file",
-                                  "h-shcmd-file-noshebang"])
+@pytest.mark.parametrize(
+    "host",
+    ["h-shcmd", "h-shcmd-file", "h-pycmd", "h-pycmd-file", "h-shcmd-file-noshebang"],
+)
 async def test_config_cmd(unet_share, host):
     unet = unet_share
     rn = unet.hosts[host]

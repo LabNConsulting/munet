@@ -146,7 +146,7 @@ async def test_spawn(unet_share, host_name, mode, shellcmd):
         p.kill(9)
 
 
-@pytest.mark.parametrize("mode", ['async', 'sync'])
+@pytest.mark.parametrize("mode", ["async", "sync"])
 @pytest.mark.parametrize("catch_err", ["timeout", "eof"])
 async def test_spawn_err(unet_share, mode, catch_err):
     unet = unet_share
@@ -172,7 +172,7 @@ async def test_spawn_err(unet_share, mode, catch_err):
 
     p = None
     try:
-        if mode == 'async':
+        if mode == "async":
             p = await host.async_spawn(
                 cmd,
                 prompt,

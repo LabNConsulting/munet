@@ -1,4 +1,5 @@
 """Test match and wait send/expect-json step functionality."""
+
 from munet.mutest.userapi import log
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import match_step_json
@@ -178,7 +179,7 @@ _, ret = match_step_json(
     "Data within output object present",
 )
 test_step(
-    ret == {'foo': 'foo', 'bar': 'bar'},
+    ret == {"foo": "foo", "bar": "bar"},
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -189,12 +190,12 @@ _, ret = match_step_json(
     expect_fail=True,
 )
 test_step(
-    ret == {'dictionary_item_removed': ["root['bar']"]},
+    ret == {"dictionary_item_removed": ["root['bar']"]},
     "    Correct return value",
 )
 # The return type should be a mix of dicts and lists. Not custom DeepDiff types!
 test_step(
-    type(ret['dictionary_item_removed']) is list,
+    type(ret["dictionary_item_removed"]) is list,
     "    Correct return value type",
 )
 
@@ -209,7 +210,7 @@ _, ret = match_step_json(
     "Objects within output array present",
 )
 test_step(
-    ret == [{'foo': 'foo'}, {'bar': 'bar'}],
+    ret == [{"foo": "foo"}, {"bar": "bar"}],
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -220,7 +221,7 @@ _, ret = match_step_json(
     expect_fail=True,
 )
 test_step(
-    ret == {'iterable_item_removed': {'root[1]': {'bar': 'bar'}}},
+    ret == {"iterable_item_removed": {"root[1]": {"bar": "bar"}}},
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -230,7 +231,7 @@ _, ret = match_step_json(
     "Both objects within output array present",
 )
 test_step(
-    ret == [{'foo': 'foo'}, {'bar': 'bar'}],
+    ret == [{"foo": "foo"}, {"bar": "bar"}],
     "    Correct return value",
 )
 
@@ -239,13 +240,10 @@ json2 = '["foo", "bar"]'
 json3 = '["bar", "foo"]'
 
 _, ret = match_step_json(
-    "r1",
-    f"echo '{json2}'",
-    json1,
-    "Data in one array is a subset of another"
+    "r1", f"echo '{json2}'", json1, "Data in one array is a subset of another"
 )
 test_step(
-    ret == ['foo', 'bar'],
+    ret == ["foo", "bar"],
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -256,17 +254,14 @@ _, ret = match_step_json(
     expect_fail=True,
 )
 test_step(
-    ret == {'iterable_item_removed': {'root[1]': 'bar'}},
+    ret == {"iterable_item_removed": {"root[1]": "bar"}},
     "    Correct return value",
 )
 _, ret = match_step_json(
-    "r1",
-    f"echo '{json2}'",
-    json3,
-    "Data in equivalent arrays match"
+    "r1", f"echo '{json2}'", json3, "Data in equivalent arrays match"
 )
 test_step(
-    ret == ['foo', 'bar'],
+    ret == ["foo", "bar"],
     "    Correct return value",
 )
 
@@ -282,7 +277,7 @@ _, ret = match_step_json(
     "Data within output object present (nested)",
 )
 test_step(
-    ret == {'level1': ['level2', {'level3': ['level4'], 'l3': 'l4'}]},
+    ret == {"level1": ["level2", {"level3": ["level4"], "l3": "l4"}]},
     "    Correct return value",
 )
 _, ret = match_step_json(
@@ -292,14 +287,11 @@ _, ret = match_step_json(
     "Objects within output array present (nested)",
 )
 test_step(
-    ret == {'level1': ['level2', {'level3': ['level4', {'level5': 'l6'}]}]},
+    ret == {"level1": ["level2", {"level3": ["level4", {"level5": "l6"}]}]},
     "    Correct return value",
 )
 _, ret = match_step_json(
-    "r1",
-    f"echo '{json4}'",
-    json1,
-    "Data in one array is a subset of another"
+    "r1", f"echo '{json4}'", json1, "Data in one array is a subset of another"
 )
 test_step(
     ret == {"level1": ["level2", {"level3": ["level4", "l4"]}]},
@@ -347,7 +339,7 @@ match_step_json(
 
 section("Test json errors")
 
-jsonblank = '{}'
+jsonblank = "{}"
 jsongood = '{"foo":"bar"}'
 jsonbad = '{"bad":"trailing-comma",}'
 

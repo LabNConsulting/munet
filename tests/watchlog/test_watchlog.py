@@ -61,7 +61,7 @@ def test_watchlog_wait(unet, stepf):
 
         stepf("Check reset() and wait_for_match() earlier match")
         wl.reset()
-        wl.wait_for_match(r"line-2", timeout=.1)
+        wl.wait_for_match(r"line-2", timeout=0.1)
         stepf("Check reset() and wait_for_match() new match")
         wl.wait_for_match(r"line-5", timeout=2)
     finally:

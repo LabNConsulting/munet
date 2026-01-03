@@ -85,10 +85,10 @@ async def test_config_cmd(unet):
 
     output = r1.conrepl.cmd_raises("ls")
     logging.debug(output)
-    assert 'foo' in output  # from cmd-file
-    assert 'bar' in output  # from initial-cmd-file
+    assert "foo" in output  # from cmd-file
+    assert "bar" in output  # from initial-cmd-file
 
     output = r2.conrepl.cmd_raises("ls")
     logging.debug(output)
-    assert 'foo' in output  # from cmd
-    assert 'bar' in output  # from initial-cmd
+    assert "foo" in output  # from cmd
+    assert "bar" in output  # from initial-cmd

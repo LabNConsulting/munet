@@ -10,7 +10,9 @@
 import pytest
 
 from munet import Commander
+
 commander = Commander("base")
+
 
 @pytest.fixture(name="stdargs")
 def fixture_stdargs(rundir):
