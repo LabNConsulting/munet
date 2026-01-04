@@ -1,6 +1,6 @@
 [project]
 name = "munet"
-version = "0.16.0"
+version = "0.17.0"
 description = "A package to facilitate network simulations"
 readme = {file = "README.org", content-type = "text/plain"}
 requires-python = ">=3.9"
@@ -14,7 +14,6 @@ dependencies = [
   "pexpect>=4.9.0",
   "pyyaml>=6.0.3",
 ]
-#"toml>=0.10.2,<0.11.0",
 
 include = ["logconf.yaml", "logconf-mutest.yaml", "munet-schema.json"]
 [project.scripts]
