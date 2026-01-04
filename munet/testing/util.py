@@ -178,8 +178,7 @@ def readline(f, timeout=None):
         return f.munet_lines.pop(0)
 
     timeout = Timeout(timeout)
-    remaining = timeout.remaining()
-    while remaining > 0:
+    for remaining in timeout:
         ready, _, _ = select.select([fd], [], [], remaining)
         if not ready:
             return None
@@ -202,8 +201,6 @@ def readline(f, timeout=None):
 
         if f.munet_lines:
             return f.munet_lines.pop(0)
-
-        remaining = timeout.remaining()
     return None
 
 
@@ -216,7 +213,7 @@ def waitline(f, regex, timeout=120):
     Return: the match object or None.
     """
     timeo = Timeout(timeout)
-    while not timeo.is_expired():
+    while not timeo:
         line = readline(f, timeo.remaining())
         if line is None:
             break

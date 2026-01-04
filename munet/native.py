@@ -1590,7 +1590,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         # Now let's wait until container shows up
         # ---------------------------------------
         timeout = Timeout(30)
-        while self.cmd_p.returncode is None and not timeout.is_expired():
+        while self.cmd_p.returncode is None and not timeout:
             o = await self.async_cmd_raises_nsonly(
                 f"podman ps -q -f name={self.container_id}"
             )
@@ -2307,7 +2307,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             sockpath = os.path.join(self.sockdir, cname)
             connected = False
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            while self.launch_p.returncode is None and not timeo.is_expired():
+            while self.launch_p.returncode is None and not timeo:
                 try:
                     sock.connect(sockpath)
                     connected = True

@@ -146,7 +146,7 @@ class WatchLog:
                 logging.debug("found '%s' in %s", m.group(0), self.path)
                 return m
             # Check timeo here so timeout=0 doesn't fail for existing data
-            if timeo.is_expired():
+            if timeo:
                 break
             _dbg("%s wait for '%s' remaining: %s", self.path, regex, timeo.remaining())
             time.sleep(0.25)

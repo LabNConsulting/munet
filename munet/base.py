@@ -100,7 +100,7 @@ class Timeout:
         return remaining
 
     def __bool__(self):
-        return self.remaining() > 0
+        return self.is_expired()
 
 
 def fsafe_name(name):
@@ -2287,7 +2287,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
         # -----------------------------------------------
         timeout = Timeout(30)
         if self.pid is not None and self.pid != our_pid:
-            while (not p or not p.poll()) and not timeout.is_expired():
+            while (not p or not p.poll()) and not timeout:
                 # check new namespace values against old (nsdict), unshare
                 # can actually take a bit to complete.
                 for fname in tuple(nslist):
