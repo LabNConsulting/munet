@@ -22,6 +22,7 @@ import socket
 import subprocess
 import time
 
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -3192,8 +3193,18 @@ ff02::2\tip6-allrouters
                     continue
                 to = cconf["to"]
                 if to in self.switches:
+                    # Use tc params present in the root of the switch config as the
+                    # default tc values for interfaces added to the bridge which aren't
+                    # present in `connections`.
                     switch = self.switches[to]
                     swconf = find_matching_net_config(name, cconf, switch.config)
+                    if not swconf:
+                        # "name" most important key to leave out, so it gets generated
+                        nontc = ("connections", "external", "ip", "ipv6", "name")
+                        swconf = {
+                            k: v for k, v in switch.config.items() if k not in nontc
+                        }
+                        swconf = deepcopy(swconf)
                     await self.add_native_link(switch, node, swconf, cconf)
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.

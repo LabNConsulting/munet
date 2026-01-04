@@ -100,10 +100,39 @@ Networks
 
 Tree diagram for network config::
 
-   +--rw topology
-   |  +--rw networks* [name]
-   |  |  +--rw name    string
-   |  |  +--rw ip?     string
+  +--rw topology
+     +--rw networks* [name]
+        +--rw name                  string
+        +--rw ip?                   string
+        +--rw ipv6?                 string
+        +--rw external?             boolean
+        +--rw delay?                uint64
+        +--rw jitter?               uint64
+        +--rw jitter-correlation?   decimal64
+        +--rw loss?                 uint64
+        +--rw loss-correlation?     decimal64
+        +--rw rate
+        |  +--rw rate?    number64
+        |  +--rw limit?   number64
+        |  +--rw burst?   number64
+        +--rw connections* [to]
+           +--rw to                    string
+           +--rw name?                 string
+           +--rw remote-name?          string
+           +--rw delay?                uint64
+           +--rw jitter?               uint64
+           +--rw jitter-correlation?   decimal64
+           +--rw loss?                 uint64
+           +--rw loss-correlation?     decimal64
+           +--rw rate
+              +--rw rate?    number64
+              +--rw limit?   number64
+              +--rw burst?   number64
+
+The ``connections`` configuration is entirely optional, and is present to allow
+overriding default network quality parameters (e.g., ``delay``, ``jitter``,
+etc). If no override is required it is enough for the nodes to specify their
+connection to the network.
 
 
 Nodes
