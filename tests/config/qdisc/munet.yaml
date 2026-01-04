@@ -1,0 +1,39 @@
+version: 1
+topology:
+  networks:
+    - name: net1
+      delay: 16
+      jitter: 30
+      loss: 40
+      rate:
+        rate: 800
+      connections:
+        - to: h2
+          delay: 18
+          jitter: 28
+          loss: 38
+          rate:
+            rate: 810
+        - to: h3
+          delay: 14
+
+  nodes:
+    - name: h1
+      connections:
+        - to: net1
+          delay: 200
+          jitter: 60
+          loss: 70
+          rate:
+            rate: 1600
+    - name: h2
+      connections:
+        - to: net1
+          delay: 210
+          jitter: 60
+          loss: 70
+          rate:
+            rate: 1600
+    - name: h3
+      connections:
+        - to: net1

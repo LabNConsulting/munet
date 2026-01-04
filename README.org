@@ -127,10 +127,32 @@ module: labn-munet-config
   |  +--rw initial-setup-cmd?        string
   |  +--rw initial-setup-host-cmd?   string
   |  +--rw networks* [name]
-  |  |  +--rw name        string
-  |  |  +--rw ip?         string
-  |  |  +--rw ipv6?       string
-  |  |  +--rw external?   boolean
+  |  |  +--rw name                  string
+  |  |  +--rw ip?                   string
+  |  |  +--rw ipv6?                 string
+  |  |  +--rw external?             boolean
+  |  |  +--rw delay?                uint64
+  |  |  +--rw jitter?               uint64
+  |  |  +--rw jitter-correlation?   decimal64
+  |  |  +--rw loss?                 uint64
+  |  |  +--rw loss-correlation?     decimal64
+  |  |  +--rw rate
+  |  |  |  +--rw rate?    number64
+  |  |  |  +--rw limit?   number64
+  |  |  |  +--rw burst?   number64
+  |  |  +--rw connections* [to]
+  |  |     +--rw to                    string
+  |  |     +--rw name?                 string
+  |  |     +--rw remote-name?          string
+  |  |     +--rw delay?                uint64
+  |  |     +--rw jitter?               uint64
+  |  |     +--rw jitter-correlation?   decimal64
+  |  |     +--rw loss?                 uint64
+  |  |     +--rw loss-correlation?     decimal64
+  |  |     +--rw rate
+  |  |        +--rw rate?    number64
+  |  |        +--rw limit?   number64
+  |  |        +--rw burst?   number64
   |  +--rw nodes* [name]
   |     +--rw id?                  uint32
   |     +--rw kind?                -> ../../../kinds/name
@@ -1103,6 +1125,34 @@ munet>
              This is most useful when adding host interfaces to nodes as the
              connection point.";
         }
+
+        /* default network tc parameters */
+        uses intf-constraints;
+
+        list connections {
+          key to;
+          description
+            "Overriding network side configuration for connections to nodes from
+             this network. If the default network tc parameters are not being
+             overriden for a specific node connection then this configuration is
+             not required.";
+
+          leaf to {
+            type string;
+            description "The target of this connection.";
+          }
+          leaf name {
+            type string;
+            description "Name for the connection (interface name).";
+          }
+          leaf remote-name {
+            type string;
+            description
+              "The remote name of the connection. This is used for disambiguation
+               when there are multiple connections to the same remote node.";
+          }
+          uses intf-constraints;
+        }
       }
 
       list nodes {
@@ -1153,4 +1203,3 @@ munet>
   [ -d /yang ] || DOCKER="sudo podman run --net=host -v $(pwd):/work docker.io/labn/org-rfc"
   if ! $DOCKER pyang -P build --lax-quote-checks -Werror --lint $module 2>&1; then echo FAIL; fi
 #+end_src
-
