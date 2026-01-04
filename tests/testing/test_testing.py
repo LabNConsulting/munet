@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # April 22 2022, Christian Hopps <chopps@gmail.com>
-#
 # Copyright (c) 2022, LabN Consulting, L.L.C.
 #
+# type: ignore[attr-defined]
+# type: ignore[reportUnreachable]
 "Test the testing fucntionality that has been imported into conftest.py"
-import pytest
-
 from munet.testing.util import retry
 
 
 def test_import_util():
-    from munet.testing.util import pause_test  # pylint: disable=C0415,W0611
+    # pylint: disable=C0415,W0611
+    from munet.testing.util import pause_test  # noqa: F401
 
 
 def test_addopts(pytestconfig):

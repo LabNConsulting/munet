@@ -5,10 +5,10 @@ This is a first level include within a sub-direction of the main test.
 
 from munet.mutest.userapi import include
 from munet.mutest.userapi import match_step
-from munet.mutest.userapi import section
 from munet.mutest.userapi import step
 from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step
+
 
 # include as new section
 include("checknorm.py", True)

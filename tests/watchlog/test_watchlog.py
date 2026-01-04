@@ -7,11 +7,6 @@
 #
 
 "Testing of basic topology configuration."
-import asyncio
-import os
-import subprocess
-
-import pytest
 
 from munet.watchlog import WatchLog
 
@@ -23,7 +18,7 @@ def test_watchlog_wait(unet, stepf):
 
     # No file yet
     stepf("Check _stat_snapshot with no file")
-    assert not wl._stat_snapshot()
+    assert not wl._stat_snapshot()  # pylint: disable=protected-access
 
     # Create the log file
     r1.cmd_raises(f"echo line-1 > {logpath}")
@@ -32,7 +27,7 @@ def test_watchlog_wait(unet, stepf):
     assert snap == "line-1\n"
 
     # Verify change
-    assert not wl._stat_snapshot()
+    assert not wl._stat_snapshot()  # pylint: disable=protected-access
 
     r1.cmd_raises(f"echo line-2 >> {logpath}")
 
