@@ -69,6 +69,18 @@
               "type": "string"
             }
           },
+          "ip": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ipv6": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "cap-add": {
             "type": "array",
             "items": {
@@ -541,6 +553,18 @@
               },
               "kind": {
                 "type": "string"
+              },
+              "ip": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "ipv6": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               "cap-add": {
                 "type": "array",

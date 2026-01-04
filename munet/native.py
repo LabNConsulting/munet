@@ -60,13 +60,24 @@ class L3ContainerNotRunningError(MunetError):
 
 
 def get_loopback_ips(c, nid):
+    ips = []
     if ip := c.get("ip"):
         if ip == "auto":
-            return [ipaddress.ip_interface("10.255.0.0/32") + nid]
-        if isinstance(ip, str):
-            return [ipaddress.ip_interface(ip)]
-        return [ipaddress.ip_interface(x) for x in ip]
-    return []
+            assert nid < 0xFFFF  # Limited to 10.255.0.0/16 block
+            ips.append(ipaddress.ip_interface("10.255.0.0/32") + nid)
+        elif isinstance(ip, str):
+            ips.append(ipaddress.ip_interface(ip))
+        else:
+            ips.extend([ipaddress.ip_interface(x) for x in ip])
+    if ipv6 := c.get("ipv6"):
+        if ipv6 == "auto":
+            assert nid < 0xFFFF  # Same limit as ipv4 for simplicity
+            ips.append(ipaddress.ip_interface(f"fcfe:ffff:{nid:02x}::1/128"))
+        elif isinstance(ip, str):
+            ips.append(ipaddress.ip_interface(ipv6))
+        else:
+            ips.extend([ipaddress.ip_interface(x) for x in ipv6])
+    return ips
 
 
 def make_ip_network(net, inc):
@@ -95,6 +106,7 @@ def get_ip_network(c, brid, ipv6=False):
             return ifip
         except ValueError:
             return ipaddress.ip_network(ip)
+    assert brid < 0xFDFF  # Limited to 10.0.0.0/16 through 10.253.0.0/16 blocks
     if ipv6:
         return make_ip_interface("fc00::fe/64", brid)
     return make_ip_interface("10.0.0.254/24", brid)
@@ -779,12 +791,16 @@ class L3NodeMixin(NodeMixin):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
-        assert self.id < 0xFF * (0xFF - 0x7F)  # Beyond this, ipv4 address is invalid
+        assert self.id < 0x7FFF  # Limited to 10.254.0.0/16 block
         self.next_p2p_network = ipaddress.ip_network(
             f"10.254.{self.id & 0xFF}.{(self.id & 0x7F00) >> 7}/31"
         )
         self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
 
+        if "ip" not in self.config and self.unet.autonumber:
+            self.config["ip"] = "auto"
+        if "ipv6" not in self.config and self.unet.autonumber and self.unet.ipv6_enable:
+            self.config["ipv6"] = "auto"
         self.loopback_ip = None
         self.loopback_ips = get_loopback_ips(self.config, self.id)
         self.loopback_ip = self.loopback_ips[0] if self.loopback_ips else None
