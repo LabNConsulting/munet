@@ -1611,6 +1611,7 @@ class InterfaceMixin:
         # logging.warning("InterfaceMixin: args: %s kwargs: %s", args, kwargs)
 
         self._intf_addrs = defaultdict(lambda: [None, None])
+        self._peer_intf_addrs = defaultdict(lambda: [None, None])
         self.net_intfs = {}
         self.next_intf_index = 0
         self.basename = "eth"
@@ -1630,9 +1631,16 @@ class InterfaceMixin:
             return None
         return self._intf_addrs[ifname][bool(ipv6)]
 
-    def set_intf_addr(self, ifname, ifaddr):
+    def get_peer_intf_addr(self, ifname, ipv6=False):
+        if ifname not in self._peer_intf_addrs:
+            return None
+        return self._peer_intf_addrs[ifname][bool(ipv6)]
+
+    def set_intf_addr(self, ifname, ifaddr, peer_ifaddr=None):
         ifaddr = ipaddress.ip_interface(ifaddr)
         self._intf_addrs[ifname][ifaddr.version == 6] = ifaddr
+        if peer_ifaddr is not None:
+            self._peer_intf_addrs[ifname][peer_ifaddr.version == 6] = peer_ifaddr
 
     def net_addr(self, netname, ipv6=False):
         if netname not in self.net_intfs:
@@ -2882,6 +2890,33 @@ class BaseMunet(LinuxNamespace):
         self.hosts[name] = cls(name, unet=self, **kwargs)
 
         return self.hosts[name]
+
+    def add_dummy(self, node1, if1, mtu=None, **intf_constraints):
+        """Add a dummy for an interface with no link."""
+        try:
+            name1 = node1.name
+        except AttributeError:
+            if node1 in self.switches:
+                node1 = self.switches[node1]
+            else:
+                node1 = self.hosts[node1]
+            name1 = node1.name
+
+        lname = "{}:{}".format(name1, if1)
+        self.logger.debug("%s: add_dummy %s", self, lname)
+        lhost = self.hosts[name1]
+
+        nsif1 = lhost.get_ns_ifname(if1)
+        lhost.cmd_raises_nsonly(f"ip link add name {nsif1} type dummy")
+
+        if mtu:
+            lhost.cmd_raises_nsonly(f"ip link set {nsif1} mtu {mtu}")
+        lhost.cmd_raises_nsonly(f"ip link set {nsif1} up")
+        lhost.register_interface(if1)
+
+        # Setup interface constraints if provided
+        if intf_constraints:
+            node1.set_intf_constraints(if1, **intf_constraints)
 
     def add_link(self, node1, node2, if1, if2, mtu=None, **intf_constraints):
         """Add a link between switch and node or 2 nodes.
