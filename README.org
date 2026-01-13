@@ -86,11 +86,11 @@ module: labn-munet-config
   |  |     +--rw expects*            string
   |  |     +--rw sends*              string
   |  |     +--rw timeout?            uint32
-  |  +--rw connections* [to]
-  |  |  +--rw to                    string
+  |  +--rw connections* [name]
+  |  |  +--rw to?                   string
   |  |  +--rw ip?                   string
   |  |  +--rw ipv6?                 string
-  |  |  +--rw name?                 string
+  |  |  +--rw name                  string
   |  |  +--rw hostintf?             string
   |  |  +--rw physical?             string
   |  |  +--rw remote-name?          string
@@ -142,9 +142,9 @@ module: labn-munet-config
   |  |  |  +--rw rate?    number64
   |  |  |  +--rw limit?   number64
   |  |  |  +--rw burst?   number64
-  |  |  +--rw connections* [to]
+  |  |  +--rw connections* [name]
   |  |     +--rw to                    string
-  |  |     +--rw name?                 string
+  |  |     +--rw name                  string
   |  |     +--rw remote-name?          string
   |  |     +--rw delay?                uint64
   |  |     +--rw jitter?               uint64
@@ -198,11 +198,11 @@ module: labn-munet-config
   |     |     +--rw expects*            string
   |     |     +--rw sends*              string
   |     |     +--rw timeout?            uint32
-  |     +--rw connections* [to]
-  |     |  +--rw to                    string
+  |     +--rw connections* [name]
+  |     |  +--rw to?                   string
   |     |  +--rw ip?                   string
   |     |  +--rw ipv6?                 string
-  |     |  +--rw name?                 string
+  |     |  +--rw name                  string
   |     |  +--rw hostintf?             string
   |     |  +--rw physical?             string
   |     |  +--rw remote-name?          string
@@ -819,7 +819,7 @@ munet>
         must "not(../hostnet) and not(../server)" {
           error-message "SSHRemote and hostnet nodes have no munet connections.";
         }
-        key to;
+        key name;
         description "Connections to other networks or nodes from this node";
 
         leaf to {
@@ -1142,7 +1142,7 @@ munet>
         uses intf-constraints;
 
         list connections {
-          key to;
+          key name;
           description
             "Overriding network side configuration for connections to nodes from
              this network. If the default network tc parameters are not being
@@ -1151,6 +1151,7 @@ munet>
 
           leaf to {
             type string;
+            mandatory true;
             description "The target of this connection.";
           }
           leaf name {

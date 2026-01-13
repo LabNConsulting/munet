@@ -115,9 +115,9 @@ Tree diagram for network config::
         |  +--rw rate?    number64
         |  +--rw limit?   number64
         |  +--rw burst?   number64
-        +--rw connections* [to]
+        +--rw connections* [name]
            +--rw to                    string
-           +--rw name?                 string
+           +--rw name                  string
            +--rw remote-name?          string
            +--rw delay?                uint64
            +--rw jitter?               uint64
@@ -208,10 +208,11 @@ Tree diagram for node connections::
 
    +--rw topology
    |  +--rw nodes* [name]
-   |     +--rw connections* [to]
-   |     |  +--rw to                    string
+   |     +--rw connections* [name]
+   |     |  +--rw to?                   string
    |     |  +--rw ip?                   string
-   |     |  +--rw name?                 string
+   |     |  +--rw ipv6?                 string
+   |     |  +--rw name                  string
    |     |  +--rw hostintf?             string
    |     |  +--rw physical?             string
    |     |  +--rw remote-name?          string
