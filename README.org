@@ -126,6 +126,7 @@ module: labn-munet-config
   |  +--rw dns-network?              -> ../networks/name
   |  +--rw ipv6-enable?              boolean
   |  +--rw networks-autonumber?      boolean
+  |  +--rw loopbacks-autonumber?     boolean
   |  +--rw initial-setup-cmd?        string
   |  +--rw initial-setup-host-cmd?   string
   |  +--rw networks* [name]
@@ -1084,9 +1085,18 @@ munet>
 
       leaf networks-autonumber {
         type boolean;
+        default false;
         description
           "Controls if networks and node connections are given IP addresses if
            not explicitly configured.";
+      }
+
+      leaf loopbacks-autonumber {
+        type boolean;
+        default false;
+        description
+          "Controls if loopbacks are given IP addresses if not explicitly
+           configured.";
       }
 
       leaf initial-setup-cmd {

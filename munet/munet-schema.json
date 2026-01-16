@@ -400,6 +400,9 @@
         "networks-autonumber": {
           "type": "boolean"
         },
+        "loopbacks-autonumber": {
+          "type": "boolean"
+        },
         "initial-setup-cmd": {
           "type": "string"
         },

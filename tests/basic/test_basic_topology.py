@@ -77,16 +77,14 @@ async def test_autonumber_ping(unet_perfunc):
         o = await r2.async_cmd_raises("ping -w1 -c1 fcff:ffff:2::1")
         logging.debug("r2 ping r3 p2p (fcff:ffff:2::1) output: %s", o)
 
-        o = await r2.async_cmd_raises("ping -w1 -c1 fcfe:ffff:2::1")
-        logging.debug("r2 ping lo (fcfe:ffff:2::1) output: %s", o)
+        o = await r2.async_cmd_raises("ping -w1 -c1 fcfe::2")
+        logging.debug("r2 ping lo (fcfe::2) output: %s", o)
 
         o = await r1.async_cmd_nostatus("ip -6 neigh show")
         logging.info("ip -6 neigh show: %s", o)
 
 
-@pytest.mark.parametrize(
-    "unet_perfunc", ["munet"], indirect=["unet_perfunc"]
-)
+@pytest.mark.parametrize("unet_perfunc", ["munet"], indirect=["unet_perfunc"])
 async def test_basic_config(unet_perfunc):
     unet = unet_perfunc
     r3 = unet.hosts["r3"]
