@@ -1,6 +1,7 @@
 version: 1
 topology:
   networks-autonumber: true
+  loopbacks-autonumber: true
   ipv6-enable: true
   networks:
     - name: net0

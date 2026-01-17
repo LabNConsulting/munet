@@ -55,6 +55,10 @@ from .config import merge_kind_config
 from .watchlog import WatchLog
 
 
+AUTO_LOOPBACK_IPV4_BASE = ipaddress.ip_interface("10.255.0.0/32")
+AUTO_LOOPBACK_IPV6_BASE = ipaddress.ip_interface("fcfe::0/128")
+
+
 class L3ContainerNotRunningError(MunetError):
     """Exception if no running container exists."""
 
@@ -63,16 +67,14 @@ def get_loopback_ips(c, nid):
     ips = []
     if ip := c.get("ip"):
         if ip == "auto":
-            assert nid < 0xFFFF  # Limited to 10.255.0.0/16 block
-            ips.append(ipaddress.ip_interface("10.255.0.0/32") + nid)
+            ips.append(AUTO_LOOPBACK_IPV4_BASE + nid)
         elif isinstance(ip, str):
             ips.append(ipaddress.ip_interface(ip))
         else:
             ips.extend([ipaddress.ip_interface(x) for x in ip])
     if ipv6 := c.get("ipv6"):
         if ipv6 == "auto":
-            assert nid < 0xFFFF  # Same limit as ipv4 for simplicity
-            ips.append(ipaddress.ip_interface(f"fcfe:ffff:{nid:02x}::1/128"))
+            ips.append(AUTO_LOOPBACK_IPV6_BASE + nid)
         elif isinstance(ip, str):
             ips.append(ipaddress.ip_interface(ipv6))
         else:
@@ -797,9 +799,13 @@ class L3NodeMixin(NodeMixin):
         )
         self.next_p2p_network6 = ipaddress.ip_network(f"fcff:ffff:{self.id:02x}::/127")
 
-        if "ip" not in self.config and self.unet.autonumber:
+        if "ip" not in self.config and self.unet.autonumber_loopbacks:
             self.config["ip"] = "auto"
-        if "ipv6" not in self.config and self.unet.autonumber and self.unet.ipv6_enable:
+        if (
+            "ipv6" not in self.config
+            and self.unet.autonumber_loopbacks
+            and self.unet.ipv6_enable
+        ):
             self.config["ipv6"] = "auto"
         self.loopback_ip = None
         self.loopback_ips = get_loopback_ips(self.config, self.id)
@@ -3303,6 +3309,14 @@ ff02::2\tip6-allrouters
     @autonumber.setter
     def autonumber(self, value):
         self.topoconf["networks-autonumber"] = bool(value)
+
+    @property
+    def autonumber_loopbacks(self):
+        return self.topoconf.get("loopbacks-autonumber", False)
+
+    @autonumber_loopbacks.setter
+    def autonumber_loopbacks(self, value):
+        self.topoconf["loopbacks-autonumber"] = bool(value)
 
     async def add_dummy_link(self, node1, c1=None):
         c1 = {} if c1 is None else c1

@@ -84,9 +84,12 @@ along with a few global topology options.
 Tree diagram for topology config::
 
    +--rw topology
-   |  +--rw dns-network?           -> ../networks/name
-   |  +--rw ipv6-enable?           boolean
-   |  +--rw networks-autonumber?   boolean
+   |  +--rw dns-network?              -> ../networks/name
+   |  +--rw ipv6-enable?              boolean
+   |  +--rw networks-autonumber?      boolean
+   |  +--rw loopbacks-autonumber?     boolean
+   |  +--rw initial-setup-cmd?        string
+   |  +--rw initial-setup-host-cmd?   string
    |  +--rw networks* [name]
    |     ... described in subsection
    |  +--rw nodes* [name]
