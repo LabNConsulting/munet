@@ -1,6 +1,6 @@
 [project]
 name = "munet"
-version = "0.17.1"
+version = "0.17.2"
 description = "A package to facilitate network simulations"
 readme = {file = "README.org", content-type = "text/plain"}
 requires-python = ">=3.9"

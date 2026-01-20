@@ -139,11 +139,24 @@ def shorten(s):
     return s
 
 
-def comm_result(rc, o, e):
-    s = f"\n\treturncode {rc}" if rc else ""
-    o = "\n\tstdout: " + shorten(o) if o and o.strip() else ""
-    e = "\n\tstderr: " + shorten(e) if e and e.strip() else ""
-    return s + o + e
+def block_quote(s):
+    ss = s.strip()
+    if "\n" not in ss:
+        return " " + s.rstrip()
+    s = "\n\t" + s.replace("\n", "\n\t")
+    if s.endswith("\n\t"):
+        s = s[:-2]
+    else:
+        s += "<EOF-NO-NEWLINE>"
+    return s
+
+
+def comm_result(o, e):
+    o = "  stdout: " + block_quote(o) if o and o.strip() else ""
+    e = "  stderr: " + block_quote(e) if e and e.strip() else ""
+    if o and e:
+        return o + "\n" + e
+    return o + e
 
 
 def proc_str(p):
@@ -1078,8 +1091,7 @@ class Commander:  # pylint: disable=R0904
         rc = p.returncode
         self.last = (rc, ac, c, o, e)
         if not rc:
-            resstr = comm_result(rc, o, e)
-            if resstr:
+            if resstr := comm_result(o, e):
                 self.logger.debug("%s", resstr)
         else:
             if warn:
