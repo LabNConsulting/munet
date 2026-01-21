@@ -12,6 +12,7 @@ import functools
 import logging
 import multiprocessing
 import os
+from pathlib import Path
 import pty
 import re
 import readline
@@ -294,6 +295,7 @@ Basic Commands:
   cli   :: open a secondary CLI window
   help  :: this help
   hosts :: list hosts
+  test  :: run mutests
   quit  :: quit the cli
 
   HOST can be a host or one of the following:
@@ -456,7 +458,7 @@ async def run_command(
             outf.write(f"------- End: {host} ------\n")
 
 
-cli_builtins = ["cli", "help", "hosts", "quit"]
+cli_builtins = ["cli", "help", "hosts", "test", "quit"]
 
 
 class Completer:
@@ -470,11 +472,34 @@ class Completer:
         tokens = line.split()
         # print(f"\nXXX: tokens: {tokens} text: '{text}' state: {state}'\n")
 
-        first_token = not tokens or (text and len(tokens) == 1)
-
         # If we have already have a builtin command we are done
-        if tokens and tokens[0] in cli_builtins:
-            return [None]
+        if tokens:
+            if tokens[0] == "test":
+                return self.complete_test(tokens, text, state)
+            if tokens[0] in cli_builtins:
+                return [None]
+        return self.complete_cmd(tokens, text, state)
+
+    def complete_test(self, tokens, text, state):
+        file_select = "mutest_*.py"
+        config_dir = self.unet.config_dirname
+        tests_glob = Path(config_dir).rglob(file_select)
+        tests = {str(x.relative_to(Path(config_dir))) for x in tests_glob}
+
+        completes = {x + " " for x in tests if x.startswith(text)}
+
+        # remove any completions already present
+        if text:
+            done_set = set(tokens[:-1])
+        else:
+            done_set = set(tokens)
+        completes -= done_set
+        completes = sorted(completes) + [None]
+
+        return completes[state]
+
+    def complete_cmd(self, tokens, text, state):
+        first_token = not tokens or (text and len(tokens) == 1)
 
         cli_run_cmds = set(self.unet.cli_run_cmds.keys())
         top_run_cmds = {x for x in cli_run_cmds if self.unet.cli_run_cmds[x][3]}
@@ -543,6 +568,41 @@ async def doline(
             "Secondary CLI",
             background,
         )
+        return True
+    if cmd == "test":
+        from .mutest.__main__ import execute_test  # pylint: disable=import-outside-toplevel
+
+        tnum = 1
+        exec_path = unet.rundir.joinpath("munet-test-exec.log")
+        exec_path.parent.mkdir(parents=True, exist_ok=True)
+        exec_handler = logging.FileHandler(exec_path, "w")
+        exec_formatter = logging.Formatter(
+            "%(asctime)s %(levelname)5s: %(name)s: %(message)s"
+        )
+        exec_handler.setFormatter(exec_formatter)
+
+        for file_select in nline.split():
+            tests_glob = Path(unet.config_dirname).glob(file_select)
+            tests = {str(x) for x in tests_glob}
+
+            for test in tests:
+                # Get test case loggers
+                cli_logger = logging.getLogger(f"cli.mutest.output.{test}")
+                cli_reslog = logging.getLogger(f"cli.mutest.results.{test}")
+                cli_logger.addHandler(exec_handler)
+                cli_reslog.addHandler(exec_handler)
+
+                try:
+                    await execute_test(
+                        unet,
+                        Path(test),
+                        {},  # Use defaults
+                        tnum,
+                        cli_logger,
+                        cli_reslog,
+                    )
+                finally:
+                    tnum += 1
         return True
 
     #
