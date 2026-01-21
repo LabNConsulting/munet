@@ -90,6 +90,7 @@ module: labn-munet-config
   |  |  +--rw to                    string
   |  |  +--rw ip?                   string
   |  |  +--rw ipv6?                 string
+  |  |  +--rw mac?                  string
   |  |  +--rw name?                 string
   |  |  +--rw hostintf?             string
   |  |  +--rw physical?             string
@@ -203,6 +204,7 @@ module: labn-munet-config
   |     |  +--rw to                    string
   |     |  +--rw ip?                   string
   |     |  +--rw ipv6?                 string
+  |     |  +--rw mac?                  string
   |     |  +--rw name?                 string
   |     |  +--rw hostintf?             string
   |     |  +--rw physical?             string
@@ -834,6 +836,10 @@ munet>
         leaf ipv6 {
           type string;
           description "IPv6 address and mask for the connection (interface).";
+        }
+        leaf mac {
+          type string;
+          description "Mac address for the connection (interface).";
         }
         leaf name {
           type string;

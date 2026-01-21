@@ -214,6 +214,8 @@ Tree diagram for node connections::
    |     +--rw connections* [to]
    |     |  +--rw to                    string
    |     |  +--rw ip?                   string
+   |     |  +--rw ipv6?                 string
+   |     |  +--rw mac?                  string
    |     |  +--rw name?                 string
    |     |  +--rw hostintf?             string
    |     |  +--rw physical?             string
