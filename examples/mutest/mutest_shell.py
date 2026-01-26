@@ -5,11 +5,11 @@
 #
 # Copyright (c) 2024, LabN Consulting, L.L.C.
 """Example mutest."""
+
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import section
 from munet.mutest.userapi import step
 from munet.mutest.userapi import wait_step
-
 
 section("Tests to show use of steps.")
 

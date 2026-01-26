@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """A module that implements the standalone parser."""
+
 import asyncio
 import importlib.resources
 import json
@@ -20,7 +21,6 @@ from functools import cache
 from importlib.resources import as_file
 from importlib.resources import files
 from pathlib import Path
-
 
 try:
     import jsonschema  # pylint: disable=C0415
@@ -55,7 +55,6 @@ project_root_contains = [
 
 
 def is_project_root(path: Path) -> bool:
-
     for contains in project_root_contains:
         if path.joinpath(contains).exists():
             return True
@@ -80,7 +79,6 @@ def find_project_root(config_path: Path, project_root=None):
 
 
 def get_config(pathname=None, basename="munet", search=None, logf=logging.debug):
-
     cwd = os.getcwd()
 
     if not search:
@@ -300,7 +298,6 @@ async def async_build_topology(
     search_root=None,
     top_level_pidns=True,
 ):
-
     if not rundir:
         rundir = tempfile.mkdtemp(prefix="unet")
     subprocess.run(f"mkdir -p {rundir} && chmod 755 {rundir}", check=True, shell=True)

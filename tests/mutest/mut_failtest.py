@@ -9,7 +9,7 @@
 
 This test is for testing various CLI options and console output of mutest.
 """
-from munet.mutest.userapi import test_step
 
+from munet.mutest.userapi import test_step
 
 test_step(False, "A failing test case")

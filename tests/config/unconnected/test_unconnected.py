@@ -6,6 +6,7 @@
 # Copyright 2023, LabN Consulting, L.L.C.
 #
 "Testing of unconnected interface."
+
 import logging
 
 import pytest

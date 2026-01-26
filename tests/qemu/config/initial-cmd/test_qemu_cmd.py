@@ -6,13 +6,13 @@
 # Copyright 2025, LabN Consulting, L.L.C.
 #
 "Tests of initial-cmd-file and cmd-file config for L3QemuNode"
+
 import logging
 import os
 
 import pytest
 
 from munet.base import commander
-
 
 # All tests are coroutines
 pytestmark = [

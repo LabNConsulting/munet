@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """A command that allows external command execution inside nodes."""
+
 import argparse
 import json
 import os

@@ -7,10 +7,10 @@
 #
 
 "Testing configuration file format variations."
+
 import pytest
 
 from munet import Commander
-
 
 commander = Commander("base")
 

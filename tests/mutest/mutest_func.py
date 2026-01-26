@@ -10,11 +10,11 @@
 This test is for testing various command functionality to make sure that
 complex commands to targets work.
 """
+
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import script_dir
 from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step
-
 
 for search_string in [
     r"(.*Full){2,}",

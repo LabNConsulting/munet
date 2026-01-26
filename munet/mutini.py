@@ -8,7 +8,6 @@
 #
 """A tiny init for namespaces in python inspired by the C program tini."""
 
-
 # pylint: disable=global-statement
 import argparse
 import errno
@@ -22,7 +21,6 @@ import subprocess
 import sys
 
 from signal import Signals as S
-
 
 try:
     from munet import linux

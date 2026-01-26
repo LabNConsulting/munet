@@ -6,6 +6,7 @@
 # Copyright (c) 2023, LabN Consulting, L.L.C.
 #
 """A module supporting an object for watching a logfile."""
+
 import asyncio
 import logging
 import re

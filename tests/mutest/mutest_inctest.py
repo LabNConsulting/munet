@@ -6,11 +6,11 @@
 # Copyright (c) 2022, LabN Consulting, L.L.C.
 #
 """Test section and include functionality."""
+
 from munet.mutest.userapi import include
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import section
 from munet.mutest.userapi import test_step
-
 
 section("A section testing echo commands")
 match_step("host1", "echo Hello", "Hello", "Test echo Hello")

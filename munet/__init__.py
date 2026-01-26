@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """A module to import various objects to root namespace."""
+
 from .base import BaseMunet
 from .base import Bridge
 from .base import Commander
@@ -19,7 +20,6 @@ from .native import L3Bridge
 from .native import L3NamespaceNode
 from .native import Munet
 from .native import to_thread
-
 
 __all__ = [
     "BaseMunet",

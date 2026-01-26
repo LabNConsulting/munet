@@ -9,7 +9,6 @@ from munet.mutest.userapi import step
 from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step
 
-
 # include as new section
 include("checknorm.py", True)
 

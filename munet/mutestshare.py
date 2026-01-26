@@ -6,6 +6,7 @@
 # Copyright (c) 2023, LabN Consulting, L.L.C.
 #
 """A tiny init for namespaces in python inspired by the C program tini."""
+
 import argparse
 import errno
 import logging
@@ -21,7 +22,6 @@ from signal import Signals as S
 
 from . import linux
 from .base import commander
-
 
 child_pid = -1
 very_verbose = False

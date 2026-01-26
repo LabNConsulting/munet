@@ -6,9 +6,9 @@
 # Copyright 2022, LabN Consulting, L.L.C.
 #
 "Testing of cleanup functionality."
+
 import logging
 import os
-
 
 # import pytest
 # All tests are coroutines

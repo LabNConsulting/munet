@@ -11,6 +11,7 @@ To use in your project, in your conftest.py add:
 
   from munet.testing.hooks import *
 """
+
 import logging
 import os
 import sys
@@ -22,7 +23,6 @@ from ..args import add_testing_args
 from ..base import BaseMunet  # pylint: disable=import-error
 from ..cli import cli  # pylint: disable=import-error
 from .util import pause_test
-
 
 # ===================
 # Hooks (non-fixture)

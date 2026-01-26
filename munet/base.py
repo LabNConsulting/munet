@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """A module that implements core functionality for library or standalone use."""
+
 import asyncio
 import datetime
 import errno
@@ -28,7 +29,6 @@ from typing import Union
 
 from . import config as munet_config
 from . import linux
-
 
 try:
     import pexpect

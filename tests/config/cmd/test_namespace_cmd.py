@@ -6,10 +6,10 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing of cmd and cmd-file config for L3NamespaceNode"
+
 import logging
 
 import pytest
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

@@ -10,8 +10,8 @@
 This test should always fail so in a automation setup one must
 run mutest nested in a mutest test and verify it fails.
 """
-from munet.mutest.userapi import match_step_json
 
+from munet.mutest.userapi import match_step_json
 
 jsonblank = "{}"
 jsonbad = '{"bad":"trailing-comma",}'

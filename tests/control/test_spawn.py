@@ -6,6 +6,7 @@
 # Copyright 2022, LabN Consulting, L.L.C.
 #
 "Testing use of pexect/REPL in munet."
+
 import logging
 import os
 import time
@@ -14,7 +15,6 @@ import pexpect
 import pytest
 
 import munet
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

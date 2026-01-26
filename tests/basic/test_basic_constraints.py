@@ -6,13 +6,13 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing of basic inteface constraints."
+
 import logging
 import re
 
 import pytest
 
 from munet import Munet
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

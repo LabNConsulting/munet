@@ -6,11 +6,11 @@
 # Copyright 2022, LabN Consulting, L.L.C.
 #
 "Testing of basic topology configuration."
+
 import asyncio
 import subprocess
 
 import pytest
-
 
 # Run tests with unshare_inline and not.
 pytestmark = pytest.mark.parametrize("unet", [True, False], indirect=["unet"])

@@ -7,6 +7,7 @@
 # type: ignore[attr-defined]
 # type: ignore[reportUnreachable]
 "Test the testing fucntionality that has been imported into conftest.py"
+
 from munet.testing.util import retry
 
 

@@ -9,10 +9,10 @@
 
 This test is for testing various CLI options and console output of mutest.
 """
+
 from munet.mutest.userapi import match_step
 from munet.mutest.userapi import script_dir
 from munet.mutest.userapi import section
-
 
 section("Test running mutest executable")
 

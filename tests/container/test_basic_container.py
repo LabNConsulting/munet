@@ -6,10 +6,10 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing use of containers in munet."
+
 import logging
 
 import pytest
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

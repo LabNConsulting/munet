@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """The main function for standalone operation."""
+
 import argparse
 import asyncio
 import logging
@@ -20,7 +21,6 @@ from .args import add_launch_args
 from .cleanup import cleanup_previous
 from .cleanup import is_running_in_rundir
 from .compat import PytestConfig
-
 
 logger = None
 

@@ -6,11 +6,11 @@
 # Copyright 2025, LabN Consulting, L.L.C.
 #
 "Testing that qdiscs are properly set on network/node interfaces"
+
 import logging
 import re
 
 import pytest
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

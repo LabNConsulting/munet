@@ -8,7 +8,6 @@
 
 
 def add_launch_args(add_func):
-
     add_func("--gdb", metavar="NODE-LIST", help="comma-sep list of hosts to run gdb on")
     add_func(
         "--gdb-breakpoints",

@@ -11,7 +11,6 @@ import logging
 
 from pathlib import Path
 
-
 do_color = True
 
 

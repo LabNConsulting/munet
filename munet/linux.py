@@ -13,7 +13,6 @@ import errno
 import functools
 import os
 
-
 libc = None
 
 

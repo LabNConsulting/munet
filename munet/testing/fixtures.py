@@ -11,6 +11,7 @@ To use in your project, in your conftest.py add:
 
   from munet.testing.fixtures import *
 """
+
 import contextlib
 import logging
 import os

@@ -9,7 +9,6 @@ from munet.mutest.userapi import step_json
 from munet.mutest.userapi import test_step
 from munet.mutest.userapi import wait_step_json
 
-
 js = step_json("r1", """printf '{ "name": "chopps" }'""")
 log("SIMPLE JSON: %s", js)
 
@@ -195,7 +194,8 @@ test_step(
 )
 # The return type should be a mix of dicts and lists. Not custom DeepDiff types!
 test_step(
-    type(ret["dictionary_item_removed"]) is list,           # pylint: disable=unidiomatic-typecheck
+    type(ret["dictionary_item_removed"])
+    is list,  # pylint: disable=unidiomatic-typecheck
     "    Correct return value type",
 )
 
@@ -325,10 +325,10 @@ match_step_json(
 # This case only passes when json_cmp (DeepDiff) is given
 # the arg `cutoff_distance_for_pairs` at 0.4 or higher
 # the default value is 0.3.
-full = '''[
+full = """[
   {"1one": 1, "1two": 2, "1three": 3, "1four": 4, "1five": 5, "1six": 6},
   {"2one": 1, "2two": 2, "2three": 3, "2four": 4, "2five": 5, "2six": 6}
-]'''
+]"""
 subset = '[{"2three": 3}]'
 
 match_step_json(

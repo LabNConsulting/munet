@@ -6,13 +6,13 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing configuration file format variations."
+
 import logging
 
 import pytest
 
 from munet import Commander
 from munet import cmd_error
-
 
 commander = Commander("base")
 

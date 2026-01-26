@@ -32,7 +32,6 @@ from munet.native import Munet
 from munet.parser import async_build_topology
 from munet.parser import get_config
 
-
 # We want all but critical to fit in 5 characters for alignment
 logging.addLevelName(logging.WARNING, "WARN")
 root_logger = logging.getLogger("")
@@ -317,7 +316,6 @@ async def run_tests(args):
 
                 try:
                     async for unet in get_unet(config, common, rundir, args):
-
                         if not printed_header:
                             print_header(reslog, unet)
                             printed_header = True

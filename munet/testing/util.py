@@ -6,6 +6,7 @@
 # Copyright (c) 2022, LabN Consulting, L.L.C
 #
 """Utility functions useful when using munet testing functionailty in pytest."""
+
 import asyncio
 import datetime
 import fcntl
@@ -23,7 +24,6 @@ from typing import TypeVar
 from ..base import BaseMunet
 from ..base import Timeout
 from ..cli import async_cli
-
 
 try:
     from typing import ParamSpec

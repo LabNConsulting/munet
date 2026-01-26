@@ -6,12 +6,12 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing of basic topology configuration."
+
 import logging
 
 import pytest
 
 from munet.base import cmd_error
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

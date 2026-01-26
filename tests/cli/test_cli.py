@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 "Testing CLI configuration and use."
+
 import io
 import logging
 import re
@@ -15,7 +16,6 @@ import pytest
 
 from munet import cli
 from munet import cmd_error
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

@@ -7,6 +7,7 @@
 #
 # pylint: disable=protected-access
 """A module that defines objects for standalone use."""
+
 import asyncio
 import base64
 import errno
@@ -24,7 +25,6 @@ import time
 
 from copy import deepcopy
 from pathlib import Path
-
 
 try:
     # We only want to require yaml for the gen cloud image feature
@@ -53,7 +53,6 @@ from .config import find_matching_net_config
 from .config import find_with_kv
 from .config import merge_kind_config
 from .watchlog import WatchLog
-
 
 AUTO_LOOPBACK_IPV4_BASE = ipaddress.ip_interface("10.255.0.0/32")
 AUTO_LOOPBACK_IPV6_BASE = ipaddress.ip_interface("fcfe::0/128")
@@ -833,15 +832,13 @@ class L3NodeMixin(NodeMixin):
         # Create a hosts file to map our name
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         with open(hosts_file, "w", encoding="ascii") as hf:
-            hf.write(
-                f"""127.0.0.1\tlocalhost {self.name}
+            hf.write(f"""127.0.0.1\tlocalhost {self.name}
 ::1\tip6-localhost ip6-loopback
 fe00::0\tip6-localnet
 ff00::0\tip6-mcastprefix
 ff02::1\tip6-allnodes
 ff02::2\tip6-allrouters
-"""
-            )
+""")
         if hasattr(self, "bind_mount"):
             self.bind_mount(hosts_file, "/etc/hosts")
 
@@ -3046,15 +3043,13 @@ class Munet(BaseMunet):
 
         hosts_file = os.path.join(self.rundir, "hosts.txt")
         with open(hosts_file, "w", encoding="ascii") as hf:
-            hf.write(
-                f"""127.0.0.1\tlocalhost {self.name}
+            hf.write(f"""127.0.0.1\tlocalhost {self.name}
 ::1\tip6-localhost ip6-loopback
 fe00::0\tip6-localnet
 ff00::0\tip6-mcastprefix
 ff02::1\tip6-allnodes
 ff02::2\tip6-allrouters
-"""
-            )
+""")
         self.bind_mount(hosts_file, "/etc/hosts")
 
         # Common CLI commands for any topology
@@ -3467,9 +3462,7 @@ ff02::2\tip6-allrouters
 
         # Create .gcno symlinks if they don't already exist, for kernel they will
         self.logger.info("Creating .gcno symlinks from '%s' to '%s'", gcdadir, bdir)
-        commander.cmd_raises(
-            f'cd "{gcdadir}"; bdir="{bdir}"'
-            + """
+        commander.cmd_raises(f'cd "{gcdadir}"; bdir="{bdir}"' + """
 for f in $(find . -name '*.gcda'); do
     f=${f#./};
     f=${f%.gcda}.gcno;
@@ -3478,8 +3471,7 @@ for f in $(find . -name '*.gcda'); do
         touch -h -r $bdir/$f $f;
         echo $f;
     fi;
-done"""
-        )
+done""")
 
         # Get the results into a summary file
         data_file = rundir / "coverage.info"

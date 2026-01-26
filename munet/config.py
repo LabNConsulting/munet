@@ -6,6 +6,7 @@
 # Copyright (c) 2021-2022, LabN Consulting, L.L.C.
 #
 """A module that defines common configuration utility functions."""
+
 import logging
 
 from collections.abc import Iterable

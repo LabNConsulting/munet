@@ -7,6 +7,7 @@
 #
 
 "Testing configuration file format variations."
+
 import pytest
 
 from munet import Commander

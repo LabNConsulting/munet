@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """Provides functionality to cleanup processes on posix systems."""
+
 import glob
 import logging
 import os

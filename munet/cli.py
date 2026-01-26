@@ -6,6 +6,7 @@
 # Copyright 2021, LabN Consulting, L.L.C.
 #
 """A module that implements a CLI."""
+
 import argparse
 import asyncio
 import functools
@@ -23,7 +24,6 @@ import sys
 import tempfile
 import termios
 import tty
-
 
 try:
     from . import linux

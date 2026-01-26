@@ -6,6 +6,7 @@
 # Copyright 2023, LabN Consulting, L.L.C.
 #
 "Test p2p peer addresses"
+
 import logging
 import pytest
 

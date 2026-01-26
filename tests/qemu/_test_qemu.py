@@ -6,13 +6,13 @@
 # Copyright 2022, LabN Consulting, L.L.C.
 #
 "Tests of L3Qemu node type"
+
 import logging
 import os
 
 import pytest
 
 from common.fetch import fetch
-
 
 # All tests are coroutines
 pytestmark = pytest.mark.asyncio

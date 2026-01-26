@@ -6,6 +6,7 @@
 # Copyright (c) 2022, LabN Consulting, L.L.C.
 #
 """Test section and include functionality."""
+
 from munet.mutest.userapi import include, section, test_step
 
 # 1.1
