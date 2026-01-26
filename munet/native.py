@@ -74,7 +74,7 @@ def get_loopback_ips(c, nid):
     if ipv6 := c.get("ipv6"):
         if ipv6 == "auto":
             ips.append(AUTO_LOOPBACK_IPV6_BASE + nid)
-        elif isinstance(ip, str):
+        elif isinstance(ipv6, str):
             ips.append(ipaddress.ip_interface(ipv6))
         else:
             ips.extend([ipaddress.ip_interface(x) for x in ipv6])
