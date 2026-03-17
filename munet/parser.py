@@ -92,8 +92,8 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
             raise FileNotFoundError(pathname)
     else:
         for d in search:
-            logf("%s", f'searching in "{d}" for "{basename}".{{yaml, toml, json}}')
-            for ext in ("yaml", "toml", "json"):
+            logf("%s", f'searching in "{d}" for "{basename}".{{yaml, yml, toml, json}}')
+            for ext in ("yaml", "yml", "toml", "json"):
                 pathname = os.path.join(d, basename + "." + ext)
                 if os.path.exists(pathname):
                     logf("%s", f'Found "{pathname}"')
@@ -102,7 +102,9 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
                 continue
             break
         else:
-            raise FileNotFoundError(basename + ".{json,toml,yaml} in " + f"{search}")
+            raise FileNotFoundError(
+                basename + ".{json,toml,yaml,yml} in " + f"{search}"
+            )
 
     _, ext = pathname.rsplit(".", 1)
 
@@ -112,7 +114,7 @@ def get_config(pathname=None, basename="munet", search=None, logf=logging.debug)
         import toml  # pylint: disable=C0415
 
         config = toml.load(pathname)
-    elif ext == "yaml":
+    elif ext in {"yaml", "yml"}:
         import yaml  # pylint: disable=C0415
 
         config = yaml.safe_load(open(pathname, encoding="utf-8"))
