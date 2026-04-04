@@ -33,6 +33,15 @@ topology with the given configuration file and execute each test on the
 resulting topology. The munet topology is launched at the start and brought down
 at the end of each test script.
 
+Alternatively, mutests can be run from the munet CLI using the ``test`` command.
+Note that tests with side effects might fundamentally change the state of the
+topology.
+
+.. code-block:: console
+
+   $ sudo munet
+   > test mutest_*.py
+
 Log Files
 ---------
 
