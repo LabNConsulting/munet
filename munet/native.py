@@ -3507,6 +3507,32 @@ done""")
         _, pending = await asyncio.wait(tasks, timeout=600)
         assert not pending, "Failed to pull container images"
 
+    def start_pcap(self, pcap, in_window=False):
+        """Start a packet capture on a target.
+
+        Accepts NODE:INTF or NETWORK as targets
+        """
+        if ":" in pcap:
+            host, intf = pcap.split(":")
+            pcap = f"{host}-{intf}"
+            host = self.hosts[host]
+        else:
+            host = self
+            intf = pcap
+        capfile = f"capture-{pcap}.pcap"
+        caplogfile = f"capture-{pcap}.log"
+        self.logger.info("%s: starting pcap (%s)", self, capfile)
+        host.background_cmd_start(
+            f"tshark -s 9200 -i {intf} -Pl -w {capfile} > {caplogfile} 2>&1",
+        )
+        if in_window:
+            host.run_in_window(
+                f"tail -F {caplogfile}",
+                background=True,
+                title=f"cap:{pcap}",
+            )
+        return capfile
+
     async def run(self):
         tasks = []
         hosts = self.hosts.values()
@@ -3529,18 +3555,7 @@ done""")
             pcapopt.update(self.switches.keys())
         if pcapopt:
             for pcap in pcapopt:
-                if ":" in pcap:
-                    host, intf = pcap.split(":")
-                    pcap = f"{host}-{intf}"
-                    host = self.hosts[host]
-                else:
-                    host = self
-                    intf = pcap
-                host.run_in_window(
-                    f"tshark -s 9200 -i {intf} -P -w capture-{pcap}.pcap",
-                    background=True,
-                    title=f"cap:{pcap}",
-                )
+                self.start_pcap(pcap, in_window=True)
 
         if launch_nodes:
             # would like a info when verbose here.
