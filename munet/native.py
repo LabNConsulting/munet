@@ -3586,7 +3586,24 @@ done""")
             tasks = [asyncio.create_task(wait_until_ready(x)) for x in ready_nodes]
 
             logging.debug("Waiting for ready on nodes: %s", ready_nodes)
-            _, pending = await asyncio.wait(tasks, timeout=30)
+            ready_timeout = 30
+            # setable via "ready-timeout: 600" in kinds.yaml if a particular type will take a long time.
+
+            for node in ready_nodes:
+                try:
+                    node_timeout = int(node.config.get("ready-timeout", ready_timeout))
+                except (TypeError, ValueError):
+                    node_timeout = ready_timeout
+
+                ready_timeout = max(ready_timeout, node_timeout)
+
+            self.logger.info(
+                "waiting up to %ss for ready-cmd on %s ready nodes",
+                ready_timeout,
+                len(ready_nodes),
+            )
+
+            _, pending = await asyncio.wait(tasks, timeout=ready_timeout)
             if pending:
                 logging.warning("Timeout waiting for ready: %s", pending)
                 for nr in pending:
