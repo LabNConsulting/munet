@@ -38,19 +38,31 @@ async def test_config_cmd(unet_share):
 
     h1 = unet.hosts["h1"]
     output = h1.cmd_raises("tc q | grep 'dev eth0'")
-    logging.debug("qdisc for dev eth0 output found: %s", output)
-    logging.debug("expects delay='200', jitter='60', loss='70', rate='1600'")
+    logging.debug("qdisc for h1 eth0 found: %s", output)
+    logging.debug("node delay is on the switch IFB, not the node NIC")
+    assert "delay" not in output
+    assert "loss" not in output
+    assert "rate" not in output
+
+    net1 = unet.switches["net1"]
+    output = net1.cmd_raises("tc q | grep 'dev ifbnet1e0'")
+    logging.debug("qdisc for ifbnet1e0 (h1 TX) found: %s", output)
     assert re.search(r"delay 200us\s+59us.*loss 70%.*rate 1600bit", output, re.DOTALL)
 
     h2 = unet.hosts["h2"]
     output = h2.cmd_raises("tc q | grep 'dev eth0'")
-    logging.debug("qdisc for dev eth0 output found: %s", output)
-    logging.debug("expects delay='209', jitter='60', loss='70', rate='1600'")
+    logging.debug("qdisc for h2 eth0 found: %s", output)
+    assert "delay" not in output
+    assert "loss" not in output
+    assert "rate" not in output
+
+    output = net1.cmd_raises("tc q | grep 'dev ifbnet1e1'")
+    logging.debug("qdisc for ifbnet1e1 (h2 TX) found: %s", output)
     assert re.search(r"delay 209us\s+59us.*loss 70%.*rate 1600bit", output, re.DOTALL)
 
     h3 = unet.hosts["h3"]
     output = h3.cmd_raises("tc q | grep 'dev eth0'")
-    logging.debug("qdisc for dev eth0 output found: %s", output)
+    logging.debug("qdisc for h3 eth0 found: %s", output)
     logging.debug("expects none")
     assert "delay" not in output
     assert "loss" not in output
