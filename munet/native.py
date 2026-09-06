@@ -3282,15 +3282,26 @@ ff02::2\tip6-allrouters
                     # default tc values for interfaces added to the bridge which aren't
                     # present in `connections`.
                     switch = self.switches[to]
-                    swconf = find_matching_net_config(name, cconf, switch.config)
-                    if not swconf:
+                    sw_to = find_matching_net_config(
+                        name, cconf, switch.config, "to"
+                    )
+                    sw_from = find_matching_net_config(
+                        name, cconf, switch.config, "from"
+                    )
+                    if not sw_to:
                         # "name" most important key to leave out, so it gets generated
-                        nontc = ("connections", "external", "ip", "ipv6", "name")
-                        swconf = {
-                            k: v for k, v in switch.config.items() if k not in nontc
+                        nontc = (
+                            "connections", "external", "ip", "ipv6", "name",
+                        )
+                        sw_to = {
+                            k: v
+                            for k, v in switch.config.items()
+                            if k not in nontc
                         }
-                        swconf = deepcopy(swconf)
-                    await self.add_native_link(switch, node, swconf, cconf)
+                        sw_to = deepcopy(sw_to)
+                    await self.add_native_link(
+                        switch, node, sw_to, cconf, c1_from=sw_from
+                    )
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.
                     other = self.hosts[to]
@@ -3332,28 +3343,40 @@ ff02::2\tip6-allrouters
             super().add_dummy(node1, if1, **c1)
             node1.set_dummy_addr(c1)
 
+    _TC_KEYS = (
+        "delay",
+        "jitter",
+        "jitter-correlation",
+        "loss",
+        "loss-correlation",
+        "rate",
+    )
+
     @staticmethod
-    def _tc_constraints(*configs):
-        """Merge linux TC keys; later configs override earlier ones."""
-        keys = (
-            "delay",
-            "jitter",
-            "jitter-correlation",
-            "loss",
-            "loss-correlation",
-            "rate",
-        )
+    def _tc_pick(config):
+        """Copy linux TC keys from config."""
+        if not config:
+            return {}
         out = {}
-        for config in configs:
-            if not config:
-                continue
-            for key in keys:
-                if config.get(key) is not None:
-                    out[key] = config[key]
+        for key in Munet._TC_KEYS:
+            if config.get(key) is not None:
+                out[key] = config[key]
         return out
 
-    async def add_native_link(self, node1, node2, c1=None, c2=None):
-        """Add a link between switch and node or 2 nodes."""
+    @staticmethod
+    def _tc_constraints(*configs):
+        """Merge unprefixed TC keys; later configs override earlier ones."""
+        out = {}
+        for config in configs:
+            out.update(Munet._tc_pick(config))
+        return out
+
+    async def add_native_link(self, node1, node2, c1=None, c2=None, c1_from=None):
+        """Add a link between switch and node or 2 nodes.
+
+        c1_from is switch ``from:`` (host TX / IFB). It is always the host
+        node's outbound constraints, even if the node is passed first.
+        """
         isp2p = False
 
         c1 = {} if c1 is None else c1
@@ -3416,35 +3439,39 @@ ff02::2\tip6-allrouters
             # Both veth ends live inside the nodes. There is no outside
             # device to own the "link" unless we insert a mid-netns.
             if "physical" not in c1 and not node1.is_vm:
-                if Munet._tc_constraints(c1):
+                tx = Munet._tc_constraints(c1)
+                if tx:
                     self.logger.warning(
                         "%s: p2p constraints on %s:%s stay inside the node",
                         self,
                         node1.name,
                         if1,
                     )
-                node1.set_intf_constraints(if1, **c1)
+                    node1.set_intf_constraints(if1, **tx)
             if "physical" not in c2 and not node2.is_vm:
-                if Munet._tc_constraints(c2):
+                tx = Munet._tc_constraints(c2)
+                if tx:
                     self.logger.warning(
                         "%s: p2p constraints on %s:%s stay inside the node",
                         self,
                         node2.name,
                         if2,
                     )
-                node2.set_intf_constraints(if2, **c2)
+                    node2.set_intf_constraints(if2, **tx)
         elif "physical" not in c2:
-            # Host-to-switch: keep the old one-way meaning.
-            # c1 (switch attachment) still shapes switch outbound (into
-            # the node). c2 (node attachment) used to shape the node NIC
-            # outbound; do that on an IFB of the switch veth instead so
-            # the DUT keeps its root qdisc.
-            switch_tc = Munet._tc_constraints(c1)
-            node_tc = Munet._tc_constraints(c2)
-            if switch_tc:
-                node1.set_intf_constraints(if1, **switch_tc)
-            if node_tc:
-                node1.set_intf_ingress_constraints(if1, **node_tc)
+            # Host-to-switch (switch-centric to/from):
+            #   to: r1   + delay → into r1  (node RX, switch egress)
+            #   from: r1 + delay → from r1  (node TX, IFB on switch ingress)
+            # Node delay still shapes TX if set (same as from:).
+            node_tx = {
+                **Munet._tc_constraints(c1_from),
+                **Munet._tc_constraints(c2),
+            }
+            node_rx = Munet._tc_constraints(c1)
+            if node_rx:
+                node1.set_intf_constraints(if1, **node_rx)
+            if node_tx:
+                node1.set_intf_ingress_constraints(if1, **node_tx)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""

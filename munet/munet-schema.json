@@ -484,6 +484,9 @@
                     "to": {
                       "type": "string"
                     },
+                    "from": {
+                      "type": "string"
+                    },
                     "name": {
                       "type": "string"
                     },

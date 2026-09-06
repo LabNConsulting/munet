@@ -145,6 +145,7 @@ module: labn-munet-config
   |  |  |  +--rw burst?   number64
   |  |  +--rw connections* [to]
   |  |     +--rw to                    string
+  |  |     +--rw from?                 string
   |  |     +--rw name?                 string
   |  |     +--rw remote-name?          string
   |  |     +--rw delay?                uint64
@@ -1154,14 +1155,19 @@ munet>
         list connections {
           key to;
           description
-            "Overriding network side configuration for connections to nodes from
-             this network. If the default network tc parameters are not being
-             overriden for a specific node connection then this configuration is
-             not required.";
+            "Per-node one-way constraints on this switch. to: N is traffic
+             toward that node (node RX). from: N is traffic from that node
+             (node TX). Use two entries for both directions.";
 
           leaf to {
             type string;
-            description "The target of this connection.";
+            description
+              "Shape traffic toward this node (switch egress, node RX).";
+          }
+          leaf from {
+            type string;
+            description
+              "Shape traffic from this node (switch ingress, node TX).";
           }
           leaf name {
             type string;
