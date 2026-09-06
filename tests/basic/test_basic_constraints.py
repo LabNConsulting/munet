@@ -32,6 +32,18 @@ async def unet_(request, rundir_module, pytestconfig):
         await unet.async_delete()
 
 
+@pytest.fixture(scope="function", name="unet_case")
+async def unet_case_(request, rundir, pytestconfig):
+    """Per-test munet so switch/node names do not collide with other cases."""
+    unshare = bool(request.param) if hasattr(request, "param") else True
+    logging.info("Creating munet with%s inline unshare", "" if unshare else "out")
+    unet = Munet(rundir=rundir, unshare_inline=unshare, pytestconfig=pytestconfig)
+    try:
+        yield unet
+    finally:
+        await unet.async_delete()
+
+
 async def ping_average_rtt(r, other, oifname):
     oip = other.get_intf_addr(oifname).ip
     await r.async_cmd_raises(f"ping -w1 -c1 {oip}")
@@ -102,9 +114,10 @@ async def test_basic_ping(unet):
     assert 20 < loss < 40
 
 
-@pytest.mark.parametrize("unet", [False, True], indirect=["unet"])
-async def test_switch_constraints_outside_node(unet):
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_constraints_outside_node(unet_case):
     """Node delay/rate stay TX-shaped, but the qdisc lives in the switch ns."""
+    unet = unet_case
     unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
@@ -142,9 +155,10 @@ async def test_switch_constraints_outside_node(unet):
     assert (exp_avg - 1) < avg < (exp_avg + 2)
 
 
-@pytest.mark.parametrize("unet", [False, True], indirect=["unet"])
-async def test_switch_to_and_from(unet):
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_to_and_from(unet_case):
     """Switch to: is node RX; from: is node TX (IFB). Together they are RTT."""
+    unet = unet_case
     unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
@@ -211,9 +225,10 @@ def test_find_matching_net_to_from():
     assert Munet._tc_constraints(leaving, {"delay": 100})["delay"] == 100
 
 
-@pytest.mark.parametrize("unet", [False, True], indirect=["unet"])
-async def test_switch_to_delay_only(unet):
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_to_delay_only(unet_case):
     """Switch to: shapes RX on switch egress (no IFB)."""
+    unet = unet_case
     unet.autonumber = True
 
     r1 = unet.add_l3_node("r1")
