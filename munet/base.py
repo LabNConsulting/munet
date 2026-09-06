@@ -1783,6 +1783,24 @@ class InterfaceMixin:
 
         return netem_args, tbf_args
 
+    def _add_tc_qdiscs(self, nsifname, constraints):
+        netem_args, tbf_args = self.get_linux_tc_args(nsifname, constraints)
+        if not netem_args and not tbf_args:
+            return False
+        count = 1
+        selector = f"root handle {count}:"
+        if netem_args:
+            self.cmd_raises(
+                f"tc qdisc add dev {nsifname} {selector} netem {netem_args}"
+            )
+            count += 1
+            selector = f"parent {count-1}: handle {count}"
+        # Place rate limit after delay otherwise limit/burst too complex
+        if tbf_args:
+            self.cmd_raises(f"tc qdisc add dev {nsifname} {selector} tbf {tbf_args}")
+        self.cmd_raises(f"tc qdisc show dev {nsifname}")
+        return True
+
     def set_intf_constraints(self, ifname, **constraints):
         """Set interface outbound constraints.
 
@@ -1801,21 +1819,30 @@ class InterfaceMixin:
             rate (int): bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000.
         """
+        self._add_tc_qdiscs(self.get_ns_ifname(ifname), constraints)
+
+    def set_intf_ingress_constraints(self, ifname, **constraints):
+        """Shape packets arriving on ifname via an IFB in this namespace.
+
+        Used on a switch port so a node's delay/rate/loss still apply to that
+        node's outbound traffic (same as a qdisc on the node NIC) without
+        taking the node's root qdisc.
+        """
         nsifname = self.get_ns_ifname(ifname)
         netem_args, tbf_args = self.get_linux_tc_args(nsifname, constraints)
-        count = 1
-        selector = f"root handle {count}:"
-        if netem_args:
-            self.cmd_raises(
-                f"tc qdisc add dev {nsifname} {selector} netem {netem_args}"
-            )
-            count += 1
-            selector = f"parent {count-1}: handle {count}"
-        # Place rate limit after delay otherwise limit/burst too complex
-        if tbf_args:
-            self.cmd_raises(f"tc qdisc add dev {nsifname} {selector} tbf {tbf_args}")
-
-        self.cmd_raises(f"tc qdisc show dev {nsifname}")
+        if not netem_args and not tbf_args:
+            return
+        ifb = "ifb" + re.sub(r"[^A-Za-z0-9]", "", nsifname)
+        ifb = ifb[:15] or "ifb0"
+        self.cmd_status("modprobe ifb")
+        self.cmd_raises(f"ip link add {ifb} type ifb")
+        self.cmd_raises(f"ip link set {ifb} up")
+        self.cmd_raises(f"tc qdisc add dev {nsifname} handle ffff: ingress")
+        self.cmd_raises(
+            f"tc filter add dev {nsifname} parent ffff: protocol all "
+            f"u32 match u32 0 0 action mirred egress redirect dev {ifb}"
+        )
+        self._add_tc_qdiscs(ifb, constraints)
 
 
 class LinuxNamespace(Commander, InterfaceMixin):

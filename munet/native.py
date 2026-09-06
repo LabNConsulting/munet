@@ -3332,6 +3332,26 @@ ff02::2\tip6-allrouters
             super().add_dummy(node1, if1, **c1)
             node1.set_dummy_addr(c1)
 
+    @staticmethod
+    def _tc_constraints(*configs):
+        """Merge linux TC keys; later configs override earlier ones."""
+        keys = (
+            "delay",
+            "jitter",
+            "jitter-correlation",
+            "loss",
+            "loss-correlation",
+            "rate",
+        )
+        out = {}
+        for config in configs:
+            if not config:
+                continue
+            for key in keys:
+                if config.get(key) is not None:
+                    out[key] = config[key]
+        return out
+
     async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
         isp2p = False
@@ -3392,10 +3412,39 @@ ff02::2\tip6-allrouters
 
         if isinstance(node1, ExternalNetwork):
             pass
-        elif "physical" not in c1 and not node1.is_vm:
-            node1.set_intf_constraints(if1, **c1)
-        if "physical" not in c2 and not node2.is_vm:
-            node2.set_intf_constraints(if2, **c2)
+        elif isp2p:
+            # Both veth ends live inside the nodes. There is no outside
+            # device to own the "link" unless we insert a mid-netns.
+            if "physical" not in c1 and not node1.is_vm:
+                if Munet._tc_constraints(c1):
+                    self.logger.warning(
+                        "%s: p2p constraints on %s:%s stay inside the node",
+                        self,
+                        node1.name,
+                        if1,
+                    )
+                node1.set_intf_constraints(if1, **c1)
+            if "physical" not in c2 and not node2.is_vm:
+                if Munet._tc_constraints(c2):
+                    self.logger.warning(
+                        "%s: p2p constraints on %s:%s stay inside the node",
+                        self,
+                        node2.name,
+                        if2,
+                    )
+                node2.set_intf_constraints(if2, **c2)
+        elif "physical" not in c2:
+            # Host-to-switch: keep the old one-way meaning.
+            # c1 (switch attachment) still shapes switch outbound (into
+            # the node). c2 (node attachment) used to shape the node NIC
+            # outbound; do that on an IFB of the switch veth instead so
+            # the DUT keeps its root qdisc.
+            switch_tc = Munet._tc_constraints(c1)
+            node_tc = Munet._tc_constraints(c2)
+            if switch_tc:
+                node1.set_intf_constraints(if1, **switch_tc)
+            if node_tc:
+                node1.set_intf_ingress_constraints(if1, **node_tc)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""

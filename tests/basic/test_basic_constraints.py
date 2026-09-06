@@ -99,3 +99,43 @@ async def test_basic_ping(unet):
     loss = await ping_with_loss(r2, r3, ifname)
     logging.info("ping loss: %s%%", loss)
     assert 20 < loss < 40
+
+
+@pytest.mark.parametrize("unet", [False, True], indirect=["unet"])
+async def test_switch_constraints_outside_node(unet):
+    """Node delay/rate stay TX-shaped, but the qdisc lives in the switch ns."""
+    unet.autonumber = True
+
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+    sw1 = unet.add_network("sw1", {"ip": "auto"})
+
+    delay = 50000
+    await unet.add_native_link(sw1, r1, {}, {"delay": delay})
+    await unet.add_native_link(sw1, r2, {}, {"delay": delay})
+
+    rif1 = r1.net_intfs[sw1.name]
+    rif2 = r2.net_intfs[sw1.name]
+    sif1 = sw1.intfs[0]
+    sif2 = sw1.intfs[1]
+
+    r1q = await r1.async_cmd_raises(f"tc qdisc show dev {rif1}")
+    r2q = await r2.async_cmd_raises(f"tc qdisc show dev {rif2}")
+    s1q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif1}")
+    s2q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif2}")
+    swq = await sw1.async_cmd_raises("tc qdisc show")
+    logging.info("node qdiscs: %s | %s", r1q, r2q)
+    logging.info("switch port qdiscs: %s | %s", s1q, s2q)
+    logging.info("switch ns qdiscs: %s", swq)
+    assert "netem" not in r1q
+    assert "netem" not in r2q
+    assert "ingress" in s1q
+    assert "ingress" in s2q
+    assert "netem" not in s1q
+    assert "netem" not in s2q
+    assert "netem" in swq
+
+    exp_avg = (delay + delay) / 1000
+    avg = await ping_average_rtt(r1, r2, rif2)
+    logging.info("ping average RTT: %s", avg)
+    assert (exp_avg - 1) < avg < (exp_avg + 2)
