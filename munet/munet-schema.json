@@ -105,6 +105,9 @@
           "ready-cmd": {
             "type": "string"
           },
+          "ready-timeout": {
+            "type": "integer"
+          },
           "image": {
             "type": "string"
           },
@@ -592,6 +595,9 @@
               },
               "ready-cmd": {
                 "type": "string"
+              },
+              "ready-timeout": {
+                "type": "integer"
               },
               "image": {
                 "type": "string"

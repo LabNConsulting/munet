@@ -145,39 +145,45 @@ Nodes
 
 Tree diagram for node config::
 
-   +--rw topology
-   |  +--rw nodes* [name]
-   |     +--rw id?            uint32
-   |     +--rw kind?          -> ../../../kinds/name
-   |     +--rw ip*            string
-   |     +--rw ipv6*          string
-   |     +--rw cap-add*       string
-   |     +--rw cap-remove*    string
-   |     +--rw cmd?           string
-   |     +--rw cmd-file?      string
-   |     +--rw cleanup-cmd?   string
-   |     +--rw image?         string
-   |     +--rw server?        string
-   |     +--rw server-port?   uint16
-   |     +--rw qemu
-   |     +--rw connections* [to]
-   |        ... described in subsection
-   |     +--rw env* [name]
-   |     |  +--rw name     string
-   |     |  +--rw value?   string
-   |     +--rw init?          union
-   |     +--rw mounts* [destination]
-   |        ... described in subsection
-   |     |  +--rw destination    string
-   |     |  +--rw source?        string
-   |     |  +--rw tmpfs-size?    string
-   |     |  +--rw type?          string
-   |     +--rw name           string
-   |     +--rw podman
-   |     |  +--rw extra-args*   string
-   |     +--rw privileged?    boolean
-   |     +--rw shell?         union
-   |     +--rw volumes*       string
+  +--rw topology
+     +--rw nodes* [name]
+        +--rw id?                  uint32
+        +--rw kind?                -> ../../../kinds/name
+        +--rw ip*                  string
+        +--rw ipv6*                string
+        +--rw cap-add*             string
+        +--rw cap-remove*          string
+        +--rw cmd?                 string
+        +--rw cmd-file?            string
+        +--rw cleanup-cmd?         string
+        +--rw ready-cmd?           string
+        +--rw ready-timeout?       uint32
+        +--rw image?               string
+        +--rw hostnet?             boolean
+        +--rw server?              string
+        +--rw server-port?         uint16
+        +--rw ssh-identity-file?   string
+        +--rw ssh-user?            string
+        +--rw ssh-password?        string
+        +--rw qemu
+            ... intentionally truncated
+        +--rw connections* [to]
+            ... described in subsections
+        +--rw env* [name]
+        |  +--rw name     string
+        |  +--rw value?   string
+        +--rw gdb-cmd?             string
+        +--rw gdb-target-cmds*     string
+        +--rw gdb-run-cmds*        string
+        +--rw init?                union
+        +--rw mounts* [destination]
+            ... described in subsections
+        +--rw name                 string
+        +--rw podman
+        |  +--rw extra-args*   string
+        +--rw privileged?          boolean
+        +--rw shell?               union
+        +--rw volumes*             string
 
 A particularly useful config option for any node is to set the ``cmd``. The
 ``cmd`` is a startup command that will run each time when the node is
@@ -201,6 +207,9 @@ specified file (and the configured ``cmd`` ignored.) A best effort attempt is ma
 to use the same interpreter as specified by the file's shebang (again, defaulting
 to ``/bin/bash`` if none is found). Setting ``shell`` overrides this behavior to use
 a specific configured interpreter instead.
+
+The ``ready-cmd`` and ``ready-timeout`` provide customization for how to check if a
+node is ready and for how long to wait for it be ready.
 
 Connections
 """""""""""

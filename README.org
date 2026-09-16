@@ -46,15 +46,16 @@ module: labn-munet-config
   |     +--rw new-window?    boolean
   |     +--rw top-level?     boolean
   +--rw kinds* [name]
+  |  +--rw merge*               string
   |  +--rw ip*                  string
   |  +--rw ipv6*                string
-  |  +--rw merge*               string
   |  +--rw cap-add*             string
   |  +--rw cap-remove*          string
   |  +--rw cmd?                 string
   |  +--rw cmd-file?            string
   |  +--rw cleanup-cmd?         string
   |  +--rw ready-cmd?           string
+  |  +--rw ready-timeout?       uint32
   |  +--rw image?               string
   |  +--rw hostnet?             boolean
   |  +--rw server?              string
@@ -63,26 +64,27 @@ module: labn-munet-config
   |  +--rw ssh-user?            string
   |  +--rw ssh-password?        string
   |  +--rw qemu
-  |  |  +--rw bios?              string
-  |  |  +--rw cloud-init?        boolean
-  |  |  +--rw cloud-init-disk?   string
-  |  |  +--rw disk?              string
-  |  |  +--rw disk-driver?       string
-  |  |  +--rw disk-template?     string
-  |  |  +--rw initial-cmd?       string
-  |  |  +--rw initial-cmd-file?  string
-  |  |  +--rw kernel?            string
-  |  |  +--rw initrd?            string
-  |  |  +--rw kvm?               boolean
-  |  |  +--rw ncpu?              uint32
-  |  |  +--rw memory?            string
-  |  |  +--rw root?              string
-  |  |  +--rw cmdline-extra?     string
-  |  |  +--rw extra-args?        string
+  |  |  +--rw bios?               string
+  |  |  +--rw cloud-init?         boolean
+  |  |  +--rw cloud-init-disk?    string
+  |  |  +--rw disk?               string
+  |  |  +--rw disk-driver?        string
+  |  |  +--rw disk-template?      string
+  |  |  +--rw initial-cmd?        string
+  |  |  +--rw initial-cmd-file?   string
+  |  |  +--rw kernel?             string
+  |  |  +--rw initrd?             string
+  |  |  +--rw kvm?                boolean
+  |  |  +--rw ncpu?               uint32
+  |  |  +--rw memory?             string
+  |  |  +--rw root?               string
+  |  |  +--rw cmdline-extra?      string
+  |  |  +--rw extra-args?         string
   |  |  +--rw console
   |  |     +--rw user?               string
   |  |     +--rw password?           string
   |  |     +--rw initial-password?   string
+  |  |     +--rw prompt?             string
   |  |     +--rw expects*            string
   |  |     +--rw sends*              string
   |  |     +--rw timeout?            uint32
@@ -114,7 +116,7 @@ module: labn-munet-config
   |  +--rw mounts* [destination]
   |  |  +--rw destination    string
   |  |  +--rw source?        string
-  |  |  +--rw size?    string
+  |  |  +--rw size?          string
   |  |  +--rw type?          string
   |  +--rw name                 string
   |  +--rw podman
@@ -167,6 +169,7 @@ module: labn-munet-config
   |     +--rw cmd-file?            string
   |     +--rw cleanup-cmd?         string
   |     +--rw ready-cmd?           string
+  |     +--rw ready-timeout?       uint32
   |     +--rw image?               string
   |     +--rw hostnet?             boolean
   |     +--rw server?              string
@@ -175,22 +178,22 @@ module: labn-munet-config
   |     +--rw ssh-user?            string
   |     +--rw ssh-password?        string
   |     +--rw qemu
-  |     |  +--rw bios?              string
-  |     |  +--rw cloud-init?        boolean
-  |     |  +--rw cloud-init-disk?   string
-  |     |  +--rw disk?              string
-  |     |  +--rw disk-driver?       string
-  |     |  +--rw disk-template?     string
-  |     |  +--rw initial-cmd?       string
-  |     |  +--rw initial-cmd-file?  string
-  |     |  +--rw kernel?            string
-  |     |  +--rw initrd?            string
-  |     |  +--rw kvm?               boolean
-  |     |  +--rw ncpu?              uint32
-  |     |  +--rw memory?            string
-  |     |  +--rw root?              string
-  |     |  +--rw cmdline-extra?     string
-  |     |  +--rw extra-args?        string
+  |     |  +--rw bios?               string
+  |     |  +--rw cloud-init?         boolean
+  |     |  +--rw cloud-init-disk?    string
+  |     |  +--rw disk?               string
+  |     |  +--rw disk-driver?        string
+  |     |  +--rw disk-template?      string
+  |     |  +--rw initial-cmd?        string
+  |     |  +--rw initial-cmd-file?   string
+  |     |  +--rw kernel?             string
+  |     |  +--rw initrd?             string
+  |     |  +--rw kvm?                boolean
+  |     |  +--rw ncpu?               uint32
+  |     |  +--rw memory?             string
+  |     |  +--rw root?               string
+  |     |  +--rw cmdline-extra?      string
+  |     |  +--rw extra-args?         string
   |     |  +--rw console
   |     |     +--rw user?               string
   |     |     +--rw password?           string
@@ -227,7 +230,7 @@ module: labn-munet-config
   |     +--rw mounts* [destination]
   |     |  +--rw destination    string
   |     |  +--rw source?        string
-  |     |  +--rw size?    string
+  |     |  +--rw size?          string
   |     |  +--rw type?          string
   |     +--rw name                 string
   |     +--rw podman
@@ -610,6 +613,12 @@ munet>
         type string;
         description
           "Shell command[s] to execute to determine if the node is ready";
+      }
+      leaf ready-timeout {
+        type uint32;
+        default 30;
+        description
+          "Maximum time in seconds to wait for the node to become ready.";
       }
       leaf image {
         type string;
