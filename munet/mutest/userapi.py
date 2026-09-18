@@ -126,14 +126,14 @@ def pause_test(desc=""):
 
 
 def act_on_result(success, args, desc=""):
-    if args.pause:
+    if args.get('pause', False):
         pause_test(desc)
     elif success or len(desc) == 0:
         # No success on description-less steps are not considered errors.
         return
-    if args.cli_on_error:
+    if args.get('cli_on_error', False):
         raise CLIOnErrorError(desc)
-    if args.pause_on_error:
+    if args.get('pause_on_error', False):
         pause_test(desc)
 
 
@@ -201,7 +201,7 @@ class TestCase:
         name: str,
         path: Path,
         targets: dict,
-        args: Namespace,
+        args: dict,
         output_logger: logging.Logger = None,
         result_logger: logging.Logger = None,
         full_summary: bool = False,
