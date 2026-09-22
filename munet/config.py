@@ -31,8 +31,12 @@ def find_all_with_kv(lst, k, v):
     return rv
 
 
-def find_matching_net_config(name, cconf, oconf):
-    p = find_all_with_kv(oconf.get("connections", {}), "to", name)
+def find_matching_net_config(name, cconf, oconf, direction="to"):
+    """Return the peer's connection entry facing this node.
+
+    direction is "to" (toward the node) or "from" (from the node).
+    """
+    p = find_all_with_kv(oconf.get("connections", {}), direction, name)
     if not p:
         return {}
 
