@@ -3329,7 +3329,7 @@ ff02::2\tip6-allrouters
             do_add_dummy = False
 
         if do_add_dummy:
-            super().add_dummy(node1, if1, **c1)
+            super().add_dummy(node1, if1, mtu=c1.get("mtu"), **Munet._tc_transmit(c1))
             node1.set_dummy_addr(c1)
 
     _TC_KEYS = (
@@ -3359,6 +3359,20 @@ ff02::2\tip6-allrouters
         for config in configs:
             out.update(Munet._tc_pick(config))
         return out
+
+    @staticmethod
+    def _tc_transmit(config):
+        """TC for local egress: deprecated unwrapped keys, then ``transmit``."""
+        if not config:
+            return {}
+        return Munet._tc_constraints(config, config.get("transmit"))
+
+    @staticmethod
+    def _tc_receive(config):
+        """TC for local ingress from ``receive``."""
+        if not config:
+            return {}
+        return Munet._tc_pick(config.get("receive"))
 
     async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
@@ -3423,38 +3437,32 @@ ff02::2\tip6-allrouters
         elif isp2p:
             # Both veth ends live inside the nodes. There is no outside
             # device to own the "link" unless we insert a mid-netns.
-            if "physical" not in c1 and not node1.is_vm:
-                tx = Munet._tc_constraints(c1)
+            # Each end's egress carries its own transmit and the peer's
+            # receive; the sender's transmit wins on overlapping keys.
+            for n, intf, c, oc in ((node1, if1, c1, c2), (node2, if2, c2, c1)):
+                if "physical" in c or n.is_vm:
+                    continue
+                tx = {**Munet._tc_receive(oc), **Munet._tc_transmit(c)}
                 if tx:
                     self.logger.warning(
                         "%s: p2p constraints on %s:%s stay inside the node",
                         self,
-                        node1.name,
-                        if1,
+                        n.name,
+                        intf,
                     )
-                    node1.set_intf_constraints(if1, **tx)
-            if "physical" not in c2 and not node2.is_vm:
-                tx = Munet._tc_constraints(c2)
-                if tx:
-                    self.logger.warning(
-                        "%s: p2p constraints on %s:%s stay inside the node",
-                        self,
-                        node2.name,
-                        if2,
-                    )
-                    node2.set_intf_constraints(if2, **tx)
+                    n.set_intf_constraints(intf, **tx)
         elif "physical" not in c2:
-            # Host-to-switch: keep the old one-way meaning.
-            # c1 (switch attachment) still shapes switch outbound (into
-            # the node). c2 (node attachment) used to shape the node NIC
-            # outbound; do that on an IFB of the switch veth instead so
-            # the DUT keeps its root qdisc.
-            switch_tc = Munet._tc_constraints(c1)
-            node_tc = Munet._tc_constraints(c2)
-            if switch_tc:
-                node1.set_intf_constraints(if1, **switch_tc)
-            if node_tc:
-                node1.set_intf_ingress_constraints(if1, **node_tc)
+            # Host-to-switch: shape on the switch port so the node keeps its
+            # root qdisc. Switch transmit and node receive shape traffic
+            # toward the node (switch egress). Switch receive and node
+            # transmit shape traffic from the node (IFB on switch ingress).
+            # Node values win on overlapping keys.
+            toward_node = {**Munet._tc_transmit(c1), **Munet._tc_receive(c2)}
+            from_node = {**Munet._tc_receive(c1), **Munet._tc_transmit(c2)}
+            if toward_node:
+                node1.set_intf_constraints(if1, **toward_node)
+            if from_node:
+                node1.set_intf_ingress_constraints(if1, **from_node)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""

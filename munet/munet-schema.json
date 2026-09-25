@@ -292,6 +292,116 @@
                       ]
                     }
                   }
+                },
+                "transmit": {
+                  "type": "object",
+                  "properties": {
+                    "delay": {
+                      "type": "integer"
+                    },
+                    "jitter": {
+                      "type": "integer"
+                    },
+                    "jitter-correlation": {
+                      "type": "string"
+                    },
+                    "loss": {
+                      "type": "integer"
+                    },
+                    "loss-correlation": {
+                      "type": "string"
+                    },
+                    "rate": {
+                      "type": "object",
+                      "properties": {
+                        "rate": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "limit": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "burst": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "receive": {
+                  "type": "object",
+                  "properties": {
+                    "delay": {
+                      "type": "integer"
+                    },
+                    "jitter": {
+                      "type": "integer"
+                    },
+                    "jitter-correlation": {
+                      "type": "string"
+                    },
+                    "loss": {
+                      "type": "integer"
+                    },
+                    "loss-correlation": {
+                      "type": "string"
+                    },
+                    "rate": {
+                      "type": "object",
+                      "properties": {
+                        "rate": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "limit": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "burst": {
+                          "oneOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -479,6 +589,116 @@
                   }
                 }
               },
+              "transmit": {
+                "type": "object",
+                "properties": {
+                  "delay": {
+                    "type": "integer"
+                  },
+                  "jitter": {
+                    "type": "integer"
+                  },
+                  "jitter-correlation": {
+                    "type": "string"
+                  },
+                  "loss": {
+                    "type": "integer"
+                  },
+                  "loss-correlation": {
+                    "type": "string"
+                  },
+                  "rate": {
+                    "type": "object",
+                    "properties": {
+                      "rate": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "limit": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "burst": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "receive": {
+                "type": "object",
+                "properties": {
+                  "delay": {
+                    "type": "integer"
+                  },
+                  "jitter": {
+                    "type": "integer"
+                  },
+                  "jitter-correlation": {
+                    "type": "string"
+                  },
+                  "loss": {
+                    "type": "integer"
+                  },
+                  "loss-correlation": {
+                    "type": "string"
+                  },
+                  "rate": {
+                    "type": "object",
+                    "properties": {
+                      "rate": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "limit": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "burst": {
+                        "oneOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
               "connections": {
                 "type": "array",
                 "items": {
@@ -540,6 +760,116 @@
                               "type": "string"
                             }
                           ]
+                        }
+                      }
+                    },
+                    "transmit": {
+                      "type": "object",
+                      "properties": {
+                        "delay": {
+                          "type": "integer"
+                        },
+                        "jitter": {
+                          "type": "integer"
+                        },
+                        "jitter-correlation": {
+                          "type": "string"
+                        },
+                        "loss": {
+                          "type": "integer"
+                        },
+                        "loss-correlation": {
+                          "type": "string"
+                        },
+                        "rate": {
+                          "type": "object",
+                          "properties": {
+                            "rate": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "limit": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "burst": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "receive": {
+                      "type": "object",
+                      "properties": {
+                        "delay": {
+                          "type": "integer"
+                        },
+                        "jitter": {
+                          "type": "integer"
+                        },
+                        "jitter-correlation": {
+                          "type": "string"
+                        },
+                        "loss": {
+                          "type": "integer"
+                        },
+                        "loss-correlation": {
+                          "type": "string"
+                        },
+                        "rate": {
+                          "type": "object",
+                          "properties": {
+                            "rate": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "limit": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "burst": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
                         }
                       }
                     }
@@ -781,6 +1111,116 @@
                               "type": "string"
                             }
                           ]
+                        }
+                      }
+                    },
+                    "transmit": {
+                      "type": "object",
+                      "properties": {
+                        "delay": {
+                          "type": "integer"
+                        },
+                        "jitter": {
+                          "type": "integer"
+                        },
+                        "jitter-correlation": {
+                          "type": "string"
+                        },
+                        "loss": {
+                          "type": "integer"
+                        },
+                        "loss-correlation": {
+                          "type": "string"
+                        },
+                        "rate": {
+                          "type": "object",
+                          "properties": {
+                            "rate": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "limit": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "burst": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "receive": {
+                      "type": "object",
+                      "properties": {
+                        "delay": {
+                          "type": "integer"
+                        },
+                        "jitter": {
+                          "type": "integer"
+                        },
+                        "jitter-correlation": {
+                          "type": "string"
+                        },
+                        "loss": {
+                          "type": "integer"
+                        },
+                        "loss-correlation": {
+                          "type": "string"
+                        },
+                        "rate": {
+                          "type": "object",
+                          "properties": {
+                            "rate": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "limit": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "burst": {
+                              "oneOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "string"
+                                }
+                              ]
+                            }
+                          }
                         }
                       }
                     }

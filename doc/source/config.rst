@@ -118,6 +118,26 @@ Tree diagram for network config::
         |  +--rw rate?    number64
         |  +--rw limit?   number64
         |  +--rw burst?   number64
+        +--rw transmit
+        |  +--rw delay?                uint64
+        |  +--rw jitter?               uint64
+        |  +--rw jitter-correlation?   decimal64
+        |  +--rw loss?                 uint64
+        |  +--rw loss-correlation?     decimal64
+        |  +--rw rate
+        |     +--rw rate?    number64
+        |     +--rw limit?   number64
+        |     +--rw burst?   number64
+        +--rw receive
+        |  +--rw delay?                uint64
+        |  +--rw jitter?               uint64
+        |  +--rw jitter-correlation?   decimal64
+        |  +--rw loss?                 uint64
+        |  +--rw loss-correlation?     decimal64
+        |  +--rw rate
+        |     +--rw rate?    number64
+        |     +--rw limit?   number64
+        |     +--rw burst?   number64
         +--rw connections* [to]
            +--rw to                    string
            +--rw name?                 string
@@ -128,14 +148,54 @@ Tree diagram for network config::
            +--rw loss?                 uint64
            +--rw loss-correlation?     decimal64
            +--rw rate
-              +--rw rate?    number64
-              +--rw limit?   number64
-              +--rw burst?   number64
+           |  +--rw rate?    number64
+           |  +--rw limit?   number64
+           |  +--rw burst?   number64
+           +--rw transmit
+           |  +--rw delay?                uint64
+           |  +--rw jitter?               uint64
+           |  +--rw jitter-correlation?   decimal64
+           |  +--rw loss?                 uint64
+           |  +--rw loss-correlation?     decimal64
+           |  +--rw rate
+           |     +--rw rate?    number64
+           |     +--rw limit?   number64
+           |     +--rw burst?   number64
+           +--rw receive
+              +--rw delay?                uint64
+              +--rw jitter?               uint64
+              +--rw jitter-correlation?   decimal64
+              +--rw loss?                 uint64
+              +--rw loss-correlation?     decimal64
+              +--rw rate
+                 +--rw rate?    number64
+                 +--rw limit?   number64
+                 +--rw burst?   number64
 
 The ``connections`` configuration is entirely optional, and is present to allow
 overriding default network quality parameters (e.g., ``delay``, ``jitter``,
 etc). If no override is required it is enough for the nodes to specify their
 connection to the network.
+
+Network quality parameters are directional and relative to the network:
+``transmit`` shapes traffic the network sends toward a node, and ``receive``
+shapes traffic the network receives from a node. Both are applied on the
+network's bridge port, so the node's own qdiscs are left untouched. Parameters
+given outside of ``transmit``/``receive`` are deprecated and apply to
+``transmit``.
+
+For example, to shape both directions between ``wan1`` and ``r1``::
+
+  networks:
+    - name: wan1
+      connections:
+        - to: r1
+          transmit:
+            delay: 2500
+            rate: { rate: "15M", burst: 16384, limit: 131072 }
+          receive:
+            delay: 2500
+            rate: { rate: "5M", burst: 16384, limit: 131072 }
 
 
 Nodes
@@ -234,9 +294,21 @@ Tree diagram for node connections::
    |     |  +--rw loss?                 uint64
    |     |  +--rw loss-correlation?     decimal64
    |     |  +--rw rate
-   |     |     +--rw rate?    number64
-   |     |     +--rw limit?   number64
-   |     |     +--rw burst?   number64
+   |     |  |  +--rw rate?    number64
+   |     |  |  +--rw limit?   number64
+   |     |  |  +--rw burst?   number64
+   |     |  +--rw transmit
+   |     |  |  ... same constraints as above
+   |     |  +--rw receive
+   |     |     ... same constraints as above
+
+Connection quality parameters are relative to the node: ``transmit`` shapes
+traffic the node sends and ``receive`` shapes traffic the node receives.
+Parameters given outside of ``transmit``/``receive`` are deprecated and apply to
+``transmit``. For connections to a network both directions are shaped on the
+network's bridge port, and node values override network values. For
+point-to-point connections the shaping is applied on the sending node's
+interface, combining the sender's ``transmit`` with the receiver's ``receive``.
 
 
 Mounts

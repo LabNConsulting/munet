@@ -75,3 +75,155 @@ async def test_switch_constraints_outside_node(unet_case):
     avg = await ping_average_rtt(r1, r2, rif2)
     logging.info("ping average RTT: %s", avg)
     assert (exp_avg - 1) < avg < (exp_avg + 2)
+
+
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_transmit_and_receive(unet_case):
+    """Switch transmit is node RX; receive is node TX (IFB). Together RTT."""
+    unet = unet_case
+    unet.autonumber = True
+
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+    sw1 = unet.add_network("sw1", {"ip": "auto"})
+
+    delay = 50000
+    swc = {"transmit": {"delay": delay}, "receive": {"delay": delay}}
+    await unet.add_native_link(sw1, r1, dict(swc), {})
+    await unet.add_native_link(sw1, r2, dict(swc), {})
+
+    rif2 = r2.net_intfs[sw1.name]
+    sif1 = sw1.intfs[0]
+    sif2 = sw1.intfs[1]
+    r1q = await r1.async_cmd_raises(f"tc qdisc show dev {r1.net_intfs[sw1.name]}")
+    s1q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif1}")
+    s2q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif2}")
+    swq = await sw1.async_cmd_raises("tc qdisc show")
+    logging.info("node qdisc: %s", r1q)
+    logging.info("switch ports: %s | %s", s1q, s2q)
+    logging.info("switch ns: %s", swq)
+    assert "netem" not in r1q
+    assert "ingress" in s1q and "netem" in s1q
+    assert "ingress" in s2q and "netem" in s2q
+    assert "ifb" in swq
+
+    # TX + RX on each hop: 4 * 50ms
+    exp_avg = (delay * 4) / 1000
+    avg = await ping_average_rtt(r1, r2, rif2)
+    logging.info("ping average RTT: %s", avg)
+    assert (exp_avg - 1) < avg < (exp_avg + 2)
+
+
+def test_tc_directions():
+    """Unwrapped keys are transmit; containers override and split direction."""
+    # pylint: disable=protected-access
+    assert not Munet._tc_transmit(None)
+    assert not Munet._tc_receive(None)
+    assert not Munet._tc_receive({"delay": 1000})
+
+    conf = {
+        "name": "eth0",
+        "delay": 1000,
+        "loss": 5,
+        "transmit": {"delay": 2000, "rate": {"rate": "15M"}},
+        "receive": {"delay": 3000},
+    }
+    tx = Munet._tc_transmit(conf)
+    rx = Munet._tc_receive(conf)
+    assert tx == {"delay": 2000, "loss": 5, "rate": {"rate": "15M"}}
+    assert rx == {"delay": 3000}
+    assert Munet._tc_transmit({"delay": 1000}) == {"delay": 1000}
+
+
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_legacy_transmit_only(unet_case):
+    """Deprecated unwrapped switch TC is transmit: switch egress (no IFB)."""
+    unet = unet_case
+    unet.autonumber = True
+
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+    sw1 = unet.add_network("sw1", {"ip": "auto"})
+
+    delay = 50000
+    await unet.add_native_link(sw1, r1, {"delay": delay}, {})
+    await unet.add_native_link(sw1, r2, {"delay": delay}, {})
+
+    rif2 = r2.net_intfs[sw1.name]
+    sif1 = sw1.intfs[0]
+    sif2 = sw1.intfs[1]
+    r1q = await r1.async_cmd_raises(f"tc qdisc show dev {r1.net_intfs[sw1.name]}")
+    s1q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif1}")
+    s2q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif2}")
+    swq = await sw1.async_cmd_raises("tc qdisc show")
+    logging.info("node qdisc: %s", r1q)
+    logging.info("switch ports: %s | %s", s1q, s2q)
+    logging.info("switch ns: %s", swq)
+    assert "netem" not in r1q
+    assert "ingress" not in s1q and "netem" in s1q
+    assert "ingress" not in s2q and "netem" in s2q
+    assert "ifb" not in swq
+
+    exp_avg = (delay + delay) / 1000
+    avg = await ping_average_rtt(r1, r2, rif2)
+    logging.info("ping average RTT: %s", avg)
+    assert (exp_avg - 1) < avg < (exp_avg + 2)
+
+
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_node_receive(unet_case):
+    """Node receive on a network link shapes switch egress, not the node."""
+    unet = unet_case
+    unet.autonumber = True
+
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+    sw1 = unet.add_network("sw1", {"ip": "auto"})
+
+    delay = 50000
+    await unet.add_native_link(sw1, r1, {}, {"receive": {"delay": delay}})
+    await unet.add_native_link(sw1, r2, {}, {"receive": {"delay": delay}})
+
+    rif2 = r2.net_intfs[sw1.name]
+    sif1 = sw1.intfs[0]
+    r1q = await r1.async_cmd_raises(f"tc qdisc show dev {r1.net_intfs[sw1.name]}")
+    s1q = await sw1.async_cmd_raises(f"tc qdisc show dev {sif1}")
+    swq = await sw1.async_cmd_raises("tc qdisc show")
+    logging.info("node qdisc: %s", r1q)
+    logging.info("switch port: %s", s1q)
+    logging.info("switch ns: %s", swq)
+    assert "netem" not in r1q
+    assert "ingress" not in s1q and "netem" in s1q
+    assert "ifb" not in swq
+
+    exp_avg = (delay + delay) / 1000
+    avg = await ping_average_rtt(r1, r2, rif2)
+    logging.info("ping average RTT: %s", avg)
+    assert (exp_avg - 1) < avg < (exp_avg + 2)
+
+
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_p2p_receive(unet_case):
+    """P2P receive is applied on the peer's egress."""
+    unet = unet_case
+    unet.autonumber = True
+
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+
+    ifname = "p2p0"
+    delay = 50000
+    c1 = {"name": ifname, "receive": {"delay": delay}}
+    c2 = {"name": ifname}
+    await unet.add_native_link(r1, r2, c1, c2)
+
+    r1q = await r1.async_cmd_raises(f"tc qdisc show dev {ifname}")
+    r2q = await r2.async_cmd_raises(f"tc qdisc show dev {ifname}")
+    logging.info("node qdiscs: %s | %s", r1q, r2q)
+    assert "netem" not in r1q
+    assert "netem" in r2q
+
+    exp_avg = delay / 1000
+    avg = await ping_average_rtt(r1, r2, ifname)
+    logging.info("ping average RTT: %s", avg)
+    assert (exp_avg - 1) < avg < (exp_avg + 2)

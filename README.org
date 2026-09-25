@@ -103,9 +103,29 @@ module: labn-munet-config
   |  |  +--rw loss?                 uint64
   |  |  +--rw loss-correlation?     decimal64
   |  |  +--rw rate
-  |  |     +--rw rate?    number64
-  |  |     +--rw limit?   number64
-  |  |     +--rw burst?   number64
+  |  |  |  +--rw rate?    number64
+  |  |  |  +--rw limit?   number64
+  |  |  |  +--rw burst?   number64
+  |  |  +--rw transmit
+  |  |  |  +--rw delay?                uint64
+  |  |  |  +--rw jitter?               uint64
+  |  |  |  +--rw jitter-correlation?   decimal64
+  |  |  |  +--rw loss?                 uint64
+  |  |  |  +--rw loss-correlation?     decimal64
+  |  |  |  +--rw rate
+  |  |  |     +--rw rate?    number64
+  |  |  |     +--rw limit?   number64
+  |  |  |     +--rw burst?   number64
+  |  |  +--rw receive
+  |  |     +--rw delay?                uint64
+  |  |     +--rw jitter?               uint64
+  |  |     +--rw jitter-correlation?   decimal64
+  |  |     +--rw loss?                 uint64
+  |  |     +--rw loss-correlation?     decimal64
+  |  |     +--rw rate
+  |  |        +--rw rate?    number64
+  |  |        +--rw limit?   number64
+  |  |        +--rw burst?   number64
   |  +--rw env* [name]
   |  |  +--rw name     string
   |  |  +--rw value?   string
@@ -145,6 +165,26 @@ module: labn-munet-config
   |  |  |  +--rw rate?    number64
   |  |  |  +--rw limit?   number64
   |  |  |  +--rw burst?   number64
+  |  |  +--rw transmit
+  |  |  |  +--rw delay?                uint64
+  |  |  |  +--rw jitter?               uint64
+  |  |  |  +--rw jitter-correlation?   decimal64
+  |  |  |  +--rw loss?                 uint64
+  |  |  |  +--rw loss-correlation?     decimal64
+  |  |  |  +--rw rate
+  |  |  |     +--rw rate?    number64
+  |  |  |     +--rw limit?   number64
+  |  |  |     +--rw burst?   number64
+  |  |  +--rw receive
+  |  |  |  +--rw delay?                uint64
+  |  |  |  +--rw jitter?               uint64
+  |  |  |  +--rw jitter-correlation?   decimal64
+  |  |  |  +--rw loss?                 uint64
+  |  |  |  +--rw loss-correlation?     decimal64
+  |  |  |  +--rw rate
+  |  |  |     +--rw rate?    number64
+  |  |  |     +--rw limit?   number64
+  |  |  |     +--rw burst?   number64
   |  |  +--rw connections* [to]
   |  |     +--rw to                    string
   |  |     +--rw name?                 string
@@ -155,9 +195,29 @@ module: labn-munet-config
   |  |     +--rw loss?                 uint64
   |  |     +--rw loss-correlation?     decimal64
   |  |     +--rw rate
-  |  |        +--rw rate?    number64
-  |  |        +--rw limit?   number64
-  |  |        +--rw burst?   number64
+  |  |     |  +--rw rate?    number64
+  |  |     |  +--rw limit?   number64
+  |  |     |  +--rw burst?   number64
+  |  |     +--rw transmit
+  |  |     |  +--rw delay?                uint64
+  |  |     |  +--rw jitter?               uint64
+  |  |     |  +--rw jitter-correlation?   decimal64
+  |  |     |  +--rw loss?                 uint64
+  |  |     |  +--rw loss-correlation?     decimal64
+  |  |     |  +--rw rate
+  |  |     |     +--rw rate?    number64
+  |  |     |     +--rw limit?   number64
+  |  |     |     +--rw burst?   number64
+  |  |     +--rw receive
+  |  |        +--rw delay?                uint64
+  |  |        +--rw jitter?               uint64
+  |  |        +--rw jitter-correlation?   decimal64
+  |  |        +--rw loss?                 uint64
+  |  |        +--rw loss-correlation?     decimal64
+  |  |        +--rw rate
+  |  |           +--rw rate?    number64
+  |  |           +--rw limit?   number64
+  |  |           +--rw burst?   number64
   |  +--rw nodes* [name]
   |     +--rw id?                  uint32
   |     +--rw kind?                -> ../../../kinds/name
@@ -217,9 +277,29 @@ module: labn-munet-config
   |     |  +--rw loss?                 uint64
   |     |  +--rw loss-correlation?     decimal64
   |     |  +--rw rate
-  |     |     +--rw rate?    number64
-  |     |     +--rw limit?   number64
-  |     |     +--rw burst?   number64
+  |     |  |  +--rw rate?    number64
+  |     |  |  +--rw limit?   number64
+  |     |  |  +--rw burst?   number64
+  |     |  +--rw transmit
+  |     |  |  +--rw delay?                uint64
+  |     |  |  +--rw jitter?               uint64
+  |     |  |  +--rw jitter-correlation?   decimal64
+  |     |  |  +--rw loss?                 uint64
+  |     |  |  +--rw loss-correlation?     decimal64
+  |     |  |  +--rw rate
+  |     |  |     +--rw rate?    number64
+  |     |  |     +--rw limit?   number64
+  |     |  |     +--rw burst?   number64
+  |     |  +--rw receive
+  |     |     +--rw delay?                uint64
+  |     |     +--rw jitter?               uint64
+  |     |     +--rw jitter-correlation?   decimal64
+  |     |     +--rw loss?                 uint64
+  |     |     +--rw loss-correlation?     decimal64
+  |     |     +--rw rate
+  |     |        +--rw rate?    number64
+  |     |        +--rw limit?   number64
+  |     |        +--rw burst?   number64
   |     +--rw env* [name]
   |     |  +--rw name     string
   |     |  +--rw value?   string
@@ -568,6 +648,30 @@ munet>
       }
     }
 
+    grouping directional-intf-constraints {
+      description
+        "Traffic control constraints by direction. Direction is relative to
+         the owner of the config: the node for node connections, and the
+         network (bridge) for network config.";
+      uses intf-constraints {
+        status deprecated;
+        description
+          "Constraints outside of ./transmit or ./receive apply to transmit.
+           Use ./transmit instead.";
+      }
+      container transmit {
+        description
+          "Constraints on traffic sent by this end (local egress). These
+           override the deprecated unwrapped constraints.";
+        uses intf-constraints;
+      }
+      container receive {
+        description
+          "Constraints on traffic received by this end (local ingress).";
+        uses intf-constraints;
+      }
+    }
+
     grouping common-node {
       description "Common node properties";
       leaf-list ip {
@@ -879,7 +983,7 @@ munet>
           default "virtio-net-pc";
           description "driver name for qemu based interfaces";
         }
-        uses intf-constraints;
+        uses directional-intf-constraints;
       }
       list env {
         key name;
@@ -1158,7 +1262,7 @@ munet>
         }
 
         /* default network tc parameters */
-        uses intf-constraints;
+        uses directional-intf-constraints;
 
         list connections {
           key to;
@@ -1166,7 +1270,8 @@ munet>
             "Overriding network side configuration for connections to nodes from
              this network. If the default network tc parameters are not being
              overriden for a specific node connection then this configuration is
-             not required.";
+             not required. Here transmit is traffic toward the node and receive
+             is traffic from the node.";
 
           leaf to {
             type string;
@@ -1182,7 +1287,7 @@ munet>
               "The remote name of the connection. This is used for disambiguation
                when there are multiple connections to the same remote node.";
           }
-          uses intf-constraints;
+          uses directional-intf-constraints;
         }
       }
 

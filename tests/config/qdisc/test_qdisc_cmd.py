@@ -67,3 +67,19 @@ async def test_config_cmd(unet_share):
     assert "delay" not in output
     assert "loss" not in output
     assert "rate" not in output
+
+    h4 = unet.hosts["h4"]
+    output = h4.cmd_raises("tc q | grep 'dev eth0'")
+    logging.debug("qdisc for h4 eth0 found: %s", output)
+    assert "delay" not in output
+    assert "loss" not in output
+
+    # Toward h4: network transmit plus h4 receive, on the switch port.
+    output = unet.cmd_raises("tc q | grep 'dev net1-e3'")
+    logging.debug("qdisc for dev net1-e3 (h4 RX) found: %s", output)
+    assert re.search(r"delay 2ms.*loss 10%", output, re.DOTALL)
+
+    # From h4: network receive plus h4 transmit, on the switch IFB.
+    output = net1.cmd_raises("tc q | grep 'dev ifbnet1e3'")
+    logging.debug("qdisc for ifbnet1e3 (h4 TX) found: %s", output)
+    assert re.search(r"delay 3ms.*loss 20%", output, re.DOTALL)
