@@ -323,16 +323,23 @@ async def run_tests(args):
                         passed, failed, e = await execute_test(
                             unet, test, args, tnum, exec_handler
                         )
+
+                        if e is not None and not isinstance(e, uapi.CLIOnErrorError):
+                            e_tb = e.__traceback__
+                            e_info = (type(e), e, e_tb)
+                            logging.error(
+                                "Script error executing test %s: %s", test, e, exc_info=e_info
+                            )
                 except KeyboardInterrupt as error:
                     errlog.warning("KeyboardInterrupt while running test %s", test_name)
                     passed, failed, e = 0, 0, error
                     raise
                 except Exception as error:
-                    logging.error(
-                        "Error executing test %s: %s", test, error, exc_info=True
-                    )
                     errlog.error(
-                        "Error executing test %s: %s", test, error, exc_info=True
+                        "Internal error executing test %s: %s", test, error, exc_info=True
+                    )
+                    logging.error(
+                        "Internal error executing test %s: %s", test, error, exc_info=True
                     )
                     passed, failed, e = 0, 0, error
                 finally:

@@ -268,9 +268,13 @@ class TestCase:
         """
         assert TestCase.g_tc is None
         self.oplogf("execute")
+        e = None
         try:
             TestCase.g_tc = self
-            e = self.__exec_script(self.info.path, True, False)
+            self.__exec_script(self.info.path, True, False)
+        except ScriptError as err:
+            # 'Unwrap' the ScriptError when possible
+            e = err.__cause__ if err.__cause__ is not None else err
         except BaseException:
             self.__end_test()
             raise
@@ -344,11 +348,14 @@ class TestCase:
                 + "\n return ok_result\n"
                 + "\n"
             )
-            exec(s2)
+            exec_locals = {}
+            # Ensures that Traceback paths are the file path (and not "<string>")
+            code = compile(s2, str(path), "exec")
+            exec(code, globals(), exec_locals)
 
             # Extract any docstring as a title.
             if print_header:
-                title = locals()[f"_{name}"].__doc__
+                title = exec_locals[f"_{name}"].__doc__
                 if title is None:
                     title = ""
                 title = title.lstrip()
@@ -360,26 +367,33 @@ class TestCase:
                 self.__print_header(self.info.tag, title, add_newline)
             self.__space_before_result = False
 
-            # Execute the function.
-            result = locals()[f"_{name}"](_ok_result)
+            # Execute the function after fixing Traceback line numbers
+            func = exec_locals[f"_{name}"]
+            func.__code__ = func.__code__.replace(
+                co_filename=str(path),
+                co_firstlineno=0,
+            )
+            result = func(_ok_result)
 
             # Here's where we can do async in the future if we want.
             # result = await locals()[f"_{name}"](_ok_result)
-        except ScriptError as error:
-            return error
+        except ScriptError:
+            # The current script has include()'ed a subordinate script and that script has raised
+            # a ScriptError. We should continue to pass the error back upwards.
+            raise
         except CLIOnErrorError:
             raise
         except Exception as error:
-            logging.error(
-                "Unexpected exception executing %s: %s", name, error, exc_info=True
-            )
-            return error
+            # Pop the 'func(_ok_result)' frame off of the traceback
+            tb = error.__traceback__
+            if tb is not None and tb.tb_next is not None:
+                tb = tb.tb_next
+            raise ScriptError("Mutest script error") from error.with_traceback(tb)
         else:
             if result is not _ok_result:
                 logging.info("%s returned early, result: %s", name, result)
             else:
                 self.oplogf("__exec_script: name %s completed normally", name)
-        return None
 
     def __post_result(self, target, success, rstr, logstr=None):
         self.oplogf(
@@ -681,41 +695,40 @@ class TestCase:
             self.oplogf("include: swapped info path: new %s old %s", path, old_path)
 
         try:
-            e = self.__exec_script(
-                path, print_header=new_section, add_newline=new_section
+            self.__exec_script(
+                path, print_header=new_section, add_newline=new_section,
             )
+        except ScriptError:
+            # The include()'ed script or one if it's subordinate scripts threw an error. We should
+            # continue to pass the error back upwards.
+            raise
         except CLIOnErrorError:
-            do_cli = True
+            raise
+        finally:
+            if new_section:
+                # Something within the section creating include has also created a section
+                # end it, sections do not cross section creating file boundaries
+                if self.__in_section:
+                    self.oplogf(
+                        "include done: path: %s __in_section calling __end_section", path
+                    )
+                    self.__end_section()
 
-        if new_section:
-            # Something within the section creating include has also created a section
-            # end it, sections do not cross section creating file boundaries
-            if self.__in_section:
+                # We should now be back to the info we started with, b/c we don't actually
+                # start a new section (__in_section) that then could have been ended inside
+                # the included file.
+                assert our_info == self.info
+
                 self.oplogf(
-                    "include done: path: %s __in_section calling __end_section", path
+                    "include done: path: %s new_section calling __end_section", path
                 )
                 self.__end_section()
-
-            # We should now be back to the info we started with, b/c we don't actually
-            # start a new section (__in_section) that then could have been ended inside
-            # the included file.
-            assert our_info == self.info
-
-            self.oplogf(
-                "include done: path: %s new_section calling __end_section", path
-            )
-            self.__end_section()
-        else:
-            # The current top path could be anything due to multiple inline includes as
-            # well as section swap in and out. Forcibly return the top path to the file
-            # we are returning to
-            self.info.path = old_path
-            self.oplogf("include: restored info path: %s", old_path)
-
-        if do_cli:
-            raise CLIOnErrorError()
-        if e:
-            raise ScriptError(e)
+            else:
+                # The current top path could be anything due to multiple inline includes as
+                # well as section swap in and out. Forcibly return the top path to the file
+                # we are returning to
+                self.info.path = old_path
+                self.oplogf("include: restored info path: %s", old_path)
 
     def __end_section(self):
         self.oplogf("__end_section: __in_section: %s", self.__in_section)
