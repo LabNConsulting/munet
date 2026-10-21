@@ -19,6 +19,9 @@ topology:
         - to: h4
           transmit:
             delay: 2000
+            peers:
+              - peer: h1
+                delay: 4000
           receive:
             delay: 3000
 

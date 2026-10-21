@@ -7,6 +7,7 @@
 
 import logging
 import re
+from copy import deepcopy
 
 import pytest
 
@@ -133,6 +134,59 @@ def test_tc_directions():
     assert tx == {"delay": 2000, "loss": 5, "rate": {"rate": "15M"}}
     assert rx == {"delay": 3000}
     assert Munet._tc_transmit({"delay": 1000}) == {"delay": 1000}
+
+    assert not Munet._tc_peers(None)
+    assert not Munet._tc_peers(conf)
+    peers = Munet._tc_peers(
+        {"transmit": {"peers": [{"peer": "r1", "delay": 10, "name": "x"}]}}
+    )
+    assert peers == {"r1": {"delay": 10}}
+    assert "peers" not in Munet._tc_transmit({"transmit": {"peers": []}})
+
+
+@pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])
+async def test_switch_transmit_peers(unet_case):
+    """Per-peer transmit shapes only that peer's traffic toward the node."""
+    unet = unet_case
+    unet.autonumber = True
+
+    peer_delay = 50000
+    default_delay = 10000
+    r2conn = {
+        "to": "r2",
+        "transmit": {
+            "delay": default_delay,
+            "peers": [{"peer": "r1", "delay": peer_delay}],
+        },
+    }
+    sw1 = unet.add_network("sw1", {"ip": "auto", "connections": [r2conn]})
+    r1 = unet.add_l3_node("r1")
+    r2 = unet.add_l3_node("r2")
+    r3 = unet.add_l3_node("r3")
+
+    # Link r2 before its peer r1 so marks do not depend on link order.
+    await unet.add_native_link(sw1, r2, deepcopy(r2conn), {})
+    await unet.add_native_link(sw1, r1, {}, {})
+    await unet.add_native_link(sw1, r3, {}, {})
+
+    s2q = await sw1.async_cmd_raises(f"tc qdisc show dev {sw1.intfs[0]}")
+    logging.info("r2 switch port qdiscs: %s", s2q)
+    assert "drr" in s2q
+    r2q = await r2.async_cmd_raises(f"tc qdisc show dev {r2.net_intfs[sw1.name]}")
+    assert "netem" not in r2q
+
+    # One way delays: r1 -> r2 peer_delay, r3 -> r2 default_delay, rest none.
+    avg = await ping_average_rtt(r1, r2, r2.net_intfs[sw1.name])
+    logging.info("r1 <-> r2 RTT: %s", avg)
+    assert (peer_delay / 1000 - 1) < avg < (peer_delay / 1000 + 2)
+
+    avg = await ping_average_rtt(r3, r2, r2.net_intfs[sw1.name])
+    logging.info("r3 <-> r2 RTT: %s", avg)
+    assert (default_delay / 1000 - 1) < avg < (default_delay / 1000 + 2)
+
+    avg = await ping_average_rtt(r1, r3, r3.net_intfs[sw1.name])
+    logging.info("r1 <-> r3 RTT: %s", avg)
+    assert avg < 2
 
 
 @pytest.mark.parametrize("unet_case", [False, True], indirect=["unet_case"])

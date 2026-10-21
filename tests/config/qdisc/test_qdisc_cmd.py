@@ -74,10 +74,13 @@ async def test_config_cmd(unet_share):
     assert "delay" not in output
     assert "loss" not in output
 
-    # Toward h4: network transmit plus h4 receive, on the switch port.
+    # Toward h4: network transmit plus h4 receive, on the switch port. Traffic
+    # from h1 gets its own class with the peer delay.
     output = unet.cmd_raises("tc q | grep 'dev net1-e3'")
     logging.debug("qdisc for dev net1-e3 (h4 RX) found: %s", output)
+    assert "drr" in output
     assert re.search(r"delay 2ms.*loss 10%", output, re.DOTALL)
+    assert re.search(r"delay 4ms.*loss 10%", output, re.DOTALL)
 
     # From h4: network receive plus h4 transmit, on the switch IFB.
     output = net1.cmd_raises("tc q | grep 'dev ifbnet1e3'")

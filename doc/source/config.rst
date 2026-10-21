@@ -158,9 +158,20 @@ Tree diagram for network config::
            |  +--rw loss?                 uint64
            |  +--rw loss-correlation?     decimal64
            |  +--rw rate
-           |     +--rw rate?    number64
-           |     +--rw limit?   number64
-           |     +--rw burst?   number64
+           |  |  +--rw rate?    number64
+           |  |  +--rw limit?   number64
+           |  |  +--rw burst?   number64
+           |  +--rw peers* [peer]
+           |     +--rw peer                  string
+           |     +--rw delay?                uint64
+           |     +--rw jitter?               uint64
+           |     +--rw jitter-correlation?   decimal64
+           |     +--rw loss?                 uint64
+           |     +--rw loss-correlation?     decimal64
+           |     +--rw rate
+           |        +--rw rate?    number64
+           |        +--rw limit?   number64
+           |        +--rw burst?   number64
            +--rw receive
               +--rw delay?                uint64
               +--rw jitter?               uint64
@@ -196,6 +207,25 @@ For example, to shape both directions between ``wan1`` and ``r1``::
           receive:
             delay: 2500
             rate: { rate: "5M", burst: 16384, limit: 131072 }
+
+A connection's ``transmit`` may also list ``peers`` to give traffic from a
+specific sending node on the network its own parameters, so each pair of nodes
+can have different link quality in each direction. Parameters not given for a
+peer are taken from the connection's ``transmit`` (and the node's ``receive``).
+Traffic is classified by the bridge port it arrived on, so this also applies to
+broadcast and multicast. For example, to make ``r1`` to ``r2`` slow and lossy
+while other nodes reach ``r2`` with the default delay::
+
+  networks:
+    - name: radio
+      connections:
+        - to: r2
+          transmit:
+            delay: 1000
+            peers:
+              - peer: r1
+                delay: 20000
+                loss: 5
 
 
 Nodes

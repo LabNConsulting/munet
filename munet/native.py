@@ -3006,6 +3006,7 @@ class Munet(BaseMunet):
 
         self.built = False
         self.tapcount = 0
+        self.tc_marks = {}
 
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.set_ns_cwd(self.rundir)
@@ -3374,6 +3375,18 @@ ff02::2\tip6-allrouters
             return {}
         return Munet._tc_pick(config.get("receive"))
 
+    @staticmethod
+    def _tc_peers(config):
+        """TC from ``transmit/peers``, keyed by the sending peer's name."""
+        if not config:
+            return {}
+        peers = (config.get("transmit") or {}).get("peers") or []
+        return {p["peer"]: Munet._tc_pick(p) for p in peers}
+
+    def _tc_mark(self, name):
+        """Return the skb mark that tags traffic sent by node `name`."""
+        return self.tc_marks.setdefault(name, len(self.tc_marks) + 1)
+
     async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
         isp2p = False
@@ -3459,10 +3472,24 @@ ff02::2\tip6-allrouters
             # Node values win on overlapping keys.
             toward_node = {**Munet._tc_transmit(c1), **Munet._tc_receive(c2)}
             from_node = {**Munet._tc_receive(c1), **Munet._tc_transmit(c2)}
-            if toward_node:
+            # Per-peer transmit overrides classify on the skb mark that the
+            # sender's port sets on ingress, so every port of a network that
+            # uses peers marks what it receives.
+            peers = Munet._tc_peers(c1)
+            if peers:
+                peer_tc = [
+                    (self._tc_mark(peer), {**toward_node, **tc})
+                    for peer, tc in peers.items()
+                ]
+                node1.set_intf_peer_constraints(if1, toward_node, peer_tc)
+            elif toward_node:
                 node1.set_intf_constraints(if1, **toward_node)
-            if from_node:
-                node1.set_intf_ingress_constraints(if1, **from_node)
+            mark = None
+            netconns = node1.config.get("connections") or []
+            if peers or any(Munet._tc_peers(c) for c in netconns):
+                mark = self._tc_mark(node2.name)
+            if from_node or mark is not None:
+                node1.set_intf_ingress_constraints(if1, mark=mark, **from_node)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""
