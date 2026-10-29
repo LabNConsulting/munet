@@ -118,6 +118,26 @@ Tree diagram for network config::
         |  +--rw rate?    number64
         |  +--rw limit?   number64
         |  +--rw burst?   number64
+        +--rw transmit
+        |  +--rw delay?                uint64
+        |  +--rw jitter?               uint64
+        |  +--rw jitter-correlation?   decimal64
+        |  +--rw loss?                 uint64
+        |  +--rw loss-correlation?     decimal64
+        |  +--rw rate
+        |     +--rw rate?    number64
+        |     +--rw limit?   number64
+        |     +--rw burst?   number64
+        +--rw receive
+        |  +--rw delay?                uint64
+        |  +--rw jitter?               uint64
+        |  +--rw jitter-correlation?   decimal64
+        |  +--rw loss?                 uint64
+        |  +--rw loss-correlation?     decimal64
+        |  +--rw rate
+        |     +--rw rate?    number64
+        |     +--rw limit?   number64
+        |     +--rw burst?   number64
         +--rw connections* [to]
            +--rw to                    string
            +--rw name?                 string
@@ -128,14 +148,84 @@ Tree diagram for network config::
            +--rw loss?                 uint64
            +--rw loss-correlation?     decimal64
            +--rw rate
-              +--rw rate?    number64
-              +--rw limit?   number64
-              +--rw burst?   number64
+           |  +--rw rate?    number64
+           |  +--rw limit?   number64
+           |  +--rw burst?   number64
+           +--rw transmit
+           |  +--rw delay?                uint64
+           |  +--rw jitter?               uint64
+           |  +--rw jitter-correlation?   decimal64
+           |  +--rw loss?                 uint64
+           |  +--rw loss-correlation?     decimal64
+           |  +--rw rate
+           |  |  +--rw rate?    number64
+           |  |  +--rw limit?   number64
+           |  |  +--rw burst?   number64
+           |  +--rw peers* [peer]
+           |     +--rw peer                  string
+           |     +--rw delay?                uint64
+           |     +--rw jitter?               uint64
+           |     +--rw jitter-correlation?   decimal64
+           |     +--rw loss?                 uint64
+           |     +--rw loss-correlation?     decimal64
+           |     +--rw rate
+           |        +--rw rate?    number64
+           |        +--rw limit?   number64
+           |        +--rw burst?   number64
+           +--rw receive
+              +--rw delay?                uint64
+              +--rw jitter?               uint64
+              +--rw jitter-correlation?   decimal64
+              +--rw loss?                 uint64
+              +--rw loss-correlation?     decimal64
+              +--rw rate
+                 +--rw rate?    number64
+                 +--rw limit?   number64
+                 +--rw burst?   number64
 
 The ``connections`` configuration is entirely optional, and is present to allow
 overriding default network quality parameters (e.g., ``delay``, ``jitter``,
 etc). If no override is required it is enough for the nodes to specify their
 connection to the network.
+
+Network quality parameters are directional and relative to the network:
+``transmit`` shapes traffic the network sends toward a node, and ``receive``
+shapes traffic the network receives from a node. Both are applied on the
+network's bridge port, so the node's own qdiscs are left untouched. Parameters
+given outside of ``transmit``/``receive`` are deprecated and apply to
+``transmit``.
+
+For example, to shape both directions between ``wan1`` and ``r1``::
+
+  networks:
+    - name: wan1
+      connections:
+        - to: r1
+          transmit:
+            delay: 2500
+            rate: { rate: "15M", burst: 16384, limit: 131072 }
+          receive:
+            delay: 2500
+            rate: { rate: "5M", burst: 16384, limit: 131072 }
+
+A connection's ``transmit`` may also list ``peers`` to give traffic from a
+specific sending node on the network its own parameters, so each pair of nodes
+can have different link quality in each direction. Parameters not given for a
+peer are taken from the connection's ``transmit`` (and the node's ``receive``).
+Traffic is classified by the bridge port it arrived on, so this also applies to
+broadcast and multicast. For example, to make ``r1`` to ``r2`` slow and lossy
+while other nodes reach ``r2`` with the default delay::
+
+  networks:
+    - name: radio
+      connections:
+        - to: r2
+          transmit:
+            delay: 1000
+            peers:
+              - peer: r1
+                delay: 20000
+                loss: 5
 
 
 Nodes
@@ -234,9 +324,21 @@ Tree diagram for node connections::
    |     |  +--rw loss?                 uint64
    |     |  +--rw loss-correlation?     decimal64
    |     |  +--rw rate
-   |     |     +--rw rate?    number64
-   |     |     +--rw limit?   number64
-   |     |     +--rw burst?   number64
+   |     |  |  +--rw rate?    number64
+   |     |  |  +--rw limit?   number64
+   |     |  |  +--rw burst?   number64
+   |     |  +--rw transmit
+   |     |  |  ... same constraints as above
+   |     |  +--rw receive
+   |     |     ... same constraints as above
+
+Connection quality parameters are relative to the node: ``transmit`` shapes
+traffic the node sends and ``receive`` shapes traffic the node receives.
+Parameters given outside of ``transmit``/``receive`` are deprecated and apply to
+``transmit``. For connections to a network both directions are shaped on the
+network's bridge port, and node values override network values. For
+point-to-point connections the shaping is applied on the sending node's
+interface, combining the sender's ``transmit`` with the receiver's ``receive``.
 
 
 Mounts

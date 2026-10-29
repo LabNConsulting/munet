@@ -1783,6 +1783,23 @@ class InterfaceMixin:
 
         return netem_args, tbf_args
 
+    def _add_tc_qdiscs(self, nsifname, constraints, parent="root", handle=1):
+        """Add netem then tbf under `parent`, using qdisc handles from `handle`."""
+        netem_args, tbf_args = self.get_linux_tc_args(nsifname, constraints)
+        if not netem_args and not tbf_args:
+            return False
+        selector = f"{parent} handle {handle:x}:"
+        if netem_args:
+            self.cmd_raises(
+                f"tc qdisc add dev {nsifname} {selector} netem {netem_args}"
+            )
+            selector = f"parent {handle:x}: handle {handle + 1:x}:"
+        # Place rate limit after delay otherwise limit/burst too complex
+        if tbf_args:
+            self.cmd_raises(f"tc qdisc add dev {nsifname} {selector} tbf {tbf_args}")
+        self.cmd_raises(f"tc qdisc show dev {nsifname}")
+        return True
+
     def set_intf_constraints(self, ifname, **constraints):
         """Set interface outbound constraints.
 
@@ -1801,21 +1818,79 @@ class InterfaceMixin:
             rate (int): bits per second, string allows for use of
                 {KMGTKiMiGiTi} prefixes "i" means K == 1024 otherwise K == 1000.
         """
+        self._add_tc_qdiscs(self.get_ns_ifname(ifname), constraints)
+
+    def set_intf_peer_constraints(self, ifname, constraints, peers):
+        """Set interface outbound constraints that depend on the sender.
+
+        Packets are classified by the skb mark set where they entered this
+        namespace (see `set_intf_ingress_constraints()`). Each (mark,
+        constraints) pair in `peers` gets its own class; all other packets use
+        `constraints`.
+
+        Args:
+            ifname: the name of the interface
+            constraints (dict): constraints for packets not matching a peer.
+            peers (list): (mark, constraints) pairs.
+        """
+        nsifname = self.get_ns_ifname(ifname)
+        self.cmd_raises(f"tc qdisc add dev {nsifname} root handle 1: drr")
+        classes = [(None, constraints)] + list(peers)
+        for minor, (mark, c) in enumerate(classes, start=1):
+            classid = f"1:{minor:x}"
+            self.cmd_raises(
+                f"tc class add dev {nsifname} parent 1: classid {classid} drr"
+            )
+            # Each class uses qdisc handles 2*minor (netem) and 2*minor+1 (tbf).
+            self._add_tc_qdiscs(
+                nsifname, c, parent=f"parent {classid}", handle=2 * minor
+            )
+            if mark is not None:
+                self.cmd_raises(
+                    f"tc filter add dev {nsifname} parent 1: protocol all "
+                    f"prio 1 handle {mark} fw classid {classid}"
+                )
+        # drr drops unclassified packets, so send the rest to the default class.
+        self.cmd_raises(
+            f"tc filter add dev {nsifname} parent 1: protocol all prio 2 "
+            "matchall classid 1:1"
+        )
+        self.cmd_raises(f"tc qdisc show dev {nsifname}")
+
+    def set_intf_ingress_constraints(self, ifname, mark=None, **constraints):
+        """Shape packets arriving on ifname via an IFB in this namespace.
+
+        Used on a switch port so a node's delay/rate/loss still apply to that
+        node's outbound traffic (same as a qdisc on the node NIC) without
+        taking the node's root qdisc. If `mark` is given, arriving packets are
+        also tagged with that skb mark so the egress port can classify them by
+        sender (see `set_intf_peer_constraints()`).
+        """
         nsifname = self.get_ns_ifname(ifname)
         netem_args, tbf_args = self.get_linux_tc_args(nsifname, constraints)
-        count = 1
-        selector = f"root handle {count}:"
-        if netem_args:
+        shape = bool(netem_args or tbf_args)
+        if not shape and mark is None:
+            return
+        self.cmd_raises(f"tc qdisc add dev {nsifname} handle ffff: ingress")
+        if mark is not None:
             self.cmd_raises(
-                f"tc qdisc add dev {nsifname} {selector} netem {netem_args}"
+                f"tc filter add dev {nsifname} parent ffff: protocol all prio 1 "
+                f"matchall action skbedit mark {mark} continue"
             )
-            count += 1
-            selector = f"parent {count-1}: handle {count}"
-        # Place rate limit after delay otherwise limit/burst too complex
-        if tbf_args:
-            self.cmd_raises(f"tc qdisc add dev {nsifname} {selector} tbf {tbf_args}")
-
-        self.cmd_raises(f"tc qdisc show dev {nsifname}")
+        if not shape:
+            return
+        ifb = "ifb" + re.sub(r"[^A-Za-z0-9]", "", nsifname)
+        ifb = ifb[:15] or "ifb0"
+        # Modules are host-global. The munet mount ns often has no
+        # /lib/modules, so modprobe inside it fails even when ifb is loaded.
+        commander.cmd_status("modprobe ifb", warn=False)
+        self.cmd_raises(f"ip link add {ifb} type ifb")
+        self.cmd_raises(f"ip link set {ifb} up")
+        self.cmd_raises(
+            f"tc filter add dev {nsifname} parent ffff: protocol all prio 2 "
+            f"u32 match u32 0 0 action mirred egress redirect dev {ifb}"
+        )
+        self._add_tc_qdiscs(ifb, constraints)
 
 
 class LinuxNamespace(Commander, InterfaceMixin):

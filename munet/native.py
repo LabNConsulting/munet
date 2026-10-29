@@ -3006,6 +3006,7 @@ class Munet(BaseMunet):
 
         self.built = False
         self.tapcount = 0
+        self.tc_marks = {}
 
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
         self.set_ns_cwd(self.rundir)
@@ -3329,8 +3330,62 @@ ff02::2\tip6-allrouters
             do_add_dummy = False
 
         if do_add_dummy:
-            super().add_dummy(node1, if1, **c1)
+            super().add_dummy(node1, if1, mtu=c1.get("mtu"), **Munet._tc_transmit(c1))
             node1.set_dummy_addr(c1)
+
+    _TC_KEYS = (
+        "delay",
+        "jitter",
+        "jitter-correlation",
+        "loss",
+        "loss-correlation",
+        "rate",
+    )
+
+    @staticmethod
+    def _tc_pick(config):
+        """Copy linux TC keys from config."""
+        if not config:
+            return {}
+        out = {}
+        for key in Munet._TC_KEYS:
+            if config.get(key) is not None:
+                out[key] = config[key]
+        return out
+
+    @staticmethod
+    def _tc_constraints(*configs):
+        """Merge unprefixed TC keys; later configs override earlier ones."""
+        out = {}
+        for config in configs:
+            out.update(Munet._tc_pick(config))
+        return out
+
+    @staticmethod
+    def _tc_transmit(config):
+        """TC for local egress: deprecated unwrapped keys, then ``transmit``."""
+        if not config:
+            return {}
+        return Munet._tc_constraints(config, config.get("transmit"))
+
+    @staticmethod
+    def _tc_receive(config):
+        """TC for local ingress from ``receive``."""
+        if not config:
+            return {}
+        return Munet._tc_pick(config.get("receive"))
+
+    @staticmethod
+    def _tc_peers(config):
+        """TC from ``transmit/peers``, keyed by the sending peer's name."""
+        if not config:
+            return {}
+        peers = (config.get("transmit") or {}).get("peers") or []
+        return {p["peer"]: Munet._tc_pick(p) for p in peers}
+
+    def _tc_mark(self, name):
+        """Return the skb mark that tags traffic sent by node `name`."""
+        return self.tc_marks.setdefault(name, len(self.tc_marks) + 1)
 
     async def add_native_link(self, node1, node2, c1=None, c2=None):
         """Add a link between switch and node or 2 nodes."""
@@ -3392,10 +3447,49 @@ ff02::2\tip6-allrouters
 
         if isinstance(node1, ExternalNetwork):
             pass
-        elif "physical" not in c1 and not node1.is_vm:
-            node1.set_intf_constraints(if1, **c1)
-        if "physical" not in c2 and not node2.is_vm:
-            node2.set_intf_constraints(if2, **c2)
+        elif isp2p:
+            # Both veth ends live inside the nodes. There is no outside
+            # device to own the "link" unless we insert a mid-netns.
+            # Each end's egress carries its own transmit and the peer's
+            # receive; the sender's transmit wins on overlapping keys.
+            for n, intf, c, oc in ((node1, if1, c1, c2), (node2, if2, c2, c1)):
+                if "physical" in c or n.is_vm:
+                    continue
+                tx = {**Munet._tc_receive(oc), **Munet._tc_transmit(c)}
+                if tx:
+                    self.logger.warning(
+                        "%s: p2p constraints on %s:%s stay inside the node",
+                        self,
+                        n.name,
+                        intf,
+                    )
+                    n.set_intf_constraints(intf, **tx)
+        elif "physical" not in c2:
+            # Host-to-switch: shape on the switch port so the node keeps its
+            # root qdisc. Switch transmit and node receive shape traffic
+            # toward the node (switch egress). Switch receive and node
+            # transmit shape traffic from the node (IFB on switch ingress).
+            # Node values win on overlapping keys.
+            toward_node = {**Munet._tc_transmit(c1), **Munet._tc_receive(c2)}
+            from_node = {**Munet._tc_receive(c1), **Munet._tc_transmit(c2)}
+            # Per-peer transmit overrides classify on the skb mark that the
+            # sender's port sets on ingress, so every port of a network that
+            # uses peers marks what it receives.
+            peers = Munet._tc_peers(c1)
+            if peers:
+                peer_tc = [
+                    (self._tc_mark(peer), {**toward_node, **tc})
+                    for peer, tc in peers.items()
+                ]
+                node1.set_intf_peer_constraints(if1, toward_node, peer_tc)
+            elif toward_node:
+                node1.set_intf_constraints(if1, **toward_node)
+            mark = None
+            netconns = node1.config.get("connections") or []
+            if peers or any(Munet._tc_peers(c) for c in netconns):
+                mark = self._tc_mark(node2.name)
+            if from_node or mark is not None:
+                node1.set_intf_ingress_constraints(if1, mark=mark, **from_node)
 
     def add_l3_node(self, name, config=None, **kwargs):
         """Add a node to munet."""

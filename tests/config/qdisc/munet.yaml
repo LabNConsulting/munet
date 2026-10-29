@@ -16,6 +16,14 @@ topology:
             rate: 810
         - to: h3
           delay: 14
+        - to: h4
+          transmit:
+            delay: 2000
+            peers:
+              - peer: h1
+                delay: 4000
+          receive:
+            delay: 3000
 
   nodes:
     - name: h1
@@ -37,3 +45,10 @@ topology:
     - name: h3
       connections:
         - to: net1
+    - name: h4
+      connections:
+        - to: net1
+          transmit:
+            loss: 20
+          receive:
+            loss: 10
