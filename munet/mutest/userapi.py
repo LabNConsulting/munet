@@ -23,6 +23,14 @@ Send/Expect functions:
 
     - :py:func:`wait_step_json`
 
+    - :py:func:`background_start`
+
+    - :py:func:`background_step`
+
+    - :py:func:`background_match_step`
+
+    - :py:func:`background_match_step_json`
+
 Control/Utility functions:
 
     - :py:func:`script_dir`
@@ -219,6 +227,7 @@ class TestCase:
         self.__in_section = False
 
         self.targets = targets
+        self.background_targets = {}
         self.args = args
 
         self.last = ""
@@ -440,6 +449,60 @@ class TestCase:
         self.info.run_time = time.time() - self.info.start_time
         return passed, failed
 
+    def _command_finish(
+        self,
+        cmd_out,
+    ) -> str:
+        """Finish running a ``cmd``.
+
+        Args:
+            cmd_out: the raw command output.
+        """
+        self.last = cmd_out = cmd_out.rstrip()
+        report = cmd_out if cmd_out else "<no output>"
+        self.logf("COMMAND OUTPUT:\n%s", report)
+        return cmd_out
+
+    def _command_finish_json(
+        self,
+        cmd_out,
+    ) -> Union[list, dict]:
+        """Finish running a json ``cmd`` and prepare json result.
+
+        Args:
+            cmd_out: the raw command output.
+        """
+        self.last = cmd_out = cmd_out.rstrip()
+        try:
+            js = json.loads(cmd_out)
+        except Exception as error:
+            js = None
+            self.olog.warning(
+                "JSON load failed. Check command output is in JSON format: %s",
+                error,
+            )
+        self.logf("COMMAND OUTPUT:\n%s", cmd_out)
+        return js
+
+    def _background_command_start(
+        self,
+        target: str,
+        cmd: str,
+    ) -> int:
+        """Start a ``cmd`` and return the pid.
+
+        Args:
+            target: the target to execute the command on.
+            cmd: string to execut on the target.
+        """
+        pid = self.targets[target].background_cmd_start(
+            cmd, stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT
+        )
+        self.background_targets[pid] = target
+        self.last = ""
+        self.logf("COMMAND STARTED: pid%s", pid)
+        return pid
+
     def _command(
         self,
         target: str,
@@ -454,10 +517,7 @@ class TestCase:
         out = self.targets[target].cmd_nostatus(
             cmd, stdin=subprocess.DEVNULL, warn=False
         )
-        self.last = out = out.rstrip()
-        report = out if out else "<no output>"
-        self.logf("COMMAND OUTPUT:\n%s", report)
-        return out
+        return self._command_finish(out)
 
     def _command_json(
         self,
@@ -473,32 +533,74 @@ class TestCase:
         out = self.targets[target].cmd_nostatus(
             cmd, stdin=subprocess.DEVNULL, warn=False
         )
-        self.last = out = out.rstrip()
+        return self._command_finish_json(out)
+
+    def _background_command_end(
+        self,
+        pid: int,
+    ) -> (str, str):
+        """Finish a ``cmd`` and return result.
+
+        Args:
+            pid: background cmd pid
+        """
+        target = self.background_targets.pop(pid, None)
+        if target is None:
+            raise KeyError(f"Unknown background command PID: {pid}")
+
         try:
-            js = json.loads(out)
-        except Exception as error:
-            js = None
+            _, out, _ = self.targets[target].background_cmd_end_status(
+                pid, warn=False
+            )
+        except TimeoutError as error:
             self.olog.warning(
-                "JSON load failed. Check command output is in JSON format: %s",
+                "Failed to terminate background command: %s",
                 error,
             )
-        self.logf("COMMAND OUTPUT:\n%s", out)
-        return js
+            cmd_out = None
+        else:
+            cmd_out = self._command_finish(out)
+        return target, cmd_out
 
-    def _match_command(
+    def _background_command_end_json(
         self,
-        target: str,
-        cmd: str,
+        pid: int,
+    ) -> (str, Union[list, dict]):
+        """Finish a json ``cmd`` and return json result.
+
+        Args:
+            pid: background cmd pid
+        """
+        target = self.background_targets.pop(pid, None)
+        if target is None:
+            raise KeyError(f"Unknown background command PID: {pid}")
+
+        try:
+            _, out, _ = self.targets[target].background_cmd_end_status(
+                pid, warn=False
+            )
+        except TimeoutError as error:
+            self.olog.warning(
+                "Failed to terminate background json command: %s",
+                error,
+            )
+            cmd_out = None
+        else:
+            cmd_out = self._command_finish_json(out)
+        return target, cmd_out
+
+    def _match_output(
+        self,
+        cmd_out: str,
         match: str,
         expect_fail: bool,
         flags: int,
         exact_match: bool,
     ) -> (bool, Union[str, list]):
-        """Execute a ``cmd`` and check result.
+        """Match and check result from a ``cmd``.
 
         Args:
-            target: the target to execute the command on.
-            cmd: string to execute on the target.
+            out: command output
             match: regex to ``re.search()`` for in output.
             expect_fail: if True then succeed when the regexp doesn't match.
             flags: python regex flags to modify matching behavior
@@ -510,9 +612,12 @@ class TestCase:
             otherwise if there were matching groups then groups() will be returned in
             ``matches`` otherwise group(0) (i.e., the matching text).
         """
-        out = self._command(target, cmd)
+        if cmd_out is None:
+            # Always fail on bad cmd output, even if user expected failure
+            return False, None
+
         if exact_match:
-            if match not in out:
+            if match not in cmd_out:
                 success = expect_fail
                 ret = None
             else:
@@ -522,7 +627,7 @@ class TestCase:
                 self.olog.log(level, "exactly matched:%s:", ret)
             return success, ret
 
-        search = re.search(match, out, flags)
+        search = re.search(match, cmd_out, flags)
         self.last_m = search
         if search is None:
             success = expect_fail
@@ -537,26 +642,23 @@ class TestCase:
             self.olog.log(level, "matched:%s:", ret)
         return success, ret
 
-    def _match_command_json(
+    def _match_output_json(
         self,
-        target: str,
-        cmd: str,
+        cmd_out_js: Union[list, dict],
         match: Union[str, list, dict],
         expect_fail: bool,
         exact_match: bool,
     ) -> (bool, Union[list, dict]):
-        """Execute a json ``cmd`` and check result.
+        """Match and check json result from a json ``cmd``.
 
         Args:
-            target: the target to execute the command on.
-            cmd: string to execut on the target.
+            cmd_out_js: json command output
             match: A json ``str``, object (``dict``), or array (``list``) to
                 compare against the json output from ``cmd``.
             expect_fail: if True then succeed when the json doesn't match.
             exact_match: if True then the json must exactly match.
         """
-        js = self._command_json(target, cmd)
-        if js is None:
+        if cmd_out_js is None:
             # Always fail on bad json, even if user expected failure
             # return expect_fail, {}
             return False, {}
@@ -576,13 +678,13 @@ class TestCase:
             return False, {}
 
         if exact_match:
-            deep_diff = json_cmp(expect, js)
+            deep_diff = json_cmp(expect, cmd_out_js)
             # Convert DeepDiff completely into dicts or lists at all levels
             json_diff = json.loads(deep_diff.to_json())
         else:
             deep_diff = json_cmp(
                 expect,
-                js,
+                cmd_out_js,
                 ignore_order=True,
                 cutoff_intersection_for_pairs=1,
                 cutoff_distance_for_pairs=1,
@@ -607,7 +709,7 @@ class TestCase:
             return success, json_diff
 
         success = not expect_fail
-        return success, js
+        return success, cmd_out_js
 
     def _wait(
         self,
@@ -638,12 +740,14 @@ class TestCase:
         ret = None
         while not success and time.time() < endt:
             if is_json:
-                success, ret = self._match_command_json(
-                    target, cmd, match, expect_fail, exact_match
+                js = self._command_json(target, cmd)
+                success, ret = self._match_output_json(
+                    js, match, expect_fail, exact_match
                 )
             else:
-                success, ret = self._match_command(
-                    target, cmd, match, expect_fail, flags, exact_match
+                out = self._command(target, cmd)
+                success, ret = self._match_output(
+                    out, match, expect_fail, flags, exact_match
                 )
             if not success:
                 time.sleep(interval)
@@ -799,7 +903,8 @@ class TestCase:
             target,
             cmd,
         )
-        return self._command_json(target, cmd)
+        js = self._command_json(target, cmd)
+        return {} if js is None else js
 
     def match_step(
         self,
@@ -828,8 +933,9 @@ class TestCase:
             flags,
             exact_match,
         )
-        success, ret = self._match_command(
-            target, cmd, match, expect_fail, flags, exact_match
+        out = self._command(target, cmd)
+        success, ret = self._match_output(
+            out, match, expect_fail, flags, exact_match
         )
         if desc:
             self.__post_result(target, success, desc)
@@ -871,8 +977,9 @@ class TestCase:
             expect_fail,
             exact_match,
         )
-        success, ret = self._match_command_json(
-            target, cmd, match, expect_fail, exact_match
+        js = self._command_json(target, cmd)
+        success, ret = self._match_output_json(
+            js, match, expect_fail, exact_match,
         )
         if desc:
             self.__post_result(target, success, desc)
@@ -961,6 +1068,117 @@ class TestCase:
         )
         success, ret = self._wait(
             target, cmd, match, True, timeout, interval, expect_fail, 0, exact_match
+        )
+        if desc:
+            self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
+        return success, ret
+
+    def background_start(self, target: str, cmd: str) -> int:
+        """See :py:func:`~munet.mutest.userapi.background_start`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:BACKGROUND_START:%s:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            target,
+            cmd,
+        )
+        return self._background_command_start(target, cmd)
+
+    def background_step(self, pid: int) -> str:
+        """See :py:func:`~munet.mutest.userapi.background_step`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:BACKGROUND_STEP:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            pid,
+        )
+        _, out = self._background_command_end(pid)
+        return out
+
+    def background_step_json(self, pid: int) -> Union[dict, list]:
+        """See :py:func:`~munet.mutest.userapi.background_step_json`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:BACKGROUND_STEP_JSON:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            pid,
+        )
+        _, js = self._background_command_end_json(pid)
+        return {} if js is None else js
+
+    def background_match_step(
+        self,
+        pid: int,
+        match: str,
+        desc: str = "",
+        expect_fail: bool = False,
+        flags: int = re.DOTALL,
+        exact_match: bool = False,
+    ) -> (bool, Union[str, list]):
+        """See :py:func:`~munet.mutest.userapi.background_match_step`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:BACKGROUND_MATCH_STEP:%s:%s:%s:%s:%s:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            pid,
+            match,
+            desc,
+            expect_fail,
+            flags,
+            exact_match,
+        )
+        target, out = self._background_command_end(pid)
+        success, ret = self._match_output(
+            out, match, expect_fail, flags, exact_match
+        )
+        if desc:
+            self.__post_result(target, success, desc)
+        act_on_result(success, self.args, desc)
+        return success, ret
+
+    def background_match_step_json(
+        self,
+        pid: int,
+        match: Union[str, list, dict],
+        desc: str = "",
+        expect_fail: bool = False,
+        exact_match: bool = False,
+    ) -> (bool, Union[list, dict]):
+        """See :py:func:`~munet.mutest.userapi.background_match_step_json`.
+
+        :meta private:
+        """
+        self.logf(
+            "#%s.%s:%s:BACKGROUND_MATCH_STEP_JSON:%s:%s:%s:%s:%s",
+            self.tag,
+            self.steps + 1,
+            self.info.path,
+            pid,
+            match,
+            desc,
+            expect_fail,
+            exact_match,
+        )
+        target, js = self._background_command_end_json(pid)
+        success, ret = self._match_output_json(
+            js, match, expect_fail, exact_match
         )
         if desc:
             self.__post_result(target, success, desc)
@@ -1250,6 +1468,134 @@ def wait_step_json(
     """
     return TestCase.g_tc.wait_step_json(
         target, cmd, match, desc, timeout, interval, expect_fail, exact_match
+    )
+
+
+def background_start(target: str, cmd: str) -> int:
+    """Start executing a ``cmd`` on a ``target`` in the background.
+
+    Args:
+        target: the target to execute the ``cmd`` on.
+        cmd: string to execute on the target.
+
+    Returns:
+        Returns the ``int`` pid of the ``cmd``.
+    """
+    return TestCase.g_tc.background_start(target, cmd)
+
+
+def background_step(pid: int) -> str:
+    """End a background ``cmd`` and return the output.
+
+    Args:
+        pid: the pid of the ``cmd`` returned by background_start()
+
+    Returns:
+        Returns the ``str`` output of the ``cmd``.
+
+    Raises:
+        KeyError: If the PID is unknown or the background command
+            is no longer being tracked.
+    """
+    return TestCase.g_tc.background_step(pid)
+
+
+def background_step_json(pid: int) -> Union[list, dict]:
+    """End a background json ``cmd`` and return the json object or array.
+
+    Args:
+        pid: the pid of the ``cmd`` returned by background_start()
+
+    Returns:
+        Returns the json object or array after parsing the ``cmd`` output.
+
+        If json parse fails, a warning is logged and an empty ``dict`` is used.
+
+    Raises:
+        KeyError: If the PID is unknown or the background command
+            is no longer being tracked.
+    """
+    return TestCase.g_tc.background_step_json(pid)
+
+
+def background_match_step(
+    pid: int,
+    match: str,
+    desc: str = "",
+    expect_fail: bool = False,
+    flags: int = re.DOTALL,
+    exact_match: bool = False,
+) -> (bool, Union[str, list]):
+    """End a background ``cmd`` and check result.
+
+    End a background ``cmd`` and check if the regexp in ``match`` matches
+    or doesn't match (according to the ``expect_fail`` value) the ``cmd``
+    output.
+
+    If the ``match`` regexp includes groups and if the match succeeds
+    the group values will be returned in a list, otherwise the command
+    output is returned.
+
+    Args:
+        pid: the pid of the ``cmd`` returned by background_start()
+        match: regex to match against output.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
+        expect_fail: if True then succeed when the regexp doesn't match.
+        flags: python regex flags to modify matching behavior
+        exact_match: if True then ``match`` must be exactly matched somewhere
+            in the output of ``cmd`` using ``str.find()``.
+
+    Returns:
+        Returns a 2-tuple. The first value is a bool indicating ``success``.
+        The second value will be a list from ``re.Match.groups()`` if non-empty,
+        otherwise ``re.Match.group(0)`` if there was a match otherwise None.
+
+    Raises:
+        KeyError: If the PID is unknown or the background command
+            is no longer being tracked.
+    """
+    return TestCase.g_tc.background_match_step(
+        pid, match, desc, expect_fail, flags, exact_match
+    )
+
+
+def background_match_step_json(
+    pid: int,
+    match: Union[str, list, dict],
+    desc: str = "",
+    expect_fail: bool = False,
+    exact_match: bool = False,
+) -> (bool, Union[list, dict]):
+    """End a background json ``cmd`` and check result.
+
+    End a ``cmd`` and check if the json object or array in ``match``
+    matches or doesn't match (according to the ``expect_fail`` value) the
+    json output from ``cmd``.
+
+    Args:
+        pid: the pid of the ``cmd`` returned by background_start()
+        match: A json ``str``, object (``dict``), or array (``list``) to compare
+            against the json output from ``cmd``.
+        desc: description of test, if no description then step failure is not
+            considered an error and no result is logged.
+        expect_fail: if True then succeed if the a json doesn't match.
+        exact_match: if True then the json must exactly match.
+
+    Returns:
+        Returns a 2-tuple. The first value is a bool indicating ``success``. The
+        second value is a ``dict`` of the diff if there is a difference found in
+        the json compare, otherwise the value is the json object (``dict``) or
+        array (``list``) from the ``cmd``.
+
+        If json parse fails, a warning is logged and an empty ``dict`` is used.
+
+    Raises:
+        KeyError: If the PID is unknown or the background command
+            is no longer being tracked.
+    """
+    return TestCase.g_tc.background_match_step_json(
+        pid, match, desc, expect_fail, exact_match
     )
 
 

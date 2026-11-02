@@ -119,6 +119,10 @@ used to check that the state of the interface actually changes.
   step("r1", 'vtysh -c "conf t\n interface eth0\n shut"')
   match_step("r1", 'vtysh -c "show interface eth0", "DOWN", "Check for interface DOWN")
 
+
+JSON Commands
+~~~~~~~~~~~~~~~~~~~
+
 Additionally, json variants of various functions are also available, namely
 :py:func:`match_step_json`, :py:func:`wait_step_json`, and :py:func:`step_json`.
 These json variants compare a json value ``match`` with the json result from ``cmd``.
@@ -211,6 +215,44 @@ If an exact match is desired, then ``exact_match`` should be set to ``True``.
 When ``exact_match`` is ``True``, the comparison will only succeed when all data
 in ``match`` is present in the ``cmd`` result *and* all data present in the
 ``cmd`` result is present in ``match``. In other words they exactly match.
+
+
+Background Commands
+~~~~~~~~~~~~~~~~~~~
+
+Mutest supports running commands in the background, allowing other test steps to
+execute while the command remains active. This is useful for monitoring traffic,
+collecting logs, or running commands whose output depends on subsequent test
+operations.
+
+Use :py:func:`background_start()` to launch a command and obtain its host process ID
+(PID). The command can later be terminated and its output evaluated using one of
+the following functions:
+
+- :py:func:`background_step()` — Terminates the command and returns its captured output.
+- :py:func:`background_match_step()` — Terminates the command and matches its output against a regular expression.
+- :py:func:`background_step_json()` — Terminates the command and returns its output as parsed JSON.
+- :py:func:`background_match_step_json()` — Terminates the command and compares its JSON output against an expected value.
+
+For example:
+
+.. code-block:: python
+
+   pid = background_start("r1", "tcpdump -i eth0 -n")
+
+   step("r2", "ping -c 5 10.0.0.1")
+
+   background_match_step(
+       pid,
+       r"5 packets captured",
+       "Verify captured traffic",
+   )
+
+**Each background command can be completed only once.** Calling any background
+step terminates the command and consumes its PID, preventing further
+background-step operations on that command. Background commands that are never
+explicitly completed are automatically cleaned up when the owning munet topology
+is deleted.
 
 To see all the available functions and their specifications see
 :ref:`mutest-api`.
