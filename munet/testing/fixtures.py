@@ -173,7 +173,11 @@ def rundir_module():
 
 
 async def _unet_impl(
-    _rundir, _pytestconfig, unshare=None, top_level_pidns=None, param=None
+    _rundir,
+    _pytestconfig,
+    unshare=None,
+    top_level_pidns=None,
+    param=None
 ):
     try:
         # Default is not to unshare inline if not specified otherwise
@@ -223,8 +227,11 @@ async def _unet_impl(
     except Exception as error:
         logging.error("unet fixture: yield unet unexpected exception: %s", error)
 
-    logging.debug("unet fixture: module done, deleting unet")
-    await _unet.async_delete()
+    if not _unet.deleting:
+        logging.debug("unet fixture: module done, deleting unet")
+        await _unet.async_delete()
+    else:
+        logging.debug("unet fixture: module done, unet already deleted")
 
     # No one ever awaits these so cancel them
     logging.debug("unet fixture: cleanup")
@@ -248,6 +255,28 @@ async def unet(request, rundir_module, pytestconfig):  # pylint: disable=W0621
     param = request.param if hasattr(request, "param") else None
     sdir = os.path.dirname(os.path.realpath(request.fspath))
     async with achdir(sdir, "unet fixture"):
+        async for x in _unet_impl(rundir_module, pytestconfig, param=param):
+            yield x
+
+
+@pytest.fixture(scope="function")
+async def unet_function(request, rundir_module, pytestconfig):  # pylint: disable=W0621
+    """A unet creating fixture.
+
+    This variant of the unet module is function-scoped. It is intendedd for test cases
+    where either fresh topologies are required or the topology will be destructively
+    altered (such as destroying it early).
+
+    The request param is either the basename of the config file or a tuple of the form:
+    (basename, unshare, top_level_pidns), with the second and third elements boolean and
+    optional, defaulting to False, True.
+
+    Note: This is NOT a module-level fixture. The topology exiss only for the single
+    function scope.
+    """
+    param = request.param if hasattr(request, "param") else None
+    sdir = os.path.dirname(os.path.realpath(request.fspath))
+    async with achdir(sdir, "unet_teardown fixture"):
         async for x in _unet_impl(rundir_module, pytestconfig, param=param):
             yield x
 
