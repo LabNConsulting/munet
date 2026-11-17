@@ -13,6 +13,7 @@ import functools
 import logging
 import multiprocessing
 import os
+from pathlib import Path
 import pty
 import re
 import readline
@@ -294,6 +295,7 @@ Basic Commands:
   cli   :: open a secondary CLI window
   help  :: this help
   hosts :: list hosts
+  test  :: run mutests
   quit  :: quit the cli
 
   HOST can be a host or one of the following:
@@ -456,7 +458,7 @@ async def run_command(
             outf.write(f"------- End: {host} ------\n")
 
 
-cli_builtins = ["cli", "help", "hosts", "quit"]
+cli_builtins = ["cli", "help", "hosts", "test", "quit"]
 
 
 class Completer:
@@ -470,11 +472,36 @@ class Completer:
         tokens = line.split()
         # print(f"\nXXX: tokens: {tokens} text: '{text}' state: {state}'\n")
 
-        first_token = not tokens or (text and len(tokens) == 1)
-
         # If we have already have a builtin command we are done
-        if tokens and tokens[0] in cli_builtins:
-            return [None]
+        if tokens:
+            if tokens[0] == "test":
+                return self.complete_test(tokens, text, state)
+            if tokens[0] in cli_builtins:
+                return [None]
+        return self.complete_cmd(tokens, text, state)
+
+    def complete_test(self, tokens, text, state):
+        if tokens and "/" in tokens[-1]:
+            return None  # Refuse to tab-complete anything not in the configdir
+        file_select = "mutest_*.py"
+        config_dir = self.unet.config_dirname
+        tests_glob = Path(config_dir).glob(file_select)
+        tests = {str(x.relative_to(Path(config_dir))) for x in tests_glob}
+
+        completes = {x + " " for x in tests if x.startswith(text)}
+
+        # remove any completions already present
+        if text:
+            done_set = set(tokens[:-1])
+        else:
+            done_set = set(tokens)
+        completes -= done_set
+        completes = sorted(completes) + [None]
+
+        return completes[state]
+
+    def complete_cmd(self, tokens, text, state):
+        first_token = not tokens or (text and len(tokens) == 1)
 
         cli_run_cmds = set(self.unet.cli_run_cmds.keys())
         top_run_cmds = {x for x in cli_run_cmds if self.unet.cli_run_cmds[x][3]}
@@ -544,6 +571,75 @@ async def doline(
             background,
         )
         return True
+    if cmd == "test":
+        from .mutest.__main__ import execute_test  # pylint: disable=import-outside-toplevel
+        if not nline:
+            outf.write("% No tests specified\n")
+            return True
+
+        tnum = 1
+        exec_path = unet.rundir.joinpath("munet-test-exec.log")
+        exec_path.parent.mkdir(parents=True, exist_ok=True)
+        exec_handler = logging.FileHandler(exec_path, "w")
+        exec_formatter = logging.Formatter(
+            "%(asctime)s %(levelname)5s: %(name)s: %(message)s"
+        )
+        exec_handler.setFormatter(exec_formatter)
+
+        # Retrieve the existing console handler and formatter in logconf.yaml
+        reslog = logging.getLogger("cli.mutest.results")
+        if not reslog.handlers:
+            outf.write("% No handler configured for cli.mutest.results\n")
+            return True
+        reslog_handler = reslog.handlers[0]
+
+        # Create a replacement targeting the current CLI
+        out_handler = logging.StreamHandler(outf)
+        out_handler.setLevel(reslog_handler.level)
+        out_handler.setFormatter(reslog_handler.formatter)
+
+        # Temporarily swap the handlers
+        reslog.removeHandler(reslog_handler)
+        reslog.addHandler(out_handler)
+        try:
+            for file_select in nline.split():
+                tests_glob = Path(unet.config_dirname).glob(file_select)
+                tests = sorted(str(x) for x in tests_glob if x.is_file())
+
+                if not tests:
+                    outf.write(f"% No tests matched: {file_select}\n")
+                    continue
+
+                for test in tests:
+                    # Get test case loggers
+                    cli_logger = logging.getLogger(f"cli.mutest.output.{test}")
+                    cli_reslog = logging.getLogger(f"cli.mutest.results.{test}")
+                    cli_logger.addHandler(exec_handler)
+                    cli_reslog.addHandler(exec_handler)
+
+                    try:
+                        await execute_test(
+                            unet,
+                            Path(test),
+                            {},  # Use defaults
+                            tnum,
+                            cli_logger,
+                            cli_reslog,
+                        )
+                    finally:
+                        cli_logger.removeHandler(exec_handler)
+                        cli_reslog.removeHandler(exec_handler)
+                        tnum += 1
+            return True
+        except ValueError as error:
+            outf.write(f"% Invalid test: {error}\n")
+            return True
+        finally:
+            # Return logging handlers to normal
+            reslog.removeHandler(out_handler)
+            reslog.addHandler(reslog_handler)
+            out_handler.close()
+            exec_handler.close()
 
     #
     # In window commands
@@ -734,7 +830,8 @@ async def cli_client_connected(unet, background, reader, writer):
                 self.writer.write(x.encode("utf-8", "ignore"))
 
             def flush(self):
-                self.writer.flush()
+                # asyncio.StreamWriter has no sync flush; the caller awaits drain()
+                pass
 
         if not await doline(unet, line, EncodingFile(writer), background, notty=True):
             logging.debug("server closing cli connection")

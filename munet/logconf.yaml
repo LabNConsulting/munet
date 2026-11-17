@@ -4,6 +4,9 @@ formatters:
     format: '%(asctime)s: %(levelname)s: %(message)s'
   precise:
     format: '%(asctime)s %(levelname)s: %(name)s: %(message)s'
+  result_color:
+    class: munet.mulog.ResultColorFormatter
+    format: '%(levelname)5s: %(message)s'
 
 handlers:
   console:
@@ -17,16 +20,33 @@ handlers:
     level: DEBUG
     filename: munet-exec.log
     mode: w
+  info_console:
+    level: INFO
+    class: logging.StreamHandler
+    formatter: result_color
+    stream: ext://sys.stderr
 
 root:
   level: DEBUG
   handlers: [ "console", "file" ]
 
-# these are some loggers that get used.
-# loggers:
-#   munet:
-#     level: DEBUG
-#     propagate: true
-#   munet.base.commander
-#     level: DEBUG
-#      propagate: true
+loggers:
+  # these are some loggers that get used.
+  #   munet:
+  #     level: DEBUG
+  #     propagate: true
+  #   munet.base.commander
+  #     level: DEBUG
+  #     propagate: true
+  cli.mutest.output:
+    level: DEBUG
+    # No default handlers. A file handler must be specified in code.
+    handlers: []
+    propagate: false
+  cli.mutest.results:
+    level: DEBUG
+    # Don't log to munet-exec.log, etc. by default in order to separate the test
+    # logging from the munet logging. Instead, default to only the console. For
+    # test logging, a file handler must be specified in code.
+    handlers: [ "info_console" ]
+    propagate: false
