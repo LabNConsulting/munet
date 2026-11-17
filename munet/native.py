@@ -690,6 +690,7 @@ class SSHRemote(NodeMixin, Commander):
         self.__base_cmd.append("-q")
         self.__base_cmd.append("-oStrictHostKeyChecking=no")
         self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
+        self.__base_cmd.append("-oBatchMode=yes")
         if self.idfile:
             self.__base_cmd.append(f"-i{self.idfile}")
         # Would be nice but has to be accepted by server config so not very useful.
@@ -1857,6 +1858,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         self.__base_cmd.append("-q")
         self.__base_cmd.append("-oStrictHostKeyChecking=no")
         self.__base_cmd.append("-oUserKnownHostsFile=/dev/null")
+        self.__base_cmd.append("-oBatchMode=yes")
         # Would be nice but has to be accepted by server config so not very useful.
         # self.__base_cmd.append("-oSendVar='TEST'")
         self.__base_cmd_pty = list(self.__base_cmd)

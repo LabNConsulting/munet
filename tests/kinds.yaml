@@ -11,8 +11,8 @@ kinds:
   - name: sshserver
     cmd: |
       chmod 755 -R /ssh
-      ssh-keygen -b 2048 -t rsa -f ../id_rsa -q -N ""
-      ssh-keygen -b 2048 -t rsa -f ssh_host_rsa_key -q -N ""
+      test -e ../id_rsa || ssh-keygen -b 2048 -t rsa -f ../id_rsa -q -N ""
+      test -e ssh_host_rsa_key || ssh-keygen -b 2048 -t rsa -f ssh_host_rsa_key -q -N ""
       [ -z "${SUDO_USER}" ] || chown ${SUDO_USER} ../id_rsa
       printf '#!/bin/bash\ncat %RUNDIR%/../id_rsa.pub' > /ssh/akeycmd.sh
       chmod 755 /ssh/akeycmd.sh
