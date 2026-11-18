@@ -21,6 +21,7 @@ from .args import add_launch_args
 from .cleanup import cleanup_previous
 from .cleanup import is_running_in_rundir
 from .compat import PytestConfig
+from .exceptions import MunetConfigError
 
 logger = None
 
@@ -207,8 +208,10 @@ def main(*args):
         status = asyncio.get_event_loop().run_until_complete(async_main(args, config))
     except KeyboardInterrupt:
         logger.info("Exiting, received KeyboardInterrupt in main")
+    except MunetConfigError as error:
+        logger.critical("Exiting, topology config error: %s", error)
     except Exception as error:
-        logger.info("Exiting, unexpected exception %s", error, exc_info=True)
+        logger.info("Exiting, unexpected exception: %s", error, exc_info=True)
 
     return status
 
