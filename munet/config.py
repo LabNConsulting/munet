@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from copy import deepcopy
 from typing import overload
 
+from .exceptions import MunetConfigError
 
 def find_with_kv(lst, k, v):
     if lst:
@@ -58,7 +59,7 @@ def merge_using_key(a, b, k):
 
 
 def list_to_dict_with_key(lst, k):
-    """Convert a YANG styl list of objects to dict of objects.
+    """Convert a YANG style list of objects to dict of objects.
 
     This function converts a YANG style list of objects (dictionaries) to a plain python
     dictionary of objects (dictionaries).  The value for the supplied key for each
@@ -70,10 +71,19 @@ def list_to_dict_with_key(lst, k):
       lst: a *list* of python dictionary objects.
       k: the key value contained in each dictionary object in the list.
 
+    Raises:
+      MunetConfigError if duplicate keys are present
+
     Returns:
       A dictionary of objects (dictionaries).
     """
-    return {x[k]: x for x in (lst if lst else [])}
+    result = {}
+    for x in lst or []:
+        key = x[k]
+        if key in result:
+            raise MunetConfigError(f"Duplicate '{k}' value: {key!r}")
+        result[key] = x
+    return result
 
 
 def config_to_dict_with_key(c, ck, k):
@@ -87,10 +97,16 @@ def config_to_dict_with_key(c, ck, k):
       ck: The key identifying the list of objects from ``c``.
       k: The key to pass to :py:func:`list_to_dict_with_key`.
 
+    Raises:
+      MunetConfigError if duplicate keys are present
+
     Returns:
       A dictionary of objects (dictionaries).
     """
-    c[ck] = list_to_dict_with_key(c.get(ck, []), k)
+    try:
+        c[ck] = list_to_dict_with_key(c.get(ck, []), k)
+    except MunetConfigError as error:
+        raise MunetConfigError(f"Invalid '{ck}' configuration: {error}") from error
     return c[ck]
 
 
