@@ -29,6 +29,7 @@ from typing import Union
 
 from . import config as munet_config
 from . import linux
+from .exceptions import MunetConfigError
 
 try:
     import pexpect
@@ -48,10 +49,6 @@ our_pid = os.getpid()
 
 
 detailed_cmd_logging = False
-
-
-class MunetError(Exception):
-    """A generic munet error."""
 
 
 class CalledProcessError(subprocess.CalledProcessError):
@@ -2740,13 +2737,14 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         super().__init__(name, pid=unet_pid, nsflags=unet.nsflags, unet=unet, **kwargs)
 
-        self.set_intf_basename(self.name + "-e")
+        self.set_intf_basename("br{}".format(self.id) + "-e")
 
         self.mtu = mtu
 
         self.logger.debug("Bridge: Creating")
 
-        # assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
+        if len(name) >= 16:  # Make sure fits in IFNAMSIZE
+            raise MunetConfigError(f"Bridge name exceeds 15 chars: {name!r}")
         self.cmd_raises(f"ip link delete {name} || true")
         self.cmd_raises(f"ip link add {name} type bridge")
         if self.mtu:
@@ -2956,17 +2954,21 @@ class BaseMunet(LinuxNamespace):
                 node2 = self.hosts[node2]
             name2 = node2.name
 
+        hostnames = ()
         if name1 in self.switches:
-            assert name2 in self.hosts
+            hostnames = (name2,)
         elif name2 in self.switches:
-            assert name1 in self.hosts
+            hostnames = (name1,)
             name1, name2 = name2, name1
             if1, if2 = if2, if1
         else:
             # p2p link
-            assert name1 in self.hosts
-            assert name2 in self.hosts
+            hostnames = (name1, name2)
             isp2p = True
+
+        for name in hostnames:
+            if name not in self.hosts:
+                raise MunetConfigError(f"Unknown host: {name!r}")
 
         lname = "{}:{}-{}:{}".format(name1, if1, name2, if2)
         self.logger.debug("%s: add_link %s%s", self, lname, " p2p" if isp2p else "")
@@ -3008,11 +3010,16 @@ class BaseMunet(LinuxNamespace):
             if mtu is None:
                 mtu = switch.mtu
 
-            if len(nsif1) > 16:
-                self.logger.error('"%s" len %s > 16', nsif1, len(nsif1))
-            elif len(nsif2) > 16:
-                self.logger.error('"%s" len %s > 16', nsif2, len(nsif2))
-            assert len(nsif1) < 16 and len(nsif2) < 16  # Make sure fits in IFNAMSIZE
+            if len(nsif1) >= 16:
+                self.logger.error('"%s" len %s >= 16', nsif1, len(nsif1))
+            elif len(nsif2) >= 16:
+                self.logger.error('"%s" len %s >= 16', nsif2, len(nsif2))
+
+            # Make sure fits in IFNAMSIZE
+            if len(nsif1) >= 16:
+                raise MunetConfigError(f"Interface name exceeds 15 chars: {nsif1!r}")
+            if len(nsif2) >= 16:
+                raise MunetConfigError(f"Interface name exceeds 15 chars: {nsif2!r}")
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
 

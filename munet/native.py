@@ -38,7 +38,6 @@ from .base import Bridge
 from .base import Commander
 from .base import InterfaceMixin
 from .base import LinuxNamespace
-from .base import MunetError
 from .base import SharedNamespace
 from .base import Timeout
 from .base import _async_get_exec_path
@@ -52,6 +51,8 @@ from .config import config_to_dict_with_key
 from .config import find_matching_net_config
 from .config import find_with_kv
 from .config import merge_kind_config
+from .exceptions import MunetError
+from .exceptions import MunetConfigError
 from .watchlog import WatchLog
 
 AUTO_LOOPBACK_IPV4_BASE = ipaddress.ip_interface("10.255.0.0/32")
@@ -107,7 +108,8 @@ def get_ip_network(c, brid, ipv6=False):
             return ifip
         except ValueError:
             return ipaddress.ip_network(ip)
-    assert brid < 0xFDFF  # Limited to 10.0.0.0/16 through 10.253.0.0/16 blocks
+    if brid >= 0xFDFF:  # Limited to 10.0.0.0/16 through 10.253.0.0/16 blocks
+        raise MunetConfigError("Bridge IDs exhausted (0xFDFF Max)")
     if ipv6:
         return make_ip_interface("fc00::fe/64", brid)
     return make_ip_interface("10.0.0.254/24", brid)
@@ -792,7 +794,8 @@ class L3NodeMixin(NodeMixin):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
-        assert self.id < 0x7FFF  # Limited to 10.254.0.0/16 block
+        if self.id >= 0x7FFF:  # Limited to 10.254.0.0/16 block
+            raise MunetConfigError("Node IDs exhausted (0x7FFF Max)")
         self.next_p2p_network = ipaddress.ip_network(
             f"10.254.{self.id & 0xFF}.{(self.id & 0x7F00) >> 7}/31"
         )
@@ -986,13 +989,15 @@ ff02::2\tip6-allrouters
     def set_dummy_addr(self, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 4
+            if ipaddr.version != 4:
+                raise MunetConfigError(f"'ip' address {ip!r} is not IPv4")
         else:
             ipaddr = None
 
         if ip := cconf.get("ipv6"):
             ip6addr = ipaddress.ip_interface(ip)
-            assert ip6addr.version == 6
+            if ip6addr.version != 6:
+                raise MunetConfigError(f"'ipv6' address {ip!r} is not IPv6'")
         else:
             ip6addr = None
 
@@ -1011,7 +1016,8 @@ ff02::2\tip6-allrouters
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 4
+            if ipaddr.version != 4:
+                raise MunetConfigError(f"'ip' address {ip!r} is not IPv4")
         elif self.unet.autonumber and "ip" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
@@ -1026,7 +1032,8 @@ ff02::2\tip6-allrouters
 
         if ip := cconf.get("ipv6"):
             ip6addr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 6
+            if ip6addr.version != 6:
+                raise MunetConfigError(f"'ipv6' address {ip!r} is not IPv6")
         elif self.unet.ipv6_enable and self.unet.autonumber and "ipv6" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
@@ -1351,7 +1358,8 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
         self.container_id = None
         self.container_image = config["image"]
         self.extra_mounts = []
-        assert self.container_image
+        if not self.container_image:
+            raise MunetConfigError("Container 'image' is missing")
 
         self.cmd_p = None
         self.cmd_pid = None
@@ -1788,7 +1796,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         self.launch_pid = None
         self.qemu_config = config["qemu"]
         self.extra_mounts = []
-        assert self.qemu_config
+        if not self.qemu_config:
+            raise MunetConfigError("'qemu' config is missing")
         self.cmdrepl = None
         self.conrepl = None
         self.is_kvm = False
@@ -1973,7 +1982,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 if not self.test_nsonly("-e", src):
                     self.cmd_raises_nsonly(f"mkdir -p {src}")
             dst = m.get("dst", m.get("destination"))
-            assert dst, "destination path required for mount"
+            if not dst:
+                raise MunetConfigError(
+                    f"'destination' path of mount {src!r} is missing"
+                )
 
             # Implicitly guess "bind" or "tmpfs". Alternatives are manually specified.
             mtype = "tmpfs" if src == "" else "bind"
@@ -1983,7 +1995,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 if k in ["destination", "dst", "source", "src"]:
                     continue
                 if k == "type":
-                    assert v in ["bind", "tmpfs", "usb"]
+                    if not v in ["bind", "tmpfs", "usb"]:
+                        raise MunetConfigError(f"Mount {src!r} type {v!r} is unknown")
                     mtype = v
                     continue
                 if not v:
@@ -2249,7 +2262,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             elif mtype == "usb":
                 con.cmd_raises(f"test -d {mp}")  # Directory should already exist!
             else:
-                assert False, "Unknown L3QemuVM mount option"
+                raise MunetConfigError(f"Mount option {mtype!r} is unknown")
 
     async def renumber_interfaces(self):
         """Re-number the interfaces.
@@ -2517,9 +2530,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if not geniso:
             mfbin = get_exec_path_host("mkfs.vfat")
             mcbin = get_exec_path_host("mcopy")
-            assert (
-                mfbin and mcbin
-            ), "genisoimage or mkfs.vfat,mcopy needed to gen cloud-init disk"
+            if not (mfbin and mcbin):
+                raise MunetConfigError(
+                    "genisoimage or mkfs.vfat,mcopy needed to gen cloud-init disk"
+                )
 
         #
         # cloud-init: meta-data
@@ -2534,7 +2548,10 @@ local-hostname: "{self.name}"
         ssh_auth_s = ""
         if bool(self.ssh_keyfile):
             pubkey = commander.cmd_raises(f"ssh-keygen -y -f {self.ssh_keyfile}")
-            assert pubkey, f"Can't extract public key from {self.ssh_keyfile}"
+            if not pubkey:
+                raise MunetConfigError(
+                    f"Can't extract public key from {self.ssh_keyfile!r}"
+                )
             pubkey = pubkey.strip()
             ssh_auth_s = f'ssh_authorized_keys: ["{pubkey}"]'
 
@@ -3293,7 +3310,11 @@ ff02::2\tip6-allrouters
                     await self.add_native_link(switch, node, swconf, cconf)
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.
-                    other = self.hosts[to]
+                    other = self.hosts.get(to, None)
+                    if not other:
+                        raise MunetConfigError(
+                            f"'connection' from {name!r} to non-existent node {to!r}"
+                        )
                     oconf = find_matching_net_config(name, cconf, other.config)
                     await self.add_native_link(node, other, cconf, oconf)
 
@@ -3339,18 +3360,29 @@ ff02::2\tip6-allrouters
         c1 = {} if c1 is None else c1
         c2 = {} if c2 is None else c2
 
+        hostnames = ()
         if node1.name in self.switches:
-            assert node2.name in self.hosts
+            hostnames = (node2.name,)
         elif node2.name in self.switches:
-            assert node1.name in self.hosts
+            hostnames = (node1.name,)
             node1, node2 = node2, node1
             c1, c2 = c2, c1
         else:
             # p2p link
-            assert node1.name in self.hosts
-            assert node1.name in self.hosts
-            assert c1 and c2
+            hostnames = (node1.name, node2.name)
+            if not c1:
+                raise MunetConfigError(
+                    f"'connection' to {node2.name!r} is missing from {node1.name!r}"
+                )
+            if not c2:
+                raise MunetConfigError(
+                    f"'connection' to {node1.name!r} is missing from {node2.name!r}"
+                )
             isp2p = True
+
+        for name in hostnames:
+            if name not in self.hosts:
+                raise MunetConfigError(f"Unknown host: {name!r}")
 
         if "name" not in c1:
             c1["name"] = node1.get_next_intf_name()
@@ -3369,10 +3401,24 @@ ff02::2\tip6-allrouters
                 await n.add_phy_intf(c["physical"], c["name"])
                 do_add_link = False
         if do_add_link:
-            assert "hostintf" not in c1
-            assert "hostintf" not in c2
-            assert "physical" not in c1
-            assert "physical" not in c2
+            # pylint: disable=line-too-long
+            if "hostintf" in c1:
+                raise MunetConfigError(
+                    f"'hostintf' unexpectedly configured in 'connection' {node1.name!r} to {node2.name!r}"
+                )
+            if "hostintf" in c2:
+                raise MunetConfigError(
+                    f"'hostintf' unexpectedly configured in 'connection' {node2.name!r} to {node1.name!r}"
+                )
+            if "physical" in c1:
+                raise MunetConfigError(
+                    f"'physical' unexpectedly configured in 'connection' {node1.name!r} to {node2.name!r}"
+                )
+            if "physical" in c2:
+                raise MunetConfigError(
+                    f"'physical' unexpectedly configured in 'connection' {node2.name!r} to {node1.name!r}"
+                )
+            # pylint: enable=line-too-long
 
             if isp2p:
                 mtu1 = c1.get("mtu")
@@ -3438,9 +3484,10 @@ ff02::2\tip6-allrouters
                     common = os.path.commonprefix([common, f])
                     if not common:
                         break
-        assert (
-            bdir
-        ), "Can't locate build directory for coverage data, use --cov-build-dir"
+        if not bdir:
+            raise MunetConfigError(
+                "Can't locate build directory for coverage data, use --cov-build-dir"
+            )
 
         bdir = Path(bdir).resolve()
         rundir = Path(self.rundir).resolve()
@@ -3505,7 +3552,8 @@ done""")
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=600)
-        assert not pending, "Failed to pull container images"
+        if pending:
+            raise MunetConfigError("Failed to pull container images")
 
     async def run(self):
         tasks = []
