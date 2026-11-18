@@ -1,0 +1,12 @@
+version: 1
+topology:
+  networks-autonumber: true
+  networks:
+    - name: net-max-15-char
+  nodes:
+    - name: node-max-unlimited-char
+      connections:
+        - to: net-max-15-char
+          name: itf-max-15-char
+
+

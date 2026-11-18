@@ -3093,13 +3093,14 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         super().__init__(name, pid=unet_pid, nsflags=unet.nsflags, unet=unet, **kwargs)
 
-        self.set_intf_basename(self.name + "-e")
+        self.set_intf_basename("br{}".format(self.id) + "-e")
 
         self.mtu = mtu
 
         self.logger.debug("Bridge: Creating")
 
-        # assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
+        if len(name) >= 16:  # Make sure fits in IFNAMSIZE
+            raise MunetConfigError(f"Bridge name exceeds 15 chars: {name!r}")
         self.cmd_raises(f"ip link delete {name} || true")
         self.cmd_raises(f"ip link add {name} type bridge")
         if self.mtu:
