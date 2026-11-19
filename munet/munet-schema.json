@@ -228,6 +228,9 @@
                 "ipv6": {
                   "type": "string"
                 },
+                "mac": {
+                  "type": "string"
+                },
                 "name": {
                   "type": "string"
                 },
@@ -717,6 +720,9 @@
                       "type": "string"
                     },
                     "ipv6": {
+                      "type": "string"
+                    },
+                    "mac": {
                       "type": "string"
                     },
                     "name": {
