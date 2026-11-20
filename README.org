@@ -592,6 +592,13 @@ munet>
         type string;
         description "Shell command[s] to execute when creating the node.";
       }
+      leaf container-cmd {
+        type string;
+        description
+          "Boot command passed to podman run. An explicitly empty value
+           selects the image default. When omitted, an eligible legacy
+           lifecycle startup command is used for boot.";
+      }
       leaf cmd-file {
         type string;
         description

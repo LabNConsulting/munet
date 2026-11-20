@@ -16,7 +16,16 @@ topology:
           ip: 10.0.2.1/24
     - name: r1
       kind: disk-linux-from-file
-      cmd-file: "cmd-qemu.sh"
+      cmd-file: ""
+      qemu:
+        initial-cmd: touch /root/ignored-initializer
+      shell: /usr/bin/python3
+      ready-cmd: |
+        from pathlib import Path
+        raise SystemExit(not Path("/root/kind-ready").exists())
+      cleanup-cmd: |
+        from pathlib import Path
+        Path("/root/cleanup-order").write_text("node\n")
       connections:
         - to: "mgmt0"
         - to: "h1"
@@ -24,13 +33,26 @@ topology:
     - name: r2
       kind: disk-linux
       cmd: "touch ~/foo"
+      shell: false
+      ready-cmd: test -f /root/foo -a -f /root/bar
+      cleanup-cmd: printf '%s\n' "node argument" > /root/direct-cleanup
       connections:
         - to: "mgmt0"
         - to: "h1"
           ip: 10.0.2.2/24
 
+    - name: existing-disk
+      kind: disk-linux-existing
+      connections: []
+      ready-cmd: test ! -f /root/unexpected-initializer
+
 kinds:
   - name: disk-linux-from-file
+    merge: [commands, qemu]
+    shell: /bin/sh
+    cmd-file: cmd-qemu.sh
+    ready-cmd: test -f /root/kind-ready
+    cleanup-cmd: echo kind >> /root/cleanup-order
     ssh-identity-file: "%RUNDIR%/../root-key"
     ssh-user: "root"
     qemu:
@@ -46,14 +68,14 @@ kinds:
       kvm: true
       ncpu: 2
   - name: disk-linux
-    ssh-identity-file: "%RUNDIR%/../root-key"
-    ssh-user: "root"
+    shell: /usr/bin/python3
     qemu:
       disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
       cloud-init: true
       cloud-init-disk: "%RUNDIR%/../%NAME%-config-cmd.img"
       initial-cmd: "touch ~/bar"
       console:
+        stdio: false
         user: "root"
         password: "foobar"
         timeout: 3600
@@ -61,6 +83,19 @@ kinds:
       kvm: true
       ncpu: 2
 
+  - name: disk-linux-existing
+    qemu:
+      disk-template: "%CONFIGDIR%/ubuntu-tpl.qcow2"
+      disk: "%RUNDIR%/../existing.qcow2"
+      cloud-init: true
+      cloud-init-disk: "%RUNDIR%/../existing-disk-config-cmd.img"
+      initial-cmd: touch /root/unexpected-initializer
+      console:
+        user: root
+        password: foobar
+        timeout: 3600
+      memory: 1G
+      kvm: true
 
 cli:
   commands:

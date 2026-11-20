@@ -155,6 +155,7 @@ Tree diagram for node config::
         +--rw cap-remove*          string
         +--rw cmd?                 string
         +--rw cmd-file?            string
+        +--rw container-cmd?       string
         +--rw cleanup-cmd?         string
         +--rw ready-cmd?           string
         +--rw ready-timeout?       uint32
@@ -208,8 +209,6 @@ to use the same interpreter as specified by the file's shebang (again, defaultin
 to ``/bin/bash`` if none is found). Setting ``shell`` overrides this behavior to use
 a specific configured interpreter instead.
 
-The ``ready-cmd`` and ``ready-timeout`` provide customization for how to check if a
-node is ready and for how long to wait for it be ready.
 
 Connections
 """""""""""
@@ -297,6 +296,46 @@ nodes, **u1**, **u2**, and **u3**.
         - type: tmpfs
           tmpfs-size: 512M
           destination: /mytmp
+
+
+Lifecycle commands
+""""""""""""""""""
+
+Add ``commands`` to a kind's ``merge`` list to run the kind's startup and
+readiness commands in a stage before the node's. Each lifecycle stage uses the
+``shell`` from its own configuration block. If not specified, munet uses one
+stage with the merged configuration.
+
+.. code-block:: yaml
+
+   kinds:
+     - name: router
+       merge: [commands]
+       cmd: start-kind-service
+       ready-cmd: check-kind-service
+       cleanup-cmd: stop-kind-service
+
+   topology:
+     nodes:
+       - name: r1
+         kind: router
+         cmd: start-node-service
+         ready-cmd: check-node-service
+         cleanup-cmd: stop-node-service
+
+Munet waits for ``ready-cmd`` to succeed before advancing. Set
+``ready-timeout`` to change the wait from the default of 30 seconds. A stage
+can define readiness or cleanup without a startup command. During teardown,
+munet runs ``cleanup-cmd`` for stages it reached, in reverse order.
+
+Set ``container-cmd`` to choose the container's boot command, or set
+``container-cmd: ""`` to use the image default. With command merging enabled,
+the boot command uses the ``shell`` from the block that defines it. Use
+``ready-cmd`` in an earlier stage when a later stage depends on a service
+started at boot.
+
+When munet creates a QEMU disk, it runs the configured ``initial-cmd`` or
+``initial-cmd-file`` before the lifecycle commands.
 
 
 CLI

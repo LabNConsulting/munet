@@ -70,6 +70,17 @@ latest official ubuntu image with a single IP interface connected to the
          image: docker.io/ubuntu
          connections: ["mgmt0"]
 
+Use ``container-cmd`` to set the command that starts the container. Once the
+container is running, munet runs any further configured ``cmd`` or ``cmd-file``
+inside it. The boot command must keep the container running. Set
+``container-cmd: ""`` to use the image's default command.
+
+.. warning::
+
+   For backward compatibility, if ``container-cmd`` is absent, munet consumes
+   the first eligible lifecycle startup command to boot the container. The
+   image default is instead chosen if none are found.
+
 
 Virtual Machine Node
 --------------------
