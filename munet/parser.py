@@ -30,7 +30,8 @@ try:
 except ImportError:
     jsonschema = None
 
-from .config import list_to_dict_with_key
+from .config import config_to_dict_with_key
+from .exceptions import MunetConfigError
 from .native import Munet
 
 
@@ -261,8 +262,7 @@ def load_kinds(args, search=None):
             #     validator = jsonschema.validators.Draft202012Validator(get_schema())
             #     validator.validate(instance=config)
 
-            kinds_list = config.get("kinds", [])
-            kinds_dict = list_to_dict_with_key(kinds_list, "name")
+            kinds_dict = config_to_dict_with_key(config, "kinds", "name")
             if kinds_dict:
                 logging.info("Loading kinds config from %s", config["config_pathname"])
                 if "kinds" in kinds:
@@ -324,7 +324,7 @@ async def async_build_topology(
 
     # load kinds along search path and merge into config
     kinds = load_kinds(args, search=search)
-    config_kinds_dict = list_to_dict_with_key(config.get("kinds", []), "name")
+    config_kinds_dict = config_to_dict_with_key(config, "kinds", "name")
     config["kinds"] = {**kinds.get("kinds", {}), **config_kinds_dict}
 
     # mere CLI command from kinds into config as well.
@@ -356,6 +356,10 @@ async def async_build_topology(
 
     try:
         await unet._async_build(logger)  # pylint: disable=W0212
+    except MunetConfigError as error:
+        logging.critical("Failure building munet topology: %s", error)
+        await unet.async_delete()
+        raise
     except Exception as error:
         logging.critical("Failure building munet topology: %s", error, exc_info=True)
         await unet.async_delete()

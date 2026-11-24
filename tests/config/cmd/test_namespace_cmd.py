@@ -11,7 +11,6 @@ import logging
 
 import pytest
 
-# All tests are coroutines
 pytestmark = pytest.mark.asyncio
 
 
@@ -22,6 +21,6 @@ pytestmark = pytest.mark.asyncio
 async def test_config_cmd(unet_share, host):
     unet = unet_share
     rn = unet.hosts[host]
-    output = rn.cmd_raises("cat cmd*.out")
+    output = rn.cmd_raises("cat cmd.out")
     logging.debug("expects to find 'foo' in cmd.out; Found: %s", output)
     assert "foo" in output

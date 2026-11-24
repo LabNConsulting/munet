@@ -1,0 +1,15 @@
+version: 1
+topology:
+  networks-autonumber: true
+  loopbacks-autonumber: true
+  networks:
+    - name: net0
+  nodes:
+    - name: r1
+      connections:
+        - to: net0
+          name: eth1
+    - name: r2
+      connections:
+        - to: net0
+          name: eth2

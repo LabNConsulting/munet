@@ -1,0 +1,21 @@
+version: 1
+topology:
+  nodes:
+    - name: ceos-test
+      kind: ceos
+      startup-config: ceos-startup.cfg
+      system-mac: "00:1c:73:11:22:33"
+
+kinds:
+  - name: ceos
+    image: docker.io/labn/docker-ci-test:20.04
+    init: false
+    shell: false
+    cmd: /sbin/init
+    env:
+      - name: INTFTYPE
+        value: eth
+    podman:
+      extra-args: ["--entrypoint=/observe-ceos.sh"]
+    volumes: ["%CONFIGDIR%/observe-ceos.sh:/observe-ceos.sh"]
+    ready-cmd: /usr/bin/test -f /ceos-ready

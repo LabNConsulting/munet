@@ -29,6 +29,7 @@ from typing import Union
 
 from . import config as munet_config
 from . import linux
+from .exceptions import MunetConfigError
 
 try:
     import pexpect
@@ -48,10 +49,6 @@ our_pid = os.getpid()
 
 
 detailed_cmd_logging = False
-
-
-class MunetError(Exception):
-    """A generic munet error."""
 
 
 class CalledProcessError(subprocess.CalledProcessError):
@@ -78,6 +75,7 @@ class Timeout:
         self.delta = datetime.timedelta(seconds=delta)
         self.started_on = datetime.datetime.now()
         self.expires_on = self.started_on + self.delta
+        self.first_iteration = True
 
     def elapsed(self):
         elapsed = datetime.datetime.now() - self.started_on
@@ -95,12 +93,41 @@ class Timeout:
 
     def __next__(self):
         remaining = self.remaining()
-        if remaining <= 0:
+        if remaining <= 0 and not self.first_iteration:
             raise StopIteration()
-        return remaining
+        self.first_iteration = False
+        return max(0, remaining)
 
     def __bool__(self):
         return self.is_expired()
+
+class BackgroundCmd:
+    """An object that holds a running background command."""
+
+    def __init__(
+        self,
+        p,
+        cmds,
+        actual_cmd,
+        stdin_file,
+        stdout_file,
+        stderr_file,
+    ):
+        self.p = p
+        self.cmds = cmds
+        self.actual_cmd = actual_cmd
+        self.stdin_file = stdin_file
+        self.stdout_file = stdout_file
+        self.stderr_file = stderr_file
+
+    def close_files(self):
+        """Idempotent file cleanup function."""
+        if self.stdin_file is not None:
+            self.stdin_file.close()
+        if self.stdout_file is not None:
+            self.stdout_file.close()
+        if self.stderr_file is not None:
+            self.stderr_file.close()
 
 
 def fsafe_name(name):
@@ -335,7 +362,7 @@ class Commander:  # pylint: disable=R0904
             logger: logger to use for logging commands a defualt is supplied if this
                 is None
             unet: unet that owns this object, only used by Commander in run_in_window,
-                otherwise can be None.
+                and for background commands, otherwise can be None.
         """
         # del kwargs  # deal with lint warning
         # logging.warning("Commander: name %s kwargs %s", name, kwargs)
@@ -345,6 +372,9 @@ class Commander:  # pylint: disable=R0904
         self.deleting = False
         self.last = None
         self.exec_paths = {}
+
+        # For managing background processes
+        self.background_cmds = {}
 
         # For running commands one time only (deals with asyncio)
         self.cmd_once_done = {}
@@ -437,42 +467,172 @@ class Commander:  # pylint: disable=R0904
         """Check if path exists."""
         return self.test("-e", path)
 
-    async def cleanup_pid(self, pid, kill_pid=None):
+    def pid_exists(self, pid, is_pgroup=False):
+        try:
+            if is_pgroup:
+                os.killpg(pid, 0)
+            else:
+                os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            # Exists, but its permissions have unexpectedly changed
+            return True
+
+    def reap_pid(self, pid, proc=None):
+        reap_complete = False
+        rv = None
+        if proc is not None:
+            assert pid == proc.pid
+            try:
+                if isinstance(proc, asyncio.subprocess.Process):  # pylint: disable=no-member
+                    rv = proc.returncode
+                else:
+                    rv = proc.poll()
+                reap_complete = rv is not None
+            except OSError as error:
+                self.logger.warning(
+                    "%s: error waiting on proc pid %s: %s", self, pid, error
+                )
+        else:
+            try:
+                wait_pid, status = os.waitpid(pid, os.WNOHANG)
+                if wait_pid != 0:
+                    rv = os.waitstatus_to_exitcode(status)
+                    reap_complete = True
+                    self.logger.debug("%s: pid %s exited status %s", self, pid, rv)
+            except OSError as error:
+                if error.errno == errno.ECHILD:
+                    self.logger.debug(
+                        "%s: pid %s is not a waitable child (possibly already reaped)",
+                        self,
+                        pid,
+                    )
+                    reap_complete = True
+                else:
+                    self.logger.warning(
+                        "%s: error waiting on pid %s: %s", self, pid, error
+                    )
+        return (reap_complete, rv)
+
+    async def async_cleanup_pid(
+        self,
+        pid,
+        kill_pid=None,
+        wait_sec=30,
+        is_pgroup=False,
+            proc=None,
+    ):
         """Signal a pid to exit with escalating forcefulness."""
+        if proc is not None and pid != proc.pid:
+            raise ValueError("Process specified, but proc.pid != pid")
         if kill_pid is None:
             kill_pid = pid
 
+        # Kill the process
+        rv = None
+        reap_complete = False
         for sn in (signal.SIGHUP, signal.SIGKILL):
             self.logger.debug(
-                "%s: %s %s (wait %s)", self, signal.Signals(sn).name, kill_pid, pid
+                "%s: %s %s (wait %s) %s",
+                self,
+                signal.Signals(sn).name,
+                kill_pid,
+                pid,
+                is_pgroup,
             )
 
-            os.kill(kill_pid, sn)
+            try:
+                if is_pgroup:
+                    os.killpg(kill_pid, sn)
+                else:
+                    os.kill(kill_pid, sn)
+            except ProcessLookupError:
+                # Attempt to reap, but don't wait anymore
+                wait_sec = 1
 
-            # No need to wait after this.
-            if sn == signal.SIGKILL:
-                return
-
-            # try each signal, waiting 15 seconds for exit before advancing
-            wait_sec = 30
+            # try each signal, waiting half the timeout before advancing
             self.logger.debug("%s: waiting %ss for pid to exit", self, wait_sec)
             for _ in Timeout(wait_sec):
-                try:
-                    status = os.waitpid(pid, os.WNOHANG)
-                    if status == (0, 0):
-                        await asyncio.sleep(0.1)
-                    else:
-                        self.logger.debug("pid %s exited status %s", pid, status)
-                        return
-                except OSError as error:
-                    if error.errno == errno.ECHILD:
-                        self.logger.debug("%s: pid %s was reaped", self, pid)
-                    else:
-                        self.logger.warning(
-                            "%s: error waiting on pid %s: %s", self, pid, error
-                        )
-                    return
-            self.logger.debug("%s: timeout waiting on pid %s to exit", self, pid)
+                # we want to confirm both of the following:
+                # 1. the specific pid identified by kill_pid was reaped
+                # 2. any applicable pgroups have exited
+                if not reap_complete:
+                    reap_complete, rv = self.reap_pid(pid, proc)
+                if not reap_complete or self.pid_exists(kill_pid, is_pgroup=is_pgroup):
+                    await asyncio.sleep(0.1)
+                else:
+                    return rv
+            self.logger.debug("%s: timeout waiting on pid %s to exit", self, kill_pid)
+
+        if not reap_complete:
+            raise TimeoutError(f"Failed to reap pid {pid}")
+        if self.pid_exists(kill_pid, is_pgroup=is_pgroup):
+            self.logger.warning(
+                "%s: failed to confirm termination of %s %s",
+                self,
+                "pgroup" if is_pgroup else "pid",
+                pid,
+            )
+        return rv
+
+    def cleanup_pid(self, pid, kill_pid=None, wait_sec=30, is_pgroup=False, proc=None):
+        """Signal a pid to exit with escalating forcefulness."""
+        if proc is not None and pid != proc.pid:
+            raise ValueError("Process specified, but proc.pid != pid")
+        if isinstance(proc, asyncio.subprocess.Process):  # pylint: disable=no-member
+            raise ValueError("Async process specified; cannot be reaped by sync API")
+        if kill_pid is None:
+            kill_pid = pid
+
+        # Kill the process
+        rv = None
+        reap_complete = False
+        for sn in (signal.SIGHUP, signal.SIGKILL):
+            self.logger.debug(
+                "%s: %s %s (wait %s) %s",
+                self,
+                signal.Signals(sn).name,
+                kill_pid,
+                pid,
+                is_pgroup,
+            )
+
+            try:
+                if is_pgroup:
+                    os.killpg(kill_pid, sn)
+                else:
+                    os.kill(kill_pid, sn)
+            except ProcessLookupError:
+                # Attempt to reap, but don't wait anymore
+                wait_sec = 1
+
+            # try each signal, waiting half the timeout before advancing
+            self.logger.debug("%s: waiting %ss for pid to exit", self, wait_sec)
+            for _ in Timeout(wait_sec):
+                # we want to confirm both of the following:
+                # 1. the specific pid identified by kill_pid was reaped
+                # 2. any applicable pgroups have exited
+                if not reap_complete:
+                    reap_complete, rv = self.reap_pid(pid, proc)
+                if not reap_complete or self.pid_exists(kill_pid, is_pgroup=is_pgroup):
+                    time_mod.sleep(0.1)
+                else:
+                    return rv
+            self.logger.debug("%s: timeout waiting on pid %s to exit", self, kill_pid)
+
+        if not reap_complete:
+            raise TimeoutError(f"Failed to reap pid {pid}")
+        if self.pid_exists(kill_pid, is_pgroup=is_pgroup):
+            self.logger.warning(
+                "%s: failed to confirm termination of %s %s",
+                self,
+                "pgroup" if is_pgroup else "pid",
+                pid,
+            )
+        return rv
+
 
     def _get_sub_args(self, cmd_list, defaults, use_pty=False, ns_only=False, **kwargs):
         """Returns pre-command, cmd, and default keyword args."""
@@ -1051,8 +1211,8 @@ class Commander:  # pylint: disable=R0904
             "%s: [cleanup_proc] terminate process: %s (pid %s)", self, proc_str(p), pid
         )
         try:
-            # This will SIGHUP and wait a while then SIGKILL and return immediately
-            await self.cleanup_pid(p.pid, pid)
+            # This will SIGHUP and wait a while then SIGKILL and reap the proc
+            await self.async_cleanup_pid(p.pid, pid, proc=p)
 
             # Wait another 2 seconds after the possible SIGKILL above for the
             # parent nsenter to cleanup and exit
@@ -1066,7 +1226,7 @@ class Commander:  # pylint: disable=R0904
                 self,
                 proc_error(p, o, e),
             )
-        except (asyncio.TimeoutError, subprocess.TimeoutExpired):
+        except (TimeoutError, asyncio.TimeoutError, subprocess.TimeoutExpired):
             self.logger.warning("%s: [cleanup_proc] SIGKILL timeout", self)
             return p
         except Exception as error:
@@ -1145,6 +1305,125 @@ class Commander:  # pylint: disable=R0904
             o = o.decode(encoding) if o is not None else o
             e = e.decode(encoding) if e is not None else e
         return self._cmd_status_finish(p, cmds, actual_cmd, o, e, raises, warn)
+
+    def _background_cmd_start_status(
+        self,
+        cmds,
+        stdin=None,
+        stdout=None,
+        stderr=None,
+        text=None,
+        **kwargs,
+    ):
+        """Starts execution of a background command."""
+        unet = self.unet if self.unet is not None else self
+
+        # STDOUT/STDERR must be buffered somewhere, so write to tempfiles
+        stdin_file = tempfile.TemporaryFile(mode="w+b")
+        stdout_file = tempfile.TemporaryFile(mode="w+b")
+        stderr_file = tempfile.TemporaryFile(mode="w+b")
+
+        pinput, stdin = Commander._cmd_status_input(stdin)
+        if text is False:
+            encoding = None
+        else:
+            encoding = kwargs.get("encoding", "utf-8")
+
+        # Allow for stdout/stderr redirection to still occur
+        stdout = stdout_file if stdout is None else stdout
+        stderr = stderr_file if stderr is None else stderr
+
+        if encoding is not None and isinstance(pinput, str):
+            pinput = pinput.encode(encoding)
+
+        if pinput is not None:
+            stdin_file.write(pinput)
+            stdin_file.seek(0)
+            stdin = stdin_file
+
+        try:
+            p, actual_cmd = self._popen(
+                "background_cmd_start",
+                cmds,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=True,
+                **kwargs
+            )
+        except Exception:
+            stdin_file.close()
+            stdout_file.close()
+            stderr_file.close()
+            raise
+
+        bg = BackgroundCmd(
+            p,
+            cmds,
+            actual_cmd,
+            stdin_file,
+            stdout_file,
+            stderr_file,
+        )
+        unet.background_cmds[p.pid] = bg
+        self.logger.debug("%s: started with pid %s", self, p.pid)
+
+        return p.pid
+
+    def _background_cmd_end_status(
+        self,
+        pid,
+        raises=False,
+        warn=False,
+        text=None,
+        **kwargs,
+    ):
+        """Ends a background command with status."""
+        unet = self.unet if self.unet is not None else self
+        bg = unet.background_cmds.get(pid, None)
+        if bg is None:
+            raise KeyError(f"Process {pid} is not tracked")
+
+        timeout = 30
+        if "timeout" in kwargs:
+            timeout = kwargs["timeout"]
+            del kwargs["timeout"]
+
+        o = None
+        e = None
+        try:
+            self.cleanup_pid(pid, wait_sec=timeout, is_pgroup=True, proc=bg.p)
+
+            bg.stdout_file.seek(0)
+            bg.stderr_file.seek(0)
+            o = bg.stdout_file.read()
+            e = bg.stderr_file.read()
+        except TimeoutError:
+            self.logger.error("%s: Process %s failed to exit", self, pid)
+            raise
+
+        # Remove process only once it is confirmed to exit.
+        del unet.background_cmds[pid]
+        bg.close_files()
+
+        if text is False:
+            encoding = None
+        else:
+            encoding = kwargs.get("encoding", "utf-8")
+
+        if encoding is not None:
+            o = o.decode(encoding) if o is not None else o
+            e = e.decode(encoding) if e is not None else e
+
+        return self._cmd_status_finish(
+            bg.p,
+            bg.cmds,
+            bg.actual_cmd,
+            o,
+            e,
+            raises,
+            warn,
+        )
 
     def _get_cmd_as_list(self, cmd):
         """Given a list or string return a list form for execution.
@@ -1341,6 +1620,63 @@ class Commander:  # pylint: disable=R0904
         _, stdout, _ = await self._async_cmd_status(
             cmd, raises=True, ns_only=True, **kwargs
         )
+        return stdout
+
+    def background_cmd_start(self, cmd, **kwargs):
+        """Run given command in the background.
+
+        Args:
+            cmd: `str` or `list` of the command to execute.  If a string is given
+                it is run using a shell, otherwise the list is executed directly
+                as the binary and arguments.
+            **kwargs: kwargs is eventually passed on to Popen. If `command` is a string
+                then will be invoked with `bash -c`, otherwise `command` is a list and
+                will be invoked without a shell.
+
+        Returns:
+            (pid) is returned
+            pid: the process id of the background command in the host
+        """
+        return self._background_cmd_start_status(cmd, **kwargs)
+
+    def background_cmd_start_nsonly(self, pid, **kwargs):
+        # Make sure the command runs on the host and not in any container.
+        return self._background_cmd_start_status(pid, ns_only=True, **kwargs)
+
+    def background_cmd_end_status(self, pid, **kwargs):
+        """End a running background command, returning status and outputs.
+
+        Args:
+            pid: process id of the background process
+            **kwargs: kwargs containing flags such as `warn` or `raise`
+
+        Returns:
+            (status, output, error) are returned
+            status: the returncode of the command.
+            output: stdout as a string from the command.
+            error: stderr as a string from the command.
+        """
+        #
+        # This method serves as the basis for all derived background cmd variations, so
+        # to override background cmd behavior simply override this function and *not*
+        # the other variations, unless you are changing only that variation's behavior
+        #
+        return self._background_cmd_end_status(pid, **kwargs)
+
+    def background_cmd_end_raises(self, pid, **kwargs):
+        """End a background command. Raise an exception on errors.
+
+        Args:
+            pid: process id of the background process
+            **kwargs: kwargs containing flags such as `warn` or `raise`
+
+        Returns:
+            output: stdout as a string from the command.
+
+        Raises:
+            CalledProcessError: on non-zero exit status
+        """
+        _, stdout, _ = self._background_cmd_end_status(pid, raises=True, **kwargs)
         return stdout
 
     def cmd_legacy(self, cmd, **kwargs):
@@ -1600,6 +1936,23 @@ class Commander:  # pylint: disable=R0904
         invoke `super()._async_delete() without catching any exceptions raised
         therein. See other examples in `base.py` or `native.py`
         """
+        # Terminate incomplete background commands at the same time
+        tasks = [
+            asyncio.create_task(self.async_cleanup_pid(pid, is_pgroup=True, proc=bg.p))
+            for pid, bg in self.background_cmds.items()
+        ]
+        self.logger.debug("%s: killing %s background cmds", self, len(tasks))
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Check status individually to better support logging
+        for rv, (pid, bg) in zip(results, list(self.background_cmds.items())):
+            del self.background_cmds[pid]
+            if isinstance(rv, BaseException):
+                self.logger.error("%s: Process %s failed with %s", self, pid, rv)
+            else:
+                self.logger.debug("%s: Process %s exited with %s", self, pid, rv)
+            bg.close_files()
+
         self.logger.info("%s: deleted", self)
 
     async def async_delete(self):
@@ -2603,7 +2956,7 @@ class LinuxNamespace(Commander, InterfaceMixin):
                 self.pid,
                 self.p.pid if self.p else None,
             )
-            await self.cleanup_pid(self.pid)
+            await self.async_cleanup_pid(self.pid)
 
         if self.p is not None:
             self.logger.debug("cleanup namespace proc pid %s", self.p.pid)
@@ -2740,13 +3093,14 @@ class Bridge(SharedNamespace, InterfaceMixin):
 
         super().__init__(name, pid=unet_pid, nsflags=unet.nsflags, unet=unet, **kwargs)
 
-        self.set_intf_basename(self.name + "-e")
+        self.set_intf_basename("br{}".format(self.id) + "-e")
 
         self.mtu = mtu
 
         self.logger.debug("Bridge: Creating")
 
-        # assert len(self.name) <= 16  # Make sure fits in IFNAMSIZE
+        if len(name) >= 16:  # Make sure fits in IFNAMSIZE
+            raise MunetConfigError(f"Bridge name exceeds 15 chars: {name!r}")
         self.cmd_raises(f"ip link delete {name} || true")
         self.cmd_raises(f"ip link add {name} type bridge")
         if self.mtu:
@@ -2956,17 +3310,21 @@ class BaseMunet(LinuxNamespace):
                 node2 = self.hosts[node2]
             name2 = node2.name
 
+        hostnames = ()
         if name1 in self.switches:
-            assert name2 in self.hosts
+            hostnames = (name2,)
         elif name2 in self.switches:
-            assert name1 in self.hosts
+            hostnames = (name1,)
             name1, name2 = name2, name1
             if1, if2 = if2, if1
         else:
             # p2p link
-            assert name1 in self.hosts
-            assert name2 in self.hosts
+            hostnames = (name1, name2)
             isp2p = True
+
+        for name in hostnames:
+            if name not in self.hosts:
+                raise MunetConfigError(f"Unknown host: {name!r}")
 
         lname = "{}:{}-{}:{}".format(name1, if1, name2, if2)
         self.logger.debug("%s: add_link %s%s", self, lname, " p2p" if isp2p else "")
@@ -3008,11 +3366,16 @@ class BaseMunet(LinuxNamespace):
             if mtu is None:
                 mtu = switch.mtu
 
-            if len(nsif1) > 16:
-                self.logger.error('"%s" len %s > 16', nsif1, len(nsif1))
-            elif len(nsif2) > 16:
-                self.logger.error('"%s" len %s > 16', nsif2, len(nsif2))
-            assert len(nsif1) < 16 and len(nsif2) < 16  # Make sure fits in IFNAMSIZE
+            if len(nsif1) >= 16:
+                self.logger.error('"%s" len %s >= 16', nsif1, len(nsif1))
+            elif len(nsif2) >= 16:
+                self.logger.error('"%s" len %s >= 16', nsif2, len(nsif2))
+
+            # Make sure fits in IFNAMSIZE
+            if len(nsif1) >= 16:
+                raise MunetConfigError(f"Interface name exceeds 15 chars: {nsif1!r}")
+            if len(nsif2) >= 16:
+                raise MunetConfigError(f"Interface name exceeds 15 chars: {nsif2!r}")
 
             self.logger.debug("%s: Creating veth pair for link %s", self, lname)
 

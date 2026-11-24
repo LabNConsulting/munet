@@ -44,7 +44,14 @@ async def setup_images(rundir_module):
                 f'ssh-keygen -b 2048 -t rsa -f {rdir}/root-key -q -N ""'
             )
         pubkey = commander.cmd_raises(f"cat {rdir}/root-key.pub").strip()
-        for node in ["r1", "r2"]:
+        existing_disk = f"{rdir}/existing.qcow2"
+        if not os.path.exists(existing_disk):
+            template = os.path.abspath(qimage)
+            commander.cmd_raises(
+                f"qemu-img create -f qcow2 -F qcow2 -b {template} {existing_disk}"
+            )
+
+        for node in ["r1", "r2", "existing-disk"]:
             user_data = f"""#cloud-config
 disable_root: 0
 ssh_pwauth: 1
@@ -62,8 +69,9 @@ runcmd:
   - systemctl start serial-getty@ttyS2.service
 """
             commander.cmd_raises(f"cat > {rdir}/{node}-user-data.yaml", stdin=user_data)
+            network = "" if node == "existing-disk" else f"-N {node}-netcfg.yaml "
             commander.cmd_raises(
-                f"cloud-localds -N {node}-netcfg.yaml -d raw"
+                f"cloud-localds {network}-d raw"
                 f" {rdir}/{node}-config-cmd.img {rdir}/{node}-user-data.yaml"
             )
     except Exception:
@@ -92,3 +100,24 @@ async def test_config_cmd(unet):
     logging.debug(output)
     assert "foo" in output  # from cmd
     assert "bar" in output  # from initial-cmd
+
+
+async def test_composed_qemu_cleanup(unet):
+    r1 = unet.hosts["r1"]
+    assert r1.cmdrepl is not None
+    r1.conrepl.cmd_raises("test -f /root/kind-ready -a ! -f /root/ignored-initializer")
+    await r1.async_cleanup_cmd()
+    assert r1.conrepl.cmd_raises("cat /root/cleanup-order") == "node\nkind"
+    assert r1.monrepl.cmd_nostatus("info status") == "VM status: running"
+
+
+async def test_primary_console_and_existing_disk(unet):
+    r2 = unet.hosts["r2"]
+    assert r2.cmdrepl is None
+    r2.conrepl.cmd_raises("test -f /root/foo -a -f /root/bar")
+    await r2.async_cleanup_cmd()
+    assert r2.conrepl.cmd_raises("cat /root/direct-cleanup") == "node argument"
+
+    vm = unet.hosts["existing-disk"]
+    assert vm.cmdrepl is None
+    vm.conrepl.cmd_raises("test ! -f /root/unexpected-initializer")

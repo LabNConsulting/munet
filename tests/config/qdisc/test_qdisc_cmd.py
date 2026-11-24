@@ -19,18 +19,18 @@ pytestmark = pytest.mark.asyncio
 async def test_config_cmd(unet_share):
     unet = unet_share
 
-    output = unet.cmd_raises("tc q | grep 'dev net1-e0'")
-    logging.debug("qdisc for dev net1-e0 output found: %s", output)
+    output = unet.cmd_raises("tc q | grep 'dev br1-e0'")
+    logging.debug("qdisc for dev br1-e0 output found: %s", output)
     logging.debug("expects delay='16', jitter='30', loss='40', rate='800'")
     assert re.search(r"delay 16us\s+29us.*loss 40%.*rate 800bit", output, re.DOTALL)
 
-    output = unet.cmd_raises("tc q | grep 'dev net1-e1'")
-    logging.debug("qdisc for dev net1-e1 output found: %s", output)
+    output = unet.cmd_raises("tc q | grep 'dev br1-e1'")
+    logging.debug("qdisc for dev br1-e1 output found: %s", output)
     logging.debug("expects delay='6', jitter='20', loss='50', rate='810'")
     assert re.search(r"delay 17us\s+27us.*loss 38%.*rate 808bit", output, re.DOTALL)
 
-    output = unet.cmd_raises("tc q | grep 'dev net1-e2'")
-    logging.debug("qdisc for dev net1-e2 output found: %s", output)
+    output = unet.cmd_raises("tc q | grep 'dev br1-e2'")
+    logging.debug("qdisc for dev br1-e2 output found: %s", output)
     logging.debug("expects delay='13'")
     assert "delay 13us" in output
     assert "loss" not in output

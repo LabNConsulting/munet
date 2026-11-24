@@ -19,11 +19,15 @@ import os
 import random
 import re
 import shlex
+import signal
 import socket
 import subprocess
+import tempfile
 import time
 
 from copy import deepcopy
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 try:
@@ -38,20 +42,24 @@ from .base import Bridge
 from .base import Commander
 from .base import InterfaceMixin
 from .base import LinuxNamespace
-from .base import MunetError
 from .base import SharedNamespace
 from .base import Timeout
 from .base import _async_get_exec_path
 from .base import _get_exec_path
 from .base import cmd_error
 from .base import commander
-from .base import fsafe_name
 from .base import get_exec_path_host
 from .config import config_subst
 from .config import config_to_dict_with_key
 from .config import find_matching_net_config
 from .config import find_with_kv
 from .config import merge_kind_config
+from .exceptions import MunetError
+from .exceptions import MunetConfigError
+from .lifecycle import CmdProcess
+from .lifecycle import LifecycleStage
+from .lifecycle import StageState
+from .lifecycle import resolve_lifecycle
 from .watchlog import WatchLog
 
 AUTO_LOOPBACK_IPV4_BASE = ipaddress.ip_interface("10.255.0.0/32")
@@ -107,7 +115,8 @@ def get_ip_network(c, brid, ipv6=False):
             return ifip
         except ValueError:
             return ipaddress.ip_network(ip)
-    assert brid < 0xFDFF  # Limited to 10.0.0.0/16 through 10.253.0.0/16 blocks
+    if brid >= 0xFDFF:  # Limited to 10.0.0.0/16 through 10.253.0.0/16 blocks
+        raise MunetConfigError("Bridge IDs exhausted (0xFDFF Max)")
     if ipv6:
         return make_ip_interface("fc00::fe/64", brid)
     return make_ip_interface("10.0.0.254/24", brid)
@@ -261,7 +270,9 @@ class NodeMixin:
         L3NodeMixin.next_ord = n + 1
         return n
 
-    def __init__(self, *args, config=None, **kwargs):
+    def __init__(
+        self, *args, config=None, lifecycle_stages=None, **kwargs
+    ):
         """Create a Node."""
         super().__init__(*args, **kwargs)
 
@@ -270,9 +281,11 @@ class NodeMixin:
 
         self.id = int(config["id"]) if "id" in config else self._get_next_ord()
 
-        self.cmd_p = None
+        self.cmd_procs = []
         self.container_id = None
         self.cleanup_called = False
+        self._cleanup_task = None
+        self._stage_finalization_task = None
 
         # Clear and create rundir early
         assert self.unet is not None
@@ -280,12 +293,56 @@ class NodeMixin:
         commander.cmd_raises(f"rm -rf {self.rundir}")
         commander.cmd_raises(f"mkdir -p {self.rundir}")
 
-    def _shebang_prep(self, config_key, is_file=False):
+        # For backward compatibility. Merged commands should be run even if an
+        # explicit lifecycle is unavailable.
+        if lifecycle_stages is None:
+            context = self._lifecycle_context()
+            lifecycle_stages = resolve_lifecycle(
+                config, {}, config_subst(config, **context), **context
+            )
+        self.stage_states = [
+            StageState(stage, number)
+            for number, stage in enumerate(lifecycle_stages, 1)
+        ]
+
+    def _lifecycle_context(self):
+        return {
+            "name": self.name,
+            "rundir": self.rundir,
+            "configdir": getattr(self.unet, "config_dirname", ""),
+        }
+
+    def _stage_filename(self, state, hook):
+        if len(self.stage_states) == 1:
+            return hook
+        return f"{hook}.{state.number}"
+
+    def _shebang_prep(
+        self, config_key, stage, script_name, *, configdir=None, console=False
+    ):
+        """Prepare a lifecycle command and return (cmds, script_path).
+
+        If an interpreter is configured or inferred, write an executable
+        shebang script. Return its path as a one-item string list in cmds
+        and as a Path in script_path.
+
+        Without an interpreter, script_path is None. With console=False,
+        cmds contains the executable and arguments parsed by shlex.split().
+        With console=True, cmds contains the command text as one string
+        for the guest console.
+
+        An empty command returns ([], None).
+        """
         shell_cmd = "/bin/bash"  # default shell
-        if not is_file:
-            cmd = self.config.get(config_key, "").strip()
+        file_supported = ["cmd"]  # XXX add ready-cmd and cleanup-cmd support
+        cmd_file = (
+            (stage.cmd_file or "").strip() if config_key in file_supported else ""
+        )
+        if not cmd_file:
+            cmd = (getattr(stage, config_key.replace("-", "_")) or "").strip()
         else:
-            cmd_file = self.config.get(config_key, "").strip()
+            if configdir is not None:
+                cmd_file = os.path.join(configdir, cmd_file)
             with open(cmd_file, "r", encoding="ascii") as f:
                 lines = f.readlines()
                 # We want to avoid overwriting the shebang if it already exists
@@ -294,12 +351,11 @@ class NodeMixin:
                 cmd = "".join(lines).strip()
 
         if not cmd:
-            return []
-
-        script_name = fsafe_name(config_key)
+            return [], None
 
         # shell_cmd is a union and can be boolean or string
-        shell_cmd = self.config.get("shell", shell_cmd)
+        if stage.shell is not None:
+            shell_cmd = stage.shell
         if not isinstance(shell_cmd, str):
             if shell_cmd:
                 # i.e., "shell: true"
@@ -308,67 +364,186 @@ class NodeMixin:
                 # i.e., "shell: false"
                 shell_cmd = ""
 
-        # If we have a shell_cmd then we create a cleanup_cmds file in run_cmd
-        # and volume mounted it
         if shell_cmd:
-            # Create cleanup cmd file
-            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
-            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
-            cmd = cmd.replace("%NAME%", str(self.name))
+            if cmd_file:
+                # Inline commands already had substitutions applied at build time.
+                cmd = config_subst(cmd, **self._lifecycle_context())
             cmd += "\n"
-
-            # Write out our cleanup cmd file at this time too.
-            cmdpath = os.path.join(self.rundir, f"{script_name}.shebang")
+            cmdpath = self.rundir / f"{script_name}.shebang"
             with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
                 cmdfile.write(f"#!{shell_cmd}\n")
                 cmdfile.write(cmd)
-                cmdfile.flush()
-            commander.cmd_raises(f"chmod 755 {cmdpath}")
+            cmdpath.chmod(0o755)
+            return [str(cmdpath)], cmdpath
 
-            if self.container_id:
-                # XXX this counts on it being mounted in container, ugly
-                cmds = [f"/tmp/{script_name}.shebang"]
-            else:
-                cmds = [cmdpath]
-        else:
-            cmds = []
-            if isinstance(cmd, str):
-                cmds.extend(shlex.split(cmd))
-            else:
-                cmds.extend(cmd)
-            cmds = [
-                x.replace("%CONFIGDIR%", str(self.unet.config_dirname)) for x in cmds
-            ]
-            cmds = [x.replace("%RUNDIR%", str(self.rundir)) for x in cmds]
-            cmds = [x.replace("%NAME%", str(self.name)) for x in cmds]
+        cmds = [cmd] if console else shlex.split(cmd)
+        if cmd_file:
+            cmds = config_subst(cmds, **self._lifecycle_context())
+        return cmds, None
 
+    def _stage_args(self, state, hook):
+        cmds, _ = self._shebang_prep(
+            hook, state.stage, self._stage_filename(state, hook)
+        )
         return cmds
 
-    async def _async_shebang_cmd(self, config_key, warn=True, is_file=False):
-        cmds = self._shebang_prep(config_key, is_file)
+    @staticmethod
+    async def _finish_spawn(task):
+        """Await subprocess setup while shielding it from caller cancellation.
+
+        If the caller is cancelled, let setup finish so any spawned process
+        can be tracked for teardown, then re-raise the cancellation.
+        """
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+
+    def _watch_process(self, proc, label, callback):
+        """Register and return a topology-owned task that waits for proc to exit.
+
+        Call callback with the completed task.
+        """
+        task = asyncio.create_task(proc.wait(), name=f"Node-{self.name}-{label}")
+        self.unet.process_exit_tasks.append(task)
+        task.add_done_callback(callback)
+        return task
+
+    async def _spawn_stage(self, state, args):
+        """Run the configured commands indicated by this node's stage."""
+        label = self._stage_filename(state, "cmd")
+        stdout = self.rundir / f"{label}.out"
+        stderr = self.rundir / f"{label}.err"
+        with stdout.open("wb") as out, stderr.open("wb") as err:
+            proc = await self.async_popen(
+                args,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=err,
+                start_new_session=True,
+            )
+        record = CmdProcess(proc, state.number)
+        self.cmd_procs.append(record)
+        state.process = record
+        record.task = self._watch_process(
+            proc, label, partial(self._stage_completed, record)
+        )
+        if getattr(self, "nsenter_fork", False):
+            record.pid = await self.get_proc_child_pid(proc)
+
+        self.logger.debug(
+            "%s: async_popen %s => %s (cmd_pid %s)",
+            self,
+            args,
+            proc.pid,
+            record.pid,
+        )
+        self.pytest_hook_run_cmd(str(stdout), str(stderr))
+
+    def _stage_completed(self, record, task):
+        if task.cancelled():
+            record.returncode = record.proc.returncode
+            return
+        record.returncode = task.result()
+        self.logger.debug(
+            "%s: lifecycle stage %s startup exited with status %s",
+            self,
+            record.stage_number,
+            record.returncode,
+        )
+
+    async def _start_stage(self, state):
+        if args := self._stage_args(state, "cmd"):
+            await self._finish_spawn(
+                asyncio.create_task(self._spawn_stage(state, args))
+            )
+
+    async def _lifecycle_cmd_status(self, args, ns_only=False):
+        """Run a lifecycle hook or probe and return (exit_code, stdout, stderr).
+
+        Use the node namespace when ns_only is True. Capture output in
+        temporary files so inherited pipes cannot delay cleanup. On
+        cancellation, finish any pending spawn, kill the process group,
+        and reap the subprocess before re-raising.
+        """
+        popen = self.async_popen_nsonly if ns_only else self.async_popen
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            spawn = asyncio.create_task(
+                popen(
+                    args,
+                    stdin=subprocess.DEVNULL,
+                    stdout=out,
+                    stderr=err,
+                    start_new_session=True,
+                )
+            )
+            try:
+                proc = await self._finish_spawn(spawn)
+                rc = await proc.wait()
+            except asyncio.CancelledError:
+                if not spawn.cancelled() and spawn.exception() is None:
+                    proc = spawn.result()
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
+                raise
+            out.seek(0)
+            err.seek(0)
+            return (
+                rc,
+                out.read().decode(errors="replace"),
+                err.read().decode(errors="replace"),
+            )
+
+    async def _async_shebang_cmd(self, state, config_key):
+        cmds = self._stage_args(state, config_key)
         if not cmds:
             return 0
 
-        rc, o, e = await self.async_cmd_status(cmds, warn=warn)
-        if not rc and warn and (o or e):
-            self.logger.info(
-                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
-            )
-        elif rc and warn:
-            self.logger.warning(
-                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
-            )
+        rc, o, e = await self._lifecycle_cmd_status(cmds)
+        if config_key == "cleanup-cmd" and rc:
+            log = self.logger.warning
+        elif config_key == "cleanup-cmd" and (o or e):
+            log = self.logger.info
         else:
-            self.logger.debug(
-                f"async_shebang_cmd ({config_key}): %s", cmd_error(rc, o, e)
-            )
-
+            log = self.logger.debug
+        log(
+            "%s: lifecycle stage %s %s: %s",
+            self,
+            state.number,
+            config_key,
+            cmd_error(rc, o, e),
+        )
         return rc
 
     def has_run_cmd(self) -> bool:
-        has_cmd = bool(self.config.get("cmd", "").strip())
-        has_cmd_file = bool(self.config.get("cmd-file", "").strip())
-        return has_cmd or has_cmd_file
+        return any(state.stage.has_startup for state in self.stage_states)
+
+    @property
+    def cmd_p(self):
+        """Return the most recent live command process for legacy callers."""
+        return next(
+            (
+                record.proc
+                for record in reversed(self.cmd_procs)
+                if record.proc.returncode is None
+            ),
+            None,
+        )
+
+    @property
+    def cmd_pid(self):
+        return next(
+            (
+                record.pid
+                for record in reversed(self.cmd_procs)
+                if record.proc.returncode is None
+            ),
+            None,
+        )
 
     async def get_proc_child_pid(self, p):
         # commander is right for both unshare inline (our proc pidns)
@@ -398,84 +573,114 @@ class NodeMixin:
         return None
 
     async def run_cmd(self):
-        """Run the configured commands for this node."""
-        self.logger.debug(
-            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
+        """Start the node's lifecycle stages and wait for their readiness gates."""
+        for state in self.stage_states:
+            state.entered = True
+            await self._start_stage(state)
+
+            if (state.stage.ready_cmd or "").strip():
+                await self._wait_stage_ready(state)
+            state.ready = True
+            logging.debug("%s's stage %s is ready", self.name, state.number)
+        logging.debug("%s is ready", self.name)
+        return self.cmd_procs[-1].proc if self.cmd_procs else None
+
+    async def _wait_stage_ready(self, state):
+        async def poll():
+            while not await self.async_ready_cmd(state):
+                await asyncio.sleep(0.25)
+
+        timeout = state.stage.ready_timeout
+        if timeout is None:
+            timeout = 30
+        deadline = time.monotonic() + timeout
+        message = (
+            f"{self}: lifecycle stage {state.number} readiness timed out "
+            f"after {timeout}s"
         )
-
-        if self.config.get("cmd-file"):
-            cmds = self._shebang_prep("cmd-file", is_file=True)
-        else:
-            cmds = self._shebang_prep("cmd")
-
-        if not cmds:
-            return
-
-        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
-        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
-        self.cmd_pid = None
-        self.cmd_p = await self.async_popen(
-            cmds,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,  # allows us to signal all children to exit
-        )
-
-        # If our process is actually the child of an nsenter fetch its pid.
-        if self.nsenter_fork:
-            self.cmd_pid = await self.get_proc_child_pid(self.cmd_p)
-
-        self.logger.debug(
-            "%s: async_popen %s => %s (cmd_pid %s)",
-            self,
-            cmds,
-            self.cmd_p.pid,
-            self.cmd_pid,
-        )
-
-        self.pytest_hook_run_cmd(stdout, stderr)
-
-        return self.cmd_p
-
-    async def _async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node.
-
-        This function is called by subclass' async_cleanup_cmd
-        """
-        self.cleanup_called = True
-
-        return await self._async_shebang_cmd("cleanup-cmd")
-
-    def has_cleanup_cmd(self) -> bool:
-        return bool(self.config.get("cleanup-cmd", "").strip())
-
-    async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node."""
-        if self.cleanup_called:
-            return
-        self.cleanup_called = True
-
-        return await self._async_cleanup_cmd()
+        check = asyncio.create_task(poll())
+        try:
+            done, _ = await asyncio.wait((check,), timeout=timeout)
+            if not done:
+                raise asyncio.TimeoutError(message)
+            check.result()
+            # A synchronous REPL can occupy the loop past the deadline.
+            if time.monotonic() > deadline:
+                raise asyncio.TimeoutError(message)
+        finally:
+            if not check.done():
+                check.cancel()
+            await asyncio.gather(check, return_exceptions=True)
 
     def has_ready_cmd(self) -> bool:
-        return bool(self.config.get("ready-cmd", "").strip())
+        return any((state.stage.ready_cmd or "").strip() for state in self.stage_states)
 
-    async def async_ready_cmd(self):
-        """Run the configured ready commands for this node."""
-        return not await self._async_shebang_cmd("ready-cmd", warn=False)
+    async def async_ready_cmd(self, state=None):
+        """Check readiness for a lifecycle stage."""
+        states = self.stage_states if state is None else (state,)
+        for current in states:
+            if await self._async_shebang_cmd(current, "ready-cmd"):
+                return False
+        return True
 
-    def cmd_completed(self, future):
-        self.logger.debug("%s: cmd completed callback", self)
-        try:
-            status = future.result()
-            self.logger.debug(
-                "%s: node cmd_p completed result: %s cmd: %s", self, status, self.cmd_p
+    def has_cleanup_cmd(self) -> bool:
+        return (
+            any((state.stage.cleanup_cmd or "").strip() for state in self.stage_states)
+        )
+
+    async def async_cleanup_cmd(self):
+        """Run entered stages' cleanup hooks in reverse order."""
+        if self._cleanup_task is None:
+            if self.cleanup_called:
+                return
+            self.cleanup_called = True
+            self._cleanup_task = asyncio.create_task(self._cleanup_stages())
+        return await asyncio.shield(self._cleanup_task)
+
+    async def _cleanup_stages(self):
+        result = None
+        for state in reversed(self.stage_states):
+            if state.entered and (state.stage.cleanup_cmd or "").strip():
+                try:
+                    result = await self._async_shebang_cmd(state, "cleanup-cmd")
+                except Exception:
+                    self.logger.warning(
+                        "%s: lifecycle stage %s cleanup failed",
+                        self,
+                        state.number,
+                        exc_info=True,
+                    )
+        return result
+
+    async def _finalize_lifecycle(self):
+        if not self.cleanup_called:
+            await self.async_cleanup_cmd()
+        elif self._cleanup_task is not None:
+            await asyncio.shield(self._cleanup_task)
+
+        if self._stage_finalization_task is None:
+            self._stage_finalization_task = asyncio.create_task(
+                self._finalize_stage_processes()
             )
-            self.cmd_pid = None
-            self.cmd_p = None
-        except asyncio.CancelledError:
-            self.logger.debug("%s: node cmd_p.wait() canceled", future)
+        await asyncio.shield(self._stage_finalization_task)
+
+    async def _finalize_stage_processes(self):
+        async def finalize(record):
+            try:
+                remaining = await self.async_cleanup_proc(record.proc, record.pid)
+                if remaining is None:
+                    await asyncio.gather(record.task, return_exceptions=True)
+            except Exception:
+                self.logger.warning(
+                    "%s: failed to finalize lifecycle process %s",
+                    self,
+                    record.proc.pid,
+                    exc_info=True,
+                )
+            finally:
+                record.returncode = record.proc.returncode
+
+        await asyncio.gather(*(finalize(record) for record in self.cmd_procs))
 
     def pytest_hook_run_cmd(self, stdout, stderr):
         """Handle pytest options related to running the node cmd.
@@ -596,21 +801,7 @@ class NodeMixin:
 
     async def _async_delete(self):
         self.logger.debug("%s: NodeMixin sub-class _async_delete", self)
-
-        if self.cmd_p:
-            await self.async_cleanup_proc(self.cmd_p, self.cmd_pid)
-            self.cmd_p = None
-
-        # Next call users "cleanup_cmd:"
-        try:
-            if not self.cleanup_called:
-                await self.async_cleanup_cmd()
-        except Exception as error:
-            self.logger.warning(
-                "Got an error during delete from async_cleanup_cmd: %s", error
-            )
-
-        # delete the LinuxNamespace/InterfaceMixin
+        await self._finalize_lifecycle()
         await super()._async_delete()
 
 
@@ -792,7 +983,8 @@ class L3NodeMixin(NodeMixin):
             self.cmd_raises("sysctl -w net.ipv6.conf.all.disable_ipv6=0")
             self.cmd_raises("sysctl -w net.ipv6.conf.all.forwarding=1")
 
-        assert self.id < 0x7FFF  # Limited to 10.254.0.0/16 block
+        if self.id >= 0x7FFF:  # Limited to 10.254.0.0/16 block
+            raise MunetConfigError("Node IDs exhausted (0x7FFF Max)")
         self.next_p2p_network = ipaddress.ip_network(
             f"10.254.{self.id & 0xFF}.{(self.id & 0x7F00) >> 7}/31"
         )
@@ -986,13 +1178,15 @@ ff02::2\tip6-allrouters
     def set_dummy_addr(self, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 4
+            if ipaddr.version != 4:
+                raise MunetConfigError(f"'ip' address {ip!r} is not IPv4")
         else:
             ipaddr = None
 
         if ip := cconf.get("ipv6"):
             ip6addr = ipaddress.ip_interface(ip)
-            assert ip6addr.version == 6
+            if ip6addr.version != 6:
+                raise MunetConfigError(f"'ipv6' address {ip!r} is not IPv6'")
         else:
             ip6addr = None
 
@@ -1011,7 +1205,8 @@ ff02::2\tip6-allrouters
     def set_lan_addr(self, switch, cconf):
         if ip := cconf.get("ip"):
             ipaddr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 4
+            if ipaddr.version != 4:
+                raise MunetConfigError(f"'ip' address {ip!r} is not IPv4")
         elif self.unet.autonumber and "ip" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
@@ -1026,7 +1221,8 @@ ff02::2\tip6-allrouters
 
         if ip := cconf.get("ipv6"):
             ip6addr = ipaddress.ip_interface(ip)
-            assert ipaddr.version == 6
+            if ip6addr.version != 6:
+                raise MunetConfigError(f"'ipv6' address {ip!r} is not IPv6")
         elif self.unet.ipv6_enable and self.unet.autonumber and "ipv6" not in cconf:
             self.logger.debug(
                 "%s: prefixlen of switch %s is %s",
@@ -1305,7 +1501,7 @@ ff02::2\tip6-allrouters
     async def _async_delete(self):
         self.logger.debug("%s: L3NodeMixin sub-class _async_delete", self)
 
-        # XXX do we need to run the cleanup command before these infra changes?
+        await self._finalize_lifecycle()
 
         # remove any hostintf interfaces
         for hname in list(self.host_intfs):
@@ -1345,16 +1541,18 @@ class L3NamespaceNode(L3NodeMixin, LinuxNamespace):
 class L3ContainerNode(L3NodeMixin, LinuxNamespace):
     """An container (podman) based L3 node."""
 
-    def __init__(self, name, config, **kwargs):
+    def __init__(self, name, config, *, container_boot=None, **kwargs):
         """Create a Container Node."""
         self.cont_exec_paths = {}
         self.container_id = None
         self.container_image = config["image"]
         self.extra_mounts = []
-        assert self.container_image
+        if not self.container_image:
+            raise MunetConfigError("Container 'image' is missing")
 
-        self.cmd_p = None
-        self.cmd_pid = None
+        self.container_p = None
+        self.container_pid = None
+        self._container_stage_args = {}
         self.__base_cmd = []
         self.__base_cmd_pty = []
 
@@ -1367,6 +1565,30 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             # private_mounts=["/sys/fs/cgroup:/sys/fs/cgroup"],
             **kwargs,
         )
+
+        self.container_boot = container_boot
+        if self.container_boot is None and "container-cmd" in config:
+            # Programmatically constructed nodes have only the supplied config.
+            self.container_boot = LifecycleStage.from_config(
+                {"cmd": config["container-cmd"], "shell": config.get("shell")},
+                **self._lifecycle_context(),
+            )
+        if self.container_boot is None:
+            for state in self.stage_states:
+                stage = state.stage
+                if stage.has_startup:
+                    self.container_boot = LifecycleStage(
+                        cmd=stage.cmd, cmd_file=stage.cmd_file, shell=stage.shell
+                    )
+                    state.stage = replace(stage, cmd=None, cmd_file=None)
+                    self.logger.warning(
+                        "%s: using legacy %s to boot the container; configure "
+                        "container-cmd to select the boot command explicitly",
+                        self.name,
+                        "cmd-file" if (stage.cmd_file or "").strip() else "cmd",
+                    )
+                    break
+
 
     @property
     def is_container(self):
@@ -1401,7 +1623,7 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             return super()._get_pre_cmd(
                 use_str, use_pty, ns_only=True, root_level=root_level, **kwargs
             )
-        if not self.cmd_p:
+        if self.cmd_p is None:
             if self.container_id:
                 s = f"{self}: Running command in namespace b/c container exited"
                 self.logger.warning("%s", s)
@@ -1484,22 +1706,68 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             # Need to work on a way to mount into live container too
             self.extra_mounts += args
 
-    def has_run_cmd(self) -> bool:
-        return True
+    @property
+    def cmd_p(self):
+        """Return the live runtime process for legacy callers."""
+        if self.container_p is not None and self.container_p.returncode is None:
+            return self.container_p
+        return None
 
-    async def run_cmd(self):
-        """Run the configured commands for this node."""
+    @property
+    def cmd_pid(self):
+        return self.container_pid if self.cmd_p is not None else None
+
+    def _prepare_container_args(self, stage, hook, name, mounts):
+        args, script = self._shebang_prep(
+            hook, stage, name, configdir=self.unet.config_dirname
+        )
+        if script:
+            destination = f"/tmp/{script.name}"
+            mounts.append(f"--volume={script}:{destination}")
+            return [destination]
+        return args
+
+    def _stage_args(self, state, hook):
+        args = self._container_stage_args.get((state.number, hook), [])
+        if isinstance(args, Exception):
+            raise args
+        if args and self.cmd_p is None:
+            raise L3ContainerNotRunningError(f"{self}: container is unavailable")
+        return args
+
+    async def _spawn_container(self, args, container_id):
+        stdout = self.rundir / "container.out"
+        stderr = self.rundir / "container.err"
+        with stdout.open("wb") as out, stderr.open("wb") as err:
+            self.container_p = await self.async_popen_nsonly(
+                args, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                start_new_session=True,
+            )
+        self.container_id = container_id
+        self._watch_process(self.container_p, "container", self._container_completed)
+
+        # If our process is actually the child of an nsenter fetch its pid.
+        if self.nsenter_fork:
+            self.container_pid = await self.get_proc_child_pid(self.container_p)
+        if len(self.stage_states) == 1 and not self.has_run_cmd():
+            # Keep the conventional log paths for a legacy boot-only container.
+            for path in (stdout, stderr):
+                (self.rundir / f"cmd{path.suffix}").symlink_to(path.name)
+        self.pytest_hook_run_cmd(str(stdout), str(stderr))
+
+    async def launch(self):
+        """Start the container runtime and wait until it accepts exec commands."""
         self.logger.debug("%s: starting container", self.name)
         self.logger.debug(
             "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
         )
 
-        self.container_id = f"{self.name}-{os.getpid()}"
+        container_id = f"{self.name}-{os.getpid()}"
         proc_path = self.unet.proc_path if self.unet else "/proc"
         cmds = [
             get_exec_path_host("podman"),
             "run",
-            f"--name={self.container_id}",
+            f"--name={container_id}",
             # f"--net=ns:/proc/{self.pid}/ns/net",
             f"--net=ns:{proc_path}/{self.pid}/ns/net",
             f"--hostname={self.name}",
@@ -1547,126 +1815,53 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
             for x in self.config["podman"].get("extra-args", []):
                 cmds.append(x.strip())
 
-        # shell_cmd is a union and can be boolean or string
-        shell_cmd = self.config.get("shell", "/bin/bash")
-        if not isinstance(shell_cmd, str):
-            if shell_cmd:
-                shell_cmd = "/bin/bash"
-            else:
-                shell_cmd = ""
+        # All stage `cmds` scripts must be mounted beforehand
+        for state in self.stage_states:
+            for hook in ("cmd", "ready-cmd", "cleanup-cmd"):
+                try:
+                    args = self._prepare_container_args(
+                        state.stage, hook, self._stage_filename(state, hook), cmds
+                    )
+                except (OSError, ValueError) as error:
+                    # Surface preparation errors when their hook is reached.
+                    args = error
+                self._container_stage_args[state.number, hook] = args
 
-        # Create shebang files, filled later on
-        for key in ("cleanup-cmd", "ready-cmd"):
-            shebang_cmd = self.config.get(key, "").strip()
-            if shell_cmd and shebang_cmd:
-                script_name = fsafe_name(key)
-                # Will write the file contents out when the command is run
-                shebang_cmdpath = os.path.join(self.rundir, f"{script_name}.shebang")
-                await self.async_cmd_raises_nsonly(f"touch {shebang_cmdpath}")
-                await self.async_cmd_raises_nsonly(f"chmod 755 {shebang_cmdpath}")
-                cmds += [
-                    # How can we override this?
-                    # u'--entrypoint=""',
-                    f"--volume={shebang_cmdpath}:/tmp/{script_name}.shebang",
-                ]
-        if self.config.get("cmd-file", "").strip():
-            raise NotImplementedError("cmd-file is not yet supported for podman nodes")
-        cmd = self.config.get("cmd", "").strip()
-
-        # See if we have a custom update for this `kind`
-        if kind := self.config.get("kind", None):
-            if kind in kind_run_cmd_update:
-                cmds, cmd = await kind_run_cmd_update[kind](self, shell_cmd, cmds, cmd)
-
-        # Create running command file
-        if shell_cmd and cmd:
-            assert isinstance(cmd, str)
-            # make cmd \n terminated for script
-            cmd = cmd.rstrip()
-            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
-            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
-            cmd = cmd.replace("%NAME%", str(self.name))
-            cmd += "\n"
-            cmdpath = os.path.join(self.rundir, "cmd.shebang")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(f"#!{shell_cmd}\n")
-                cmdfile.write(cmd)
-                cmdfile.flush()
-            self.cmd_raises_nsonly(f"chmod 755 {cmdpath}")
-            cmds += [
-                # How can we override this?
-                # u'--entrypoint=""',
-                f"--volume={cmdpath}:/tmp/cmds.shebang",
-                self.container_image,
-                "/tmp/cmds.shebang",
-            ]
-        else:
-            # `cmd` is a direct run (no shell) cmd
-            cmds.append(self.container_image)
-            if cmd:
-                if isinstance(cmd, str):
-                    cmds.extend(shlex.split(cmd))
-                else:
-                    cmds.extend(cmd)
-
-            cmds = [
-                x.replace("%CONFIGDIR%", str(self.unet.config_dirname)) for x in cmds
-            ]
-            cmds = [x.replace("%RUNDIR%", str(self.rundir)) for x in cmds]
-            cmds = [x.replace("%NAME%", str(self.name)) for x in cmds]
-
-        stdout = open(os.path.join(self.rundir, "cmd.out"), "wb")
-        stderr = open(os.path.join(self.rundir, "cmd.err"), "wb")
-        # Using nsonly avoids using `podman exec` to execute the cmds.
-        self.cmd_p = await self.async_popen_nsonly(
-            cmds,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,  # keeps main tty signals away from podman
-        )
-
-        # If our process is actually the child of an nsenter fetch its pid.
-        if self.nsenter_fork:
-            self.cmd_pid = await self.get_proc_child_pid(self.cmd_p)
-
-        self.logger.debug(
-            "%s: async_popen => %s (%s)", self, self.cmd_p.pid, self.cmd_pid
-        )
-
-        self.pytest_hook_run_cmd(stdout, stderr)
-
-        # ---------------------------------------
-        # Now let's wait until container shows up
-        # ---------------------------------------
-        timeout = Timeout(30)
-        while self.cmd_p.returncode is None and not timeout:
-            o = await self.async_cmd_raises_nsonly(
-                f"podman ps -q -f name={self.container_id}"
+        boot_args = []
+        if self.container_boot is not None:
+            boot_args = self._prepare_container_args(
+                self.container_boot, "cmd", "container-cmd", cmds
             )
-            if o.strip():
-                break
-            elapsed = int(timeout.elapsed())
-            if elapsed <= 3:
+            update_kind = kind_run_cmd_update.get(self.config.get("kind"))
+            if update_kind and boot_args == ["/sbin/init"]:
+                cmds, boot_args = await update_kind(self, "", cmds, "/sbin/init")
+
+        cmds += [self.container_image, *boot_args]
+        await self._finish_spawn(
+            asyncio.create_task(self._spawn_container(cmds, container_id))
+        )
+
+        probe = [get_exec_path_host("podman"), "exec", self.container_id, "/bin/true"]
+
+        async def wait_for_exec():
+            while self.container_p.returncode is None:
+                rc, _, _ = await self._lifecycle_cmd_status(probe, ns_only=True)
+                # Podman uses 125 for its own errors. 126 and 127 indicate
+                # exec reached the container, even for images without /bin/true.
+                if rc in (0, 126, 127):
+                    return
                 await asyncio.sleep(0.1)
-            else:
-                self.logger.info("%s: run_cmd taking more than %ss", self, elapsed)
-                await asyncio.sleep(1)
-        if self.cmd_p.returncode is not None:
-            # leave self.container_id set to cause exception on use
-            self.logger.warning(
-                "%s: run_cmd exited quickly (%ss) rc: %s",
-                self,
-                timeout.elapsed(),
-                self.cmd_p.returncode,
+
+        try:
+            await asyncio.wait_for(wait_for_exec(), 30)
+        except asyncio.TimeoutError as error:
+            raise asyncio.TimeoutError(
+                f"{self}: timed out waiting for Podman exec"
+            ) from error
+        if self.container_p.returncode is not None:
+            raise L3ContainerNotRunningError(
+                f"{self}: podman run exited with status {self.container_p.returncode}"
             )
-        elif timeout.is_expired():
-            self.logger.critical(
-                "%s: timeout (%ss) waiting for container to start",
-                self.name,
-                timeout.elapsed(),
-            )
-            assert not timeout.is_expired()
 
         #
         # Set our precmd for executing in the container
@@ -1688,92 +1883,53 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
 
         self.pytest_hook_open_shell()
 
-        return self.cmd_p
+        return self.container_p
 
-    async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node."""
-        if self.cleanup_called:
-            return
-        self.cleanup_called = True
-
-        if "cleanup-cmd" not in self.config:
+    def _container_completed(self, task):
+        if task.cancelled():
+            log = self.logger.debug if self.deleting else self.logger.warning
+            phase = "during cleanup" if self.deleting else "during startup or runtime"
+            log("%s: podman run exit watcher cancelled %s", self, phase)
             return
 
-        # The opposite of other types, the container needs cmd_p running
-        if not self.cmd_p:
-            self.logger.warning("async_cleanup_cmd: container no longer running")
-            return
-
-        return await self._async_cleanup_cmd()
-
-    def cmd_completed(self, future):
-        log = self.logger.debug if self.deleting else self.logger.warning
-        try:
-            n = future.result()
-            if self.deleting:
-                log("contianer `cmd:` result: %s", n)
-            else:
-                log(
-                    "contianer `cmd:` exited early, "
-                    "try adding `tail -f /dev/null` to `cmd:`, result: %s",
-                    n,
-                )
-        except asyncio.CancelledError as error:
-            if self.deleting:
-                log("contianer's self.cmd_p.wait() canceled during cleanup")
-            else:
-                # This should only happen if the user cancels the task which is waiting
-                # on self.cmd_p.wait(). Should not normally happen during runtime.
-                log("contianer's self.cmd_p.wait() canceled during runtime: %s", error)
-        self.cmd_p = None
+        status = task.result()
+        if self.deleting:
+            self.logger.debug(
+                "%s: podman run exited during cleanup (status %s)", self, status
+            )
+        else:
+            self.logger.warning(
+                "%s: podman run exited while the topology was active (status %s). "
+                "See container.out and container.err in %s. "
+                "Check that container-cmd or the image default keeps it running.",
+                self,
+                status,
+                self.rundir,
+            )
 
     async def _async_delete(self):
         self.logger.debug("%s: deleting", self)
+        await self._finalize_lifecycle()
 
         if contid := self.container_id:
-            try:
-                if not self.cleanup_called:
-                    self.logger.debug("calling user cleanup cmd")
-                    await self.async_cleanup_cmd()
-            except Exception as error:
-                self.logger.warning(
-                    "Got an error during delete from async_cleanup_cmd: %s", error
-                )
-
-            # Clear the container_id field we want to act like a namespace now.
+            # Clear the container_id field so namespace commands work during teardown.
             self.container_id = None
-
-            o = ""
-            e = ""
-            if self.cmd_p:
-                self.logger.debug("podman stop on container: %s", contid)
-                if (rc := self.cmd_p.returncode) is None:
+            podman = get_exec_path_host("podman")
+            for action in (["stop", "--time=2"], ["rm"]):
+                self.logger.debug("podman %s on container: %s", action[0], contid)
+                try:
                     rc, o, e = await self.async_cmd_status_nsonly(
-                        [get_exec_path_host("podman"), "stop", "--time=2", contid]
+                        [podman, *action, contid], warn=False
                     )
-                if rc and rc < 128:
+                except Exception:
                     self.logger.warning(
-                        "%s: podman stop on cmd failed: %s",
-                        self,
-                        cmd_error(rc, o, e),
+                        "%s: error running podman %s", self, action[0], exc_info=True
                     )
-                else:
-                    # It's gone
-                    self.cmd_p = None
+                    continue
+                log = self.logger.warning if rc else self.logger.debug
+                log("%s: podman %s: %s", self, action[0], cmd_error(rc, o, e))
 
-            # now remove the container
-            self.logger.debug("podman rm on container: %s", contid)
-            rc, o, e = await self.async_cmd_status_nsonly(
-                [get_exec_path_host("podman"), "rm", contid]
-            )
-            if rc:
-                self.logger.warning(
-                    "%s: podman rm failed: %s", self, cmd_error(rc, o, e)
-                )
-            else:
-                self.logger.debug(
-                    "podman removed container %s: %s", contid, cmd_error(rc, o, e)
-                )
+            await self.async_cleanup_proc(self.container_p, self.container_pid)
 
         await super()._async_delete()
 
@@ -1781,14 +1937,16 @@ class L3ContainerNode(L3NodeMixin, LinuxNamespace):
 class L3QemuVM(L3NodeMixin, LinuxNamespace):
     """An VM (qemu) based L3 node."""
 
-    def __init__(self, name, config, **kwargs):
+    def __init__(self, name, config, *, initial_guest_command=None, **kwargs):
         """Create a Container Node."""
         self.cont_exec_paths = {}
         self.launch_p = None
         self.launch_pid = None
         self.qemu_config = config["qemu"]
+        self.initial_guest_command = initial_guest_command
         self.extra_mounts = []
-        assert self.qemu_config
+        if not self.qemu_config:
+            raise MunetConfigError("'qemu' config is missing")
         self.cmdrepl = None
         self.conrepl = None
         self.is_kvm = False
@@ -1973,7 +2131,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 if not self.test_nsonly("-e", src):
                     self.cmd_raises_nsonly(f"mkdir -p {src}")
             dst = m.get("dst", m.get("destination"))
-            assert dst, "destination path required for mount"
+            if not dst:
+                raise MunetConfigError(
+                    f"'destination' path of mount {src!r} is missing"
+                )
 
             # Implicitly guess "bind" or "tmpfs". Alternatives are manually specified.
             mtype = "tmpfs" if src == "" else "bind"
@@ -1983,7 +2144,8 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
                 if k in ["destination", "dst", "source", "src"]:
                     continue
                 if k == "type":
-                    assert v in ["bind", "tmpfs", "usb"]
+                    if not v in ["bind", "tmpfs", "usb"]:
+                        raise MunetConfigError(f"Mount {src!r} type {v!r} is unknown")
                     mtype = v
                     continue
                 if not v:
@@ -1995,115 +2157,82 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if args:
             self.extra_mounts += args
 
-    async def _run_cmd(self, cmd_node, is_file=False, in_qemu_conf=False):
+    def _run_cmd(self, stage, config_key, script_name):
         """Run the configured commands for this node inside VM."""
-        self.logger.debug(
-            "[rundir %s exists %s]", self.rundir, os.path.exists(self.rundir)
-        )
+        if (
+            not self.launch_p
+            or self.launch_p.returncode is not None
+            or not self.conrepl
+        ):
+            raise MunetError(f"{self}: QEMU guest console is unavailable")
 
-        shell_cmd = "/bin/bash"  # default shell
-        if in_qemu_conf:
-            cmd = self.qemu_config.get(cmd_node, "").strip()
-        else:
-            cmd = self.config.get(cmd_node, "").strip()
-        if is_file:
-            with open(cmd, "r", encoding="ascii") as f:
-                lines = f.readlines()
-                # We want to avoid overwriting the shebang if it already exists
-                if lines and lines[0].startswith("#!"):
-                    shell_cmd = lines.pop(0)[2:].strip()
-                cmd = "".join(lines).strip()
+        cmds, cmdpath = self._shebang_prep(config_key, stage, script_name, console=True)
+        if not cmds:
+            return 0
+        cmd = cmds[0]
 
-        if not cmd:
-            self.logger.debug("%s: no `%s` to run", self, cmd_node)
-            return None
-
-        shell_cmd = self.config.get("shell", shell_cmd)
-        if not isinstance(shell_cmd, str):
-            if shell_cmd:
-                shell_cmd = "/bin/bash"
-            else:
-                shell_cmd = ""
-
-        if shell_cmd:
-            cmd = cmd.rstrip()
-            cmd = f"#!{shell_cmd}\n" + cmd
-            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
-            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
-            cmd = cmd.replace("%NAME%", str(self.name))
-            cmd += "\n"
-
-            # Write a copy to the rundir
-            cmdpath = os.path.join(self.rundir, f"{cmd_node}.shebang")
-            with open(cmdpath, mode="w+", encoding="utf-8") as cmdfile:
-                cmdfile.write(cmd)
-            commander.cmd_raises(f"chmod 755 {cmdpath}")
-
+        if cmdpath:
             # Now write a copy inside the VM
-            self.conrepl.cmd_status(
-                f"cat > /tmp/{cmd_node}.shebang << EOF\n" + cmd + "\nEOF"
+            guest_path = f"/tmp/{cmdpath.name}"
+            script = cmdpath.read_text(encoding="utf-8")
+            eof = "MUNET_EOF"
+            while eof in script.splitlines():
+                eof += "_"
+            rc, output = self.conrepl.cmd_status(
+                f"cat > {guest_path} <<'{eof}'\n{script}{eof}"
             )
-            self.conrepl.cmd_status(f"chmod 755 /tmp/{cmd_node}.shebang")
-            cmds = f"/tmp/{cmd_node}.shebang"
+            if not rc:
+                rc, output = self.conrepl.cmd_status(f"chmod 755 {guest_path}")
+            if rc:
+                raise MunetError(
+                    f"{self}: cannot prepare guest script {script_name}: {output}"
+                )
+            cmd = guest_path
+
+        repl = self.cmdrepl or self.conrepl
+        if not self.qemu_config.get("unix-os", True) and config_key != "ready-cmd":
+            # Network appliance consoles can take raw input without status syntax.
+            output = repl.run_command(cmd, timeout=120)
+            rc = None
         else:
-            cmd = cmd.replace("%CONFIGDIR%", str(self.unet.config_dirname))
-            cmd = cmd.replace("%RUNDIR%", str(self.rundir))
-            cmd = cmd.replace("%NAME%", str(self.name))
-            cmds = cmd
+            rc, output = repl.cmd_status(cmd, timeout=120)
 
-        # class future_proc:
-        #     """Treat awaitable minimally as a proc."""
-        #     def __init__(self, aw):
-        #         self.aw = aw
-        #         # XXX would be nice to have a real value here
-        #         self.returncode = 0
-        #     async def wait(self):
-        #         if self.aw:
-        #             return await self.aw
-        #         return None
+        log = (
+            self.logger.warning
+            if rc and config_key == "cleanup-cmd"
+            else self.logger.debug
+        )
+        log("%s: guest lifecycle %s returned %s: %s", self, script_name, rc, output)
+        return rc
 
-        class now_proc:
-            """Treat awaitable minimally as a proc."""
+    async def _start_stage(self, state):
+        if state.stage.has_startup:
+            self._run_cmd(state.stage, "cmd", self._stage_filename(state, "cmd"))
 
-            def __init__(self, output):
-                self.output = output
-                self.returncode = 0
+    async def _async_shebang_cmd(self, state, config_key):
+        if (getattr(state.stage, config_key.replace("-", "_")) or "").strip():
+            return self._run_cmd(
+                state.stage, config_key, self._stage_filename(state, config_key)
+            )
+        return 0
 
-            async def wait(self):
-                return self.output
-
-        if self.cmdrepl:
-            # self.cmd_p = future_proc(
-            #     # We need our own console here b/c this is async and not returning
-            #     # immediately
-            #     # self.cmdrepl.run_command(cmds, timeout=120, async_=True)
-            #     self.cmdrepl.run_command(cmds, timeout=120)
-            # )
-
-            # When run_command supports async_ arg we can use the above...
-            self.cmd_p = now_proc(self.cmdrepl.run_command(cmds, timeout=120))
-        else:
-            # If we only have a console we can't run in parallel, so run to completion
-            self.cmd_p = now_proc(self.conrepl.run_command(cmds, timeout=120))
-
-        return self.cmd_p
-
-    async def run_cmd(self):
+    def _run_initial_guest_command(self):
         if self.disk_created:
-            if self.qemu_config.get("initial-cmd-file"):
-                await self._run_cmd("initial-cmd-file", is_file=True, in_qemu_conf=True)
-            else:
-                await self._run_cmd("initial-cmd", in_qemu_conf=True)
+            stage = self.initial_guest_command or LifecycleStage(
+                cmd=self.qemu_config.get("initial-cmd"),
+                cmd_file=self.qemu_config.get("initial-cmd-file"),
+                shell=self.config.get("shell"),
+            )
+            if stage.has_startup:
+                name = (
+                    "initial-cmd-file"
+                    if (stage.cmd_file or "").strip()
+                    else "initial-cmd"
+                )
+                self._run_cmd(stage, "cmd", name)
 
-        if self.config.get("cmd-file"):
-            await self._run_cmd("cmd-file", is_file=True)
-        else:
-            await self._run_cmd("cmd")
-
-        # stdout and err both combined into logfile from the spawned repl
-        if self.cmdrepl:
-            stdout = os.path.join(self.rundir, "_cmdcon-log.txt")
-            self.pytest_hook_run_cmd(stdout, None)
+    def _use_command_console(self, use_stdio):
+        return use_stdio and self.has_run_cmd()
 
     # InterfaceMixin override
     # We need a name unique in the shared namespace.
@@ -2249,7 +2378,7 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
             elif mtype == "usb":
                 con.cmd_raises(f"test -d {mp}")  # Directory should already exist!
             else:
-                assert False, "Unknown L3QemuVM mount option"
+                raise MunetConfigError(f"Mount option {mtype!r} is unknown")
 
     async def renumber_interfaces(self):
         """Re-number the interfaces.
@@ -2517,9 +2646,10 @@ class L3QemuVM(L3NodeMixin, LinuxNamespace):
         if not geniso:
             mfbin = get_exec_path_host("mkfs.vfat")
             mcbin = get_exec_path_host("mcopy")
-            assert (
-                mfbin and mcbin
-            ), "genisoimage or mkfs.vfat,mcopy needed to gen cloud-init disk"
+            if not (mfbin and mcbin):
+                raise MunetConfigError(
+                    "genisoimage or mkfs.vfat,mcopy needed to gen cloud-init disk"
+                )
 
         #
         # cloud-init: meta-data
@@ -2534,7 +2664,10 @@ local-hostname: "{self.name}"
         ssh_auth_s = ""
         if bool(self.ssh_keyfile):
             pubkey = commander.cmd_raises(f"ssh-keygen -y -f {self.ssh_keyfile}")
-            assert pubkey, f"Can't extract public key from {self.ssh_keyfile}"
+            if not pubkey:
+                raise MunetConfigError(
+                    f"Can't extract public key from {self.ssh_keyfile!r}"
+                )
             pubkey = pubkey.strip()
             ssh_auth_s = f'ssh_authorized_keys: ["{pubkey}"]'
 
@@ -2756,9 +2889,7 @@ users:
         # args.extend(["-display", "vnc=0.0.0.0:40"])
 
         use_stdio = cc.get("stdio", True)
-        has_cmd = self.config.get("cmd")
-        has_cmd_file = self.config.get("cmd-file")
-        use_cmdcon = (has_cmd or has_cmd_file) and use_stdio
+        use_cmdcon = self._use_command_console(use_stdio)
 
         #
         # Any extra serial/console ports beyond thw first, require entries in
@@ -2831,27 +2962,7 @@ users:
         # Launch Qemu
         #
 
-        stdout = open(os.path.join(self.rundir, "qemu.out"), "wb")
-        stderr = open(os.path.join(self.rundir, "qemu.err"), "wb")
-        self.launch_p = await self.async_popen_nsonly(
-            args,
-            stdin=subprocess.DEVNULL,
-            stdout=stdout,
-            stderr=stderr,
-            pass_fds=pass_fds,
-            # Don't want Keybaord interrupt etc to pass to child.
-            # start_new_session=True,
-            preexec_fn=os.setsid,
-        )
-
-        if self.nsenter_fork:
-            self.launch_pid = await self.get_proc_child_pid(self.launch_p)
-
-        self.pytest_hook_run_cmd(stdout, stderr)
-
-        # We've passed these on, so don't need these open here anymore.
-        for fd in pass_fds:
-            os.close(fd)
+        await self._finish_spawn(asyncio.create_task(self._spawn_qemu(args, pass_fds)))
 
         self.logger.debug(
             "%s: popen => %s (%s)", self, self.launch_p.pid, self.launch_pid
@@ -2926,7 +3037,28 @@ users:
 
         self.pytest_hook_open_shell()
 
+        self._run_initial_guest_command()
+        if self.cmdrepl:
+            self.pytest_hook_run_cmd(str(self.rundir / "_cmdcon-log.txt"), None)
+
         return self.launch_p
+
+    async def _spawn_qemu(self, args, pass_fds):
+        stdout = self.rundir / "qemu.out"
+        stderr = self.rundir / "qemu.err"
+        try:
+            with stdout.open("wb") as out, stderr.open("wb") as err:
+                self.launch_p = await self.async_popen_nsonly(
+                    args, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                    pass_fds=pass_fds, preexec_fn=os.setsid,
+                )
+        finally:
+            for fd in pass_fds:
+                os.close(fd)
+        self._watch_process(self.launch_p, "launch", self.launch_completed)
+        if self.nsenter_fork:
+            self.launch_pid = await self.get_proc_child_pid(self.launch_p)
+        self.pytest_hook_run_cmd(str(stdout), str(stderr))
 
     def launch_completed(self, future):
         self.logger.debug("%s: launch (qemu) completed called", self)
@@ -2939,47 +3071,9 @@ users:
                 "%s: node launch (qemu) cmd wait() canceled: %s", future, error
             )
 
-    async def async_cleanup_cmd(self):
-        """Run the configured cleanup commands for this node."""
-        if self.cleanup_called:
-            return
-        self.cleanup_called = True
-
-        if "cleanup-cmd" not in self.config:
-            return
-
-        if not self.launch_p:
-            self.logger.warning("async_cleanup_cmd: qemu no longer running")
-            return
-
-        raise NotImplementedError("Needs to be like run_cmd")
-        # return await self._async_cleanup_cmd()
-
     async def _async_delete(self):
-        self.logger.debug("%s: deleting", self)
-
-        # Need to cleanup early b/c it is running on the VM
-        if self.cmd_p:
-            await self.async_cleanup_proc(self.cmd_p, self.cmd_pid)
-            self.cmd_p = None
-
-        try:
-            # Need to cleanup early b/c it is running on the VM
-            if not self.cleanup_called:
-                await self.async_cleanup_cmd()
-        except Exception as error:
-            self.logger.warning(
-                "Got an error during delete from async_cleanup_cmd: %s", error
-            )
-
-        try:
-            if not self.launch_p:
-                self.logger.warning("async_delete: qemu is not running")
-            else:
-                await self.async_cleanup_proc(self.launch_p, self.launch_pid)
-        except Exception as error:
-            self.logger.warning("%s: failed to cleanup qemu process: %s", self, error)
-
+        await self._finalize_lifecycle()
+        await self.async_cleanup_proc(self.launch_p, self.launch_pid)
         await super()._async_delete()
 
 
@@ -3005,6 +3099,7 @@ class Munet(BaseMunet):
         super().__init__("munet", pid=pid, rundir=rundir, logger=logger, **kwargs)
 
         self.built = False
+        self.process_exit_tasks = []
         self.tapcount = 0
 
         self.cmd_raises(f"mkdir -p {self.rundir} && chmod 755 {self.rundir}")
@@ -3225,23 +3320,58 @@ ff02::2\tip6-allrouters
             topoconf["networks"][name] = conf
             self.add_network(name, conf, logger=logger)
 
-        for name, conf in config_to_dict_with_key(topoconf, "nodes", "name").items():
-            if kind := conf.get("kind"):
-                if kconf := kinds[kind]:
-                    conf = merge_kind_config(kconf, conf)
-
-            config_to_dict_with_key(
-                conf, "env", "name"
-            )  # convert list of env objects to dict
-
-            conf = config_subst(
-                conf,
-                name=name,
-                rundir=os.path.join(self.rundir, name),
-                configdir=self.config_dirname,
+        for name, node_conf in config_to_dict_with_key(
+            topoconf, "nodes", "name"
+        ).items():
+            kind = node_conf.get("kind")
+            kind_conf = kinds[kind] if kind else {}
+            conf = (
+                merge_kind_config(kind_conf, node_conf)
+                if kind_conf
+                else dict(node_conf)
             )
+
+            config_to_dict_with_key(conf, "env", "name")
+            context = {
+                "name": name,
+                "rundir": os.path.join(self.rundir, name),
+                "configdir": self.config_dirname,
+            }
+            conf = config_subst(conf, **context)
+            stages = resolve_lifecycle(node_conf, kind_conf, conf, **context)
+            options = {}
+            compose_commands = "commands" in kind_conf.get("merge", [])
+            if conf.get("image") and "container-cmd" in conf:
+                shell = conf.get("shell")
+                if compose_commands:
+                    source = node_conf if "container-cmd" in node_conf else kind_conf
+                    shell = config_subst(source.get("shell"), **context)
+                options["container_boot"] = LifecycleStage(
+                    cmd=conf["container-cmd"], shell=shell
+                )
+            elif (
+                compose_commands
+                and not conf.get("image")
+                and (qemu := conf.get("qemu"))
+            ):
+                cmd = qemu.get("initial-cmd")
+                cmd_file = qemu.get("initial-cmd-file")
+                # Resolve the source of the initializer that will actually run.
+                key = "initial-cmd-file" if (cmd_file or "").strip() else "initial-cmd"
+                source = node_conf if key in node_conf.get("qemu", {}) else kind_conf
+                options["initial_guest_command"] = LifecycleStage(
+                    cmd=cmd,
+                    cmd_file=cmd_file,
+                    shell=config_subst(source.get("shell"), **context),
+                )
             topoconf["nodes"][name] = conf
-            self.add_l3_node(name, conf, logger=logger)
+            self.add_l3_node(
+                name,
+                conf,
+                lifecycle_stages=stages,
+                logger=logger,
+                **options,
+            )
 
         # ------------------
         # Create connections
@@ -3293,7 +3423,11 @@ ff02::2\tip6-allrouters
                     await self.add_native_link(switch, node, swconf, cconf)
                 elif cconf["name"] not in node.intfs:
                     # Only add the p2p interface if not already there.
-                    other = self.hosts[to]
+                    other = self.hosts.get(to, None)
+                    if not other:
+                        raise MunetConfigError(
+                            f"'connection' from {name!r} to non-existent node {to!r}"
+                        )
                     oconf = find_matching_net_config(name, cconf, other.config)
                     await self.add_native_link(node, other, cconf, oconf)
 
@@ -3339,18 +3473,29 @@ ff02::2\tip6-allrouters
         c1 = {} if c1 is None else c1
         c2 = {} if c2 is None else c2
 
+        hostnames = ()
         if node1.name in self.switches:
-            assert node2.name in self.hosts
+            hostnames = (node2.name,)
         elif node2.name in self.switches:
-            assert node1.name in self.hosts
+            hostnames = (node1.name,)
             node1, node2 = node2, node1
             c1, c2 = c2, c1
         else:
             # p2p link
-            assert node1.name in self.hosts
-            assert node1.name in self.hosts
-            assert c1 and c2
+            hostnames = (node1.name, node2.name)
+            if not c1:
+                raise MunetConfigError(
+                    f"'connection' to {node2.name!r} is missing from {node1.name!r}"
+                )
+            if not c2:
+                raise MunetConfigError(
+                    f"'connection' to {node1.name!r} is missing from {node2.name!r}"
+                )
             isp2p = True
+
+        for name in hostnames:
+            if name not in self.hosts:
+                raise MunetConfigError(f"Unknown host: {name!r}")
 
         if "name" not in c1:
             c1["name"] = node1.get_next_intf_name()
@@ -3369,10 +3514,24 @@ ff02::2\tip6-allrouters
                 await n.add_phy_intf(c["physical"], c["name"])
                 do_add_link = False
         if do_add_link:
-            assert "hostintf" not in c1
-            assert "hostintf" not in c2
-            assert "physical" not in c1
-            assert "physical" not in c2
+            # pylint: disable=line-too-long
+            if "hostintf" in c1:
+                raise MunetConfigError(
+                    f"'hostintf' unexpectedly configured in 'connection' {node1.name!r} to {node2.name!r}"
+                )
+            if "hostintf" in c2:
+                raise MunetConfigError(
+                    f"'hostintf' unexpectedly configured in 'connection' {node2.name!r} to {node1.name!r}"
+                )
+            if "physical" in c1:
+                raise MunetConfigError(
+                    f"'physical' unexpectedly configured in 'connection' {node1.name!r} to {node2.name!r}"
+                )
+            if "physical" in c2:
+                raise MunetConfigError(
+                    f"'physical' unexpectedly configured in 'connection' {node2.name!r} to {node1.name!r}"
+                )
+            # pylint: enable=line-too-long
 
             if isp2p:
                 mtu1 = c1.get("mtu")
@@ -3438,9 +3597,10 @@ ff02::2\tip6-allrouters
                     common = os.path.commonprefix([common, f])
                     if not common:
                         break
-        assert (
-            bdir
-        ), "Can't locate build directory for coverage data, use --cov-build-dir"
+        if not bdir:
+            raise MunetConfigError(
+                "Can't locate build directory for coverage data, use --cov-build-dir"
+            )
 
         bdir = Path(bdir).resolve()
         rundir = Path(self.rundir).resolve()
@@ -3505,19 +3665,40 @@ done""")
         if not tasks:
             return
         _, pending = await asyncio.wait(tasks, timeout=600)
-        assert not pending, "Failed to pull container images"
+        if pending:
+            raise MunetConfigError("Failed to pull container images")
+
+    def start_pcap(self, pcap, in_window=False):
+        """Start a packet capture on a target.
+
+        Accepts NODE:INTF or NETWORK as targets
+        """
+        if ":" in pcap:
+            host, intf = pcap.split(":")
+            pcap = f"{host}-{intf}"
+            host = self.hosts[host]
+        else:
+            host = self
+            intf = pcap
+        capfile = f"capture-{pcap}.pcap"
+        caplogfile = f"capture-{pcap}.log"
+        self.logger.info("%s: starting pcap (%s)", self, capfile)
+        host.background_cmd_start(
+            f"tshark -s 9200 -i {intf} -Pl -w {capfile} > {caplogfile} 2>&1",
+        )
+        if in_window:
+            host.run_in_window(
+                f"tail -F {caplogfile}",
+                background=True,
+                title=f"cap:{pcap}",
+            )
+        return capfile
 
     async def run(self):
-        tasks = []
+        """Start the topology and return its process-completion watcher tasks."""
         hosts = self.hosts.values()
-
         images = {x.container_image for x in hosts if hasattr(x, "container_image")}
         await self.load_images(images)
-
-        launch_nodes = [x for x in hosts if hasattr(x, "launch")]
-        launch_nodes = [x for x in launch_nodes if x.config.get("qemu")]
-        run_nodes = [x for x in hosts if x.has_run_cmd()]
-        ready_nodes = [x for x in hosts if x.has_ready_cmd()]
 
         if self.cfgopt.getoption("--coverage"):
             self.coverage_setup()
@@ -3529,85 +3710,47 @@ done""")
             pcapopt.update(self.switches.keys())
         if pcapopt:
             for pcap in pcapopt:
-                if ":" in pcap:
-                    host, intf = pcap.split(":")
-                    pcap = f"{host}-{intf}"
-                    host = self.hosts[host]
-                else:
-                    host = self
-                    intf = pcap
-                host.run_in_window(
-                    f"tshark -s 9200 -i {intf} -P -w capture-{pcap}.pcap",
-                    background=True,
-                    title=f"cap:{pcap}",
-                )
+                self.start_pcap(pcap, in_window=True)
 
-        if launch_nodes:
-            # would like a info when verbose here.
-            logging.debug("Launching nodes")
-            await asyncio.gather(*[x.launch() for x in launch_nodes])
+        startup_tasks = []
+        startup_errors = []
 
-        logging.debug("Launched nodes -- Queueing Waits")
+        async def start_node(node):
+            try:
+                if launch := getattr(node, "launch", None):
+                    logging.debug("Launching node %s", node.name)
+                    await launch()
+                logging.debug("Running staged `cmds` on node %s", node.name)
+                await node.run_cmd()
+            except Exception as error:
+                if not startup_errors:
+                    startup_errors.append(error)
+                    for sibling in startup_tasks:
+                        if sibling is not asyncio.current_task() and not sibling.done():
+                            sibling.cancel()
+                raise
 
-        # Watch for launched processes to exit
-        for node in launch_nodes:
-            task = asyncio.create_task(
-                node.launch_p.wait(), name=f"Node-{node.name}-launch"
-            )
-            task.add_done_callback(node.launch_completed)
-            tasks.append(task)
+        logging.debug("Starting all nodes")
+        startup_tasks.extend(
+            asyncio.create_task(start_node(node), name=f"Node-{node.name}-startup")
+            for node in hosts
+        )
+        try:
+            await asyncio.gather(*startup_tasks)
+        except BaseException as error:
+            # A node failure has already cancelled its siblings. Joining them
+            # without a second cancellation lets in-flight spawns finish cleanly.
+            if not startup_errors:
+                for task in startup_tasks:
+                    if not task.done():
+                        task.cancel()
+            await asyncio.gather(*startup_tasks, return_exceptions=True)
+            if startup_errors and error is not startup_errors[0]:
+                raise startup_errors[0] from None
+            raise
 
-        logging.debug("Wait complete queued, running cmd")
-
-        if run_nodes:
-            # would like a info when verbose here.
-            logging.debug("Running `cmd` on nodes")
-            await asyncio.gather(*[x.run_cmd() for x in run_nodes])
-
-        logging.debug("Ran cmds -- Queueing Waits")
-
-        # Watch for run_cmd processes to exit
-        for node in run_nodes:
-            task = asyncio.create_task(node.cmd_p.wait(), name=f"Node-{node.name}-cmd")
-            task.add_done_callback(node.cmd_completed)
-            tasks.append(task)
-
-        logging.debug("Wait complete queued, waiting for ready")
-
-        # Wait for nodes to be ready
-        if ready_nodes:
-
-            async def wait_until_ready(x):
-                while not await x.async_ready_cmd():
-                    logging.debug("Waiting for ready on: %s", x)
-                    await asyncio.sleep(0.25)
-                logging.debug("%s is ready!", x)
-
-            tasks = [asyncio.create_task(wait_until_ready(x)) for x in ready_nodes]
-
-            logging.debug("Waiting for ready on nodes: %s", ready_nodes)
-
-            # setable via "ready-timeout: 600" in kinds.yaml.
-            ready_timeout = max(
-                node.config.get("ready-timeout", 30) for node in ready_nodes
-            )
-            self.logger.info(
-                "waiting up to %ss for ready-cmd on %s ready nodes",
-                ready_timeout,
-                len(ready_nodes),
-            )
-
-            _, pending = await asyncio.wait(tasks, timeout=ready_timeout)
-            if pending:
-                logging.warning("Timeout waiting for ready: %s", pending)
-                for nr in pending:
-                    nr.cancel()
-                raise asyncio.TimeoutError()
-            logging.debug("All nodes ready")
-
-        logging.debug("All done returning tasks: %s", tasks)
-
-        return tasks
+        logging.debug("All nodes ready; Returning tasks: %s", self.process_exit_tasks)
+        return list(self.process_exit_tasks)
 
     async def _async_delete(self):
         from .testing.util import async_pause_test  # pylint: disable=C0415
@@ -3624,12 +3767,14 @@ done""")
             except Exception as error:
                 self.logger.error("\n...continuing after error: %s", error)
 
-        # Run cleanup-cmd's.
-        nodes = (x for x in self.hosts.values() if x.has_cleanup_cmd())
-        try:
-            await asyncio.gather(*(x.async_cleanup_cmd() for x in nodes))
-        except Exception as error:
-            logging.warning("Error running cleanup cmds: %s", error)
+        # Keep links and runtimes available for user cleanup hooks and coverage.
+        nodes = list(self.hosts.values())
+        results = await asyncio.gather(
+            *(node.async_cleanup_cmd() for node in nodes), return_exceptions=True
+        )
+        for node, result in zip(nodes, results):
+            if isinstance(result, BaseException):
+                self.logger.warning("%s: error running cleanup hooks: %s", node, result)
 
         # Gather any coverage data
         if self.cfgopt.getoption("--coverage"):
@@ -3643,13 +3788,16 @@ done""")
 
             await self.coverage_finish()
 
-        # XXX should we cancel launch and run tasks?
-
         try:
             await super()._async_delete()
         except Exception as error:
             self.logger.error("Error cleaning up: %s", error, exc_info=True)
             raise
+        finally:
+            for task in self.process_exit_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*self.process_exit_tasks, return_exceptions=True)
 
 
 async def run_cmd_update_ceos(node, shell_cmd, cmds, cmd):

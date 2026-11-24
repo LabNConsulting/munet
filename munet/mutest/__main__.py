@@ -26,6 +26,7 @@ from munet.args import add_testing_args
 from munet.base import Bridge
 from munet.cli import async_cli
 from munet.compat import PytestConfig
+from munet.exceptions import MunetConfigError
 from munet.mutest import userapi as uapi
 from munet.native import L3NodeMixin
 from munet.native import Munet
@@ -69,6 +70,9 @@ async def get_unet(
                 pytestconfig=PytestConfig(args),
                 unshare_inline=unshare,
             )
+        except MunetConfigError as error:
+            # Config errors are expected user errors; propagate without a traceback.
+            raise
         except Exception as error:
             logging.debug("unet build failed: %s", error, exc_info=True)
             raise
@@ -327,6 +331,9 @@ async def run_tests(args):
                     errlog.warning("KeyboardInterrupt while running test %s", test_name)
                     passed, failed, e = 0, 0, error
                     raise
+                except MunetConfigError as error:
+                    errlog.error("Topology error in test %s: %s", test, error)
+                    passed, failed, e = 0, 0, error
                 except Exception as error:
                     logging.error(
                         "Error executing test %s: %s", test, error, exc_info=True

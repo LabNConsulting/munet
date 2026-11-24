@@ -96,6 +96,9 @@
           "cmd": {
             "type": "string"
           },
+          "container-cmd": {
+            "type": "string"
+          },
           "cmd-file": {
             "type": "string"
           },
@@ -585,6 +588,9 @@
                 }
               },
               "cmd": {
+                "type": "string"
+              },
+              "container-cmd": {
                 "type": "string"
               },
               "cmd-file": {
